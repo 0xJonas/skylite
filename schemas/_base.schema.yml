@@ -1,0 +1,62 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$defs:
+  identifier:
+    type: string
+    pattern: '^\p{XID_Start}\p{XID_Continue}*|_\p{XID_Continue}+$'
+  u8:
+    type: integer
+    minimum: 0x0
+    maximum: 0xff
+  u16:
+    type: integer
+    minimum: 0x0
+    maximum: 0xffff
+  u32:
+    type: integer
+    minimum: 0x0
+    maximum: 0xffff_ffff
+  i8:
+    type: integer
+    minimum: -0x80
+    maximum: +0x7f
+  i16:
+    type: integer
+    minimum: -0x8000
+    maximum: +0x7fff
+  i32:
+    type: integer
+    minimum: -0x8000_0000
+    maximum: +0x7fff_ffff
+  property:
+    type: object
+    anyOf:
+    - properties:
+        type: { const: u8 }
+        init: { $ref: "#$defs/u8" }
+    - properties:
+        type: { const: u16 }
+        init: { $ref: "#$defs/u16" }
+    - properties:
+        type: { const: u32 }
+        init: { $ref: "#$defs/u32" }
+    - properties:
+        type: { const: i8 }
+        init: { $ref: "#$defs/i8" }
+    - properties:
+        type: { const: i16 }
+        init: { $ref: "#$defs/i16" }
+    - properties:
+        type: { const: i32 }
+        init: { $ref: "#$defs/i32" }
+    - properties:
+        type: { const: f32 }
+        init: { type: number }
+    - properties:
+        type: { const: f64 }
+        init: { type: number }
+    - properties:
+        type: { const: bool }
+        init: { type: boolean }
+    - properties:
+        type: { const: str }
+        init: { type: string }

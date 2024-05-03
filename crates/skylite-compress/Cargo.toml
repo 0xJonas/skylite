@@ -1,0 +1,15 @@
+[package]
+name = "skylite-compress"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["lib"]
+
+[dev-dependencies]
+quickcheck = "^1"
+
+[features]
+default = ["lz77", "rc"]
+lz77 = []
+rc = []

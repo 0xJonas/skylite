@@ -1,0 +1,49 @@
+%YAML 1.2
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://github.com/0xJonas/Skylite/schemas/sprite.schema.yml"
+title: Sprite
+description: Definition of a sprite used by the Skylite framework.
+required: [atlas, width, height, animations]
+properties:
+  atlas:
+    type: string
+    description: Path of the raw data of the sprite's atlas, relative to `<project-root>/graphics`.
+  width:
+    $ref: "./_base.schema.yml#$defs/u8"
+    description: Width of a single frame of the sprite.
+  height:
+    $ref: "./_base.schema.yml#$defs/u8"
+    description: Height of a single frame of the sprite.
+  origin:
+    type: object
+    description: Origin point of the sprite relative to the top-left corner of a frame.
+    properties:
+      x: { $ref: "./_base.schema.yml#$defs/u8" }
+      y: { $ref: "./_base.schema.yml#$defs/u8" }
+  animations:
+    type: object
+    description: >
+      The set of animations for this sprite. An identifier will be generated in the resulting
+      code for each of the animations. These identifiers have the form `<sprite-name>_<animation-name>`
+      and can be used to retrieve an Animator to render the animation.
+    propertyNames:
+      $ref: "./_base.schema.yml#/$defs/identifier"
+    additionalProperties:
+      type: object
+      required: [frames]
+      properties:
+        playOnce:
+          type: boolean
+          description: Whether the animation should stop on the last frame, rather than repeat from the beginning.
+          default: false
+        frames:
+          type: array
+          description: List of frames comprising the animation
+          items:
+            type: object
+            properties:
+              x: X-position of this frame inside the sprite's atlas
+              y: Y-position of this frame inside the sprite's atlas
+              duration: The number of frames for which to show this frame of the animation.
+              required: [x, y, duration]

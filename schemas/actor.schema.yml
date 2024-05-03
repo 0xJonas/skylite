@@ -1,0 +1,61 @@
+%YAML 1.2
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://github.com/0xJonas/Skylite/schemas/actor.schema.yml"
+title: Actor
+description: Definition of an actor used by the Skylite framework.
+type: object
+required: [actions, initialAction]
+properties:
+  properties:
+    type: object
+    description: >
+      Definition of properties for this actor. These will be available
+      as members on the generated actor type.
+    default: {}
+    propertyNames:
+      $ref: "./_base.schema.yml#/$defs/identifier"
+    additionalProperties:
+      allOf:
+      - properties:
+          type:
+            description: The type of this property.
+          init:
+            description: >
+              The initial value of this property. Must correspond to the given
+              type. If this value is omitted, the property must be set when the
+              actor is instantiated in the scene definition.
+          description:
+            type: string
+            description: A description of the the property.
+            default: ""
+        required: [type]
+      - $ref: "./_base.schema.yml#/$defs/property"
+  actions:
+    type: object
+    description: >
+      Definition of actions for this actor. Each action corresponds to a
+      method in the `actor_definition!` macro.
+    properties:
+      description:
+        description: A description of the action.
+        type: string
+        default: ""
+      params:
+        type: object
+        description: >
+          List of parameters for the action. Each parameter defined here
+          must correspond to a parameter in the action function in the
+          `actor_definition!` macro.
+        propertyNames:
+          $ref: "./_base.schema.yml#/$defs/identifier"
+        additionalProperties:
+          properties:
+            type:
+              enum: [u8, u16, u32, i8, i16, i32, f32, f64, bool, str]
+              description: The type of the parameter.
+  initialAction:
+    type: object
+    description: >
+      The initial action that the actor is in after instantiation.
+      Must be tagged with the action, e.g. `!<!skylite:self#Action1>`.

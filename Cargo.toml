@@ -1,0 +1,6 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.dependencies]
+skylite-compress = { path = "./crates/skylite-compress", default-features = false }

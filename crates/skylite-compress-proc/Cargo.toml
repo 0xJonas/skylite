@@ -1,0 +1,19 @@
+[package]
+name = "skylite-compress-proc"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "^1.0"
+skylite-compress.workspace = true
+
+[dev-dependencies]
+quote = "^1.0"
+
+[features]
+default = ["lz77", "rc"]
+lz77 = ["skylite-compress/lz77"]
+rc = ["skylite-compress/rc"]

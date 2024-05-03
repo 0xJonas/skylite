@@ -1,0 +1,113 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://github.com/0xJonas/Skylite/schemas/scene.schema.yml"
+title: Scene
+description: Definition of a scene used by the Skylite framework.
+type: object
+required: [map]
+properties:
+  map:
+    type: string
+    description: The map used by this scene. Must be a path relative to `<project-root>/maps/`.
+  actors:
+    type: object
+    description: List of actors included in the scene.
+    default: []
+    propertyNames:
+      $ref: "./_base.schema.yml#/$defs/identifier"
+    additionalProperties:
+      type: object
+      description: >
+        Instance of an actor. Must be a mapping which provides values for at least those parameters in
+        the actor definition, which do not have a default value set. The mapping must be tagged with the
+        actor definition to use, e.g. `!<!skylite:project/actors/actor1.yml>`.
+  properties:
+    type: object
+    description: >
+      Properties of the scene. Each non-persistent property defined here will be available as a member on
+      the generated scene type. Persistent properties are essentially globals and can only be accessed
+      through persistent memory via their property ids.
+    default: {}
+    propertyNames:
+      $ref: "./_base.schema.yml#/$defs/identifier"
+    additionalProperties:
+      allOf:
+      - type: object
+        properties:
+          type:
+            description: The data type of this property.
+          init:
+            description: >
+              The initial value of this property. Must correspond to to the assigned type.
+              When `persist` is false, this value is loaded every time the scene is loaded.
+              When `persist` is true, this value is loaded once into the game's persistent
+              memory and then loaded from there.
+          description:
+            type: string
+            description: A description of this property.
+            default: ""
+          persist:
+            type: boolean
+            description: >
+              Whether this property should be saved within the game's persistent memory.
+              A property with `persist: true` will NOT generate a member on the scene type, but will instead
+              generate a global property id `<scene>_<propertyName>` which can be used to access
+              the property within persistent memory.
+            default: false
+        required: [type, init]
+      - $ref: "./_base.schema.yml#$defs/property"
+  plays:
+    type: object
+    description: >
+      Plays are scripted sequences of events, which play out automatically whenever they are triggered.
+      In other words, plays define cutscenes, which run within the scene.
+    propertyNames:
+      $ref: "./_base.schema.yml#/$defs/identifier"
+    additionalProperties:
+      type: array
+      items:
+        anyOf:
+        - description: Have an actor perform an action. Must be tagged as `!Action`.
+          properties:
+            actor:
+              type: string
+              description: The name of the actor as defined in the actors list.
+            action:
+              type: object
+              description: >
+                The action to perform. This must be a mapping which provides the arguments
+                to the action. The mapping must be tagged with the action to use,
+                e.g. `!<!skylite:project/actors/actor1.yml#MyAction>`.
+          required: [actor, action]
+        - description: Wait some number of frames. Must be tagged with `!Wait`.
+          properties:
+            duration:
+              $ref: ./_base.schema.yml#/$defs/u8
+              description: >
+                The number of frames to wait. Use 0 for to wait indefinitely, in which case
+                the play can only be resumed by a call to `resume_play`.
+            modalDuration:
+              $ref: ./_base.schema.yml#/$defs/u8
+              description: >
+                The number of frames after which the !Wait directive can be cancelled by
+                a call to `resume_play`. Defaults to the value of `duration`, even if it is 0.
+                Note that a value of 0 does not specify an indefinite wait time, so a `modalDuration`
+                of 0 can be cancelled immediately.
+          required: [duration]
+        - description: Move the camera focus. Must be tagged with `!Focus`.
+          properties:
+            x:
+              $ref: ./_base.schema.yml#/$defs/u16
+              description: The x-position of the new focus.
+            y:
+              $ref: ./_base.schema.yml#/$defs/u16
+              description: The y-position of the new focus.
+            duration:
+              $ref: ./_base.schema.yml#/$defs/u8
+              description: The duration in frames over which to move the focus. Can be 0.
+          required: ["x", "y", "duration"]
+        - description: Run a custom directive defined in the `scene_definition!` macro. Must be tagged with `!Custom`.
+          properties:
+            directive:
+              $ref: "./_base.schema.yml#/$defs/identifier"
+              description: The name of the directive to run.
+          required: [directive]
