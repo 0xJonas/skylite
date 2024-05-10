@@ -159,6 +159,7 @@ pub fn compress(data: &[u8], methods: &[CompressionMethods]) -> (Vec<u8>, Vec<Co
 /// in any way, this function will likely panic. Furthermore, the returned
 /// `Decoder` does not know the original length of the data. Reading past the
 /// end of the original data will likely also panic.
+#[no_mangle]
 pub fn make_decoder<'a>(data: &'a [u8]) -> Box<dyn Decoder + 'a> {
     let mut decoder: Box<dyn Decoder + 'a> = Box::new(RawSliceDecoder::new(data));
     loop {

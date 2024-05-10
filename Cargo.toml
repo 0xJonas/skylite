@@ -4,3 +4,14 @@ resolver = "2"
 
 [workspace.dependencies]
 skylite-compress = { path = "./crates/skylite-compress", default-features = false }
+
+[profile.release]
+lto = true
+opt-level = "z"
+strip = "symbols"
+
+[profile.profile-size]
+inherits = "release"
+debug = 2
+split-debuginfo = "packed"
+strip = "debuginfo"
