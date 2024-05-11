@@ -8,10 +8,10 @@ pub(crate) enum Call {
         // Hash of the actual data. Storing the actual data here
         // would use up too much memory.
         data: u64,
-        x: u16,
-        y: u16,
-        src_x: u16,
-        src_y: u16,
+        x: i16,
+        y: i16,
+        src_x: i16,
+        src_y: i16,
         src_w: u16,
         src_h: u16,
         flip_h: bool,
@@ -24,21 +24,21 @@ pub(crate) enum Call {
     }
 }
 
-fn apply_transform(pos: (u16, u16), w: u16, h: u16, flip_h: bool, flip_v: bool, rotate: bool) -> (u16, u16) {
+fn apply_transform(pos: (i16, i16), w: u16, h: u16, flip_h: bool, flip_v: bool, rotate: bool) -> (i16, i16) {
     let pos = if flip_h {
-        (w - pos.0 - 1, pos.1)
+        (w as i16 - pos.0 - 1, pos.1)
     } else {
         pos
     };
 
     let pos = if flip_v {
-        (pos.0, h - pos.1 - 1)
+        (pos.0, h as i16 - pos.1 - 1)
     } else {
         pos
     };
 
     if rotate {
-        (h - pos.1 - 1, pos.0)
+        (h as i16 - pos.1 - 1, pos.0)
     } else {
         pos
     }
@@ -59,14 +59,14 @@ impl SkyliteTarget for MockTarget {
         }
     }
 
-    fn draw_sub(&mut self, data: &[u8], x: u16, y: u16, src_x: u16, src_y: u16, src_w: u16, src_h: u16, flip_h: bool, flip_v: bool, rotate: bool) {
+    fn draw_sub(&mut self, data: &[u8], x: i16, y: i16, src_x: i16, src_y: i16, src_w: u16, src_h: u16, flip_h: bool, flip_v: bool, rotate: bool) {
         let mut hasher = DefaultHasher::new();
         hasher.write(data);
         self.call_history.push(Call::DrawSub { data: hasher.finish(), x, y, src_x, src_y, src_w, src_h, flip_h, flip_v, rotate });
 
-        let data_width = data[data.len() - 1] as u16;
-        for offset_y in 0..src_h {
-            for offset_x in 0..src_w {
+        let data_width = data[data.len() - 1] as i16;
+        for offset_y in 0..src_h as i16 {
+            for offset_x in 0..src_w as i16 {
                 let src_index = (src_y + offset_y) * data_width + src_x + offset_x;
                 let screen_offset = apply_transform((offset_x, offset_y), src_w, src_h, flip_h, flip_v, rotate);
                 let screen_index = (y + screen_offset.1) * 128 + x + screen_offset.0;
