@@ -2,14 +2,18 @@ use crate::chibi_scheme;
 use crate::chibi_scheme::sexp;
 use std::io::Write;
 
-pub unsafe fn write_sexp<W: Write>(writer: &mut W, ctx: sexp, obj: sexp) -> std::io::Result<()> {
-    let sexp_str = chibi_scheme::sexp_write_to_string(ctx, obj);
-    let len = chibi_scheme::sexp_string_length(sexp_str);
-    write!(writer, "{}", String::from_raw_parts(chibi_scheme::sexp_string_data(sexp_str) as *mut u8, len as usize, len as usize))
+pub unsafe fn write_sexp<W: Write>(writer: &mut W, ctx: &ChibiContext, obj: sexp) -> std::io::Result<()> {
+    let sexp_str = ctx.make_var(chibi_scheme::sexp_write_to_string(ctx.c, obj));
+    let len = chibi_scheme::sexp_string_length(*sexp_str.get());
+    write!(writer, "{}", String::from_raw_parts(chibi_scheme::sexp_string_data(*sexp_str.get()) as *mut u8, len as usize, len as usize))
 }
 
-unsafe fn wrap_result(obj: sexp) -> Result<sexp, sexp> {
-    if chibi_scheme::sexp_exceptionp(obj) {
+fn wrap_result(obj: sexp) -> Result<sexp, sexp> {
+    if obj == std::ptr::null_mut() {
+        return Err(obj);
+    }
+    let is_exception = unsafe { chibi_scheme::sexp_exceptionp(obj) };
+    if is_exception {
         Err(obj)
     } else {
         Ok(obj)
@@ -27,24 +31,34 @@ pub struct ChibiVar<'ctx> {
 }
 
 impl ChibiContext {
-    pub unsafe fn new() -> Result<ChibiContext, sexp> {
-        let c = wrap_result(chibi_scheme::sexp_make_eval_context(std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), 0, 0))?;
-        let sexp_seven = chibi_scheme::sexp_make_fixnum(7);
-        wrap_result(chibi_scheme::sexp_load_standard_env(c, std::ptr::null_mut(), sexp_seven))?;
-        Ok(ChibiContext {
-            c
-        })
+    pub fn new() -> Result<ChibiContext, sexp> {
+        unsafe {
+            // SAFETY: May allocate global data, but there is no way to avoid that. Even when called multiple times, this will only have an effect once.
+            chibi_scheme::sexp_scheme_init();
+            // SAFETY: Only allocates on success.
+            let c = wrap_result(chibi_scheme::sexp_make_eval_context(std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), 0, 0))?;
+            // SAFETY: The new context is destroyed before exiting with an error.
+            let sexp_seven = chibi_scheme::sexp_make_fixnum(7);
+            wrap_result(chibi_scheme::sexp_load_standard_env(c, std::ptr::null_mut(), sexp_seven))
+                .or_else(|_| Err(chibi_scheme::sexp_destroy_context(c)))?;
+            Ok(ChibiContext {
+                c
+            })
+        }
     }
 
-    pub unsafe fn make_var(&self, val: sexp) -> ChibiVar {
+    pub fn make_var(&self, val: sexp) -> ChibiVar {
         let var = Box::pin(val);
         let gc_var = var.as_ref().get_ref() as *const sexp as *mut sexp;
 
         let gc_preserver = Box::pin(chibi_scheme::sexp_gc_var_t {
             var: gc_var,
-            next: (*self.c).value.context.saves
+            next: unsafe { (*self.c).value.context.saves }
         });
-        (*self.c).value.context.saves = gc_preserver.as_ref().get_ref() as *const chibi_scheme::sexp_gc_var_t as *mut chibi_scheme::sexp_gc_var_t;
+
+        unsafe {
+            (*self.c).value.context.saves = gc_preserver.as_ref().get_ref() as *const chibi_scheme::sexp_gc_var_t as *mut chibi_scheme::sexp_gc_var_t;
+        }
 
         ChibiVar {
             var,
