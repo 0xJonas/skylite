@@ -334,6 +334,7 @@ name = "skylite-proc"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "glob",
  "proc-macro2",
  "quote",
  "syn 1.0.109",

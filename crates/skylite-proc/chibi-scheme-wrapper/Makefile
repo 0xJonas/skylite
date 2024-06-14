@@ -1,7 +1,7 @@
-include ../chibi-scheme/Makefile.detect
+CFLAGS = -DSEXP_USE_NTPGETTIME -DSEXP_USE_INTTYPES -g -g3 -O3
 
 %.o: %.c
-	$(CC) -c $(XCPPFLAGS) $(XCFLAGS) $(CLIBFLAGS) -I../chibi-scheme/include -o $@ $<
+	$(CC) -c $(CFLAGS) -o $@ $<
 
 libwrapper.a: wrapper.o
 	$(AR) rcs $@ $^

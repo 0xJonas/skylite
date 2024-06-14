@@ -1,14 +1,17 @@
 use crate::chibi_scheme;
 use crate::chibi_scheme::sexp;
-use std::io::Write;
+use std::slice;
 
-pub unsafe fn write_sexp<W: Write>(writer: &mut W, ctx: &ChibiContext, obj: sexp) -> std::io::Result<()> {
+pub unsafe fn form_to_string(ctx: &ChibiContext, obj: sexp) -> String {
     let sexp_str = ctx.make_var(chibi_scheme::sexp_write_to_string(ctx.c, obj));
-    let len = chibi_scheme::sexp_string_length(*sexp_str.get());
-    write!(writer, "{}", String::from_raw_parts(chibi_scheme::sexp_string_data(*sexp_str.get()) as *mut u8, len as usize, len as usize))
+    let bytes = slice::from_raw_parts(
+        chibi_scheme::sexp_string_data(*sexp_str.get()) as *const u8,
+        chibi_scheme::sexp_string_size(*sexp_str.get()) as usize
+    );
+    std::str::from_utf8(bytes).unwrap().to_owned()
 }
 
-fn wrap_result(obj: sexp) -> Result<sexp, sexp> {
+pub fn wrap_result(obj: sexp) -> Result<sexp, sexp> {
     if obj == std::ptr::null_mut() {
         return Err(obj);
     }

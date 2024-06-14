@@ -49,6 +49,7 @@ sexp (sexp_make_boolean)(bool n) { return sexp_make_boolean(n); }
 bool (sexp_unbox_boolean)(sexp obj) { return sexp_unbox_boolean(obj); }
 sexp (sexp_make_fixnum)(sexp_sint_t n) { return sexp_make_fixnum(n); }
 sexp_sint_t (sexp_unbox_fixnum)(sexp obj) { return sexp_unbox_fixnum(obj); }
+double (sexp_flonum_value)(sexp obj) { return sexp_flonum_value(obj); }
 sexp (sexp_make_character)(char n) { return sexp_make_character(n); }
 char (sexp_unbox_character)(sexp obj) { return sexp_unbox_character(obj); }
 sexp (sexp_make_string_cursor)(int n) { return sexp_make_string_cursor(n); }
