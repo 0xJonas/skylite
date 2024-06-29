@@ -1,117 +1,112 @@
-use std::{ffi::CString, fmt::Display, ptr::null_mut};
+use std::{ffi::{c_void, CStr, CString}, fmt::Display, ptr::null_mut};
 
 use crate::{
-    chibi_scheme::{sexp, sexp_assq, sexp_booleanp, sexp_c_string, sexp_car, sexp_cdr, sexp_eval_string, sexp_flonum_value, sexp_flonump, sexp_length, sexp_listp, sexp_nullp, sexp_numberp, sexp_pairp, sexp_string_data, sexp_string_size, sexp_string_to_symbol, sexp_stringp, sexp_symbol_to_string, sexp_symbolp, sexp_unbox_boolean, sexp_unbox_fixnum},
-    chibi_util::{form_to_string, wrap_result, ChibiContext, ChibiVar},
-    SkyliteProcError
+    guile::{scm_assq, scm_c_eval_string, scm_cadr, scm_car, scm_cdr, scm_from_utf8_symbol, scm_is_bool, scm_is_false, scm_is_integer, scm_is_null, scm_is_real, scm_is_symbol, scm_is_true, scm_length, scm_list_p, scm_object_to_string, scm_pair_p, scm_string_p, scm_symbol_to_string, scm_to_bool, scm_to_double, scm_to_int64, scm_to_utf8_stringn, wrapper_free, SCM}, SkyliteProcError
 };
 
 
-pub(crate) fn catch_err(val: sexp) -> Result<sexp, SkyliteProcError> {
-    wrap_result(val).map_err(|err| SkyliteProcError::ChibiException(err))
+pub fn form_to_string(obj: SCM) -> String {
+    unsafe {
+        let scm_string = scm_object_to_string(obj, scm_c_eval_string(CStr::from_bytes_with_nul(b"write\0").unwrap().as_ptr()));
+        let raw_string = scm_to_utf8_stringn(scm_string, null_mut());
+        let out = CStr::from_ptr(raw_string).to_str().unwrap().to_owned();
+        wrapper_free(raw_string as *mut c_void);
+        out
+    }
 }
 
 /// Returns the value associated with `key` in `alist`.
-pub(crate) unsafe fn assq_str(ctx: &ChibiContext, key: &str, alist: sexp) -> Result<Option<sexp>, SkyliteProcError> {
-    if !sexp_pairp(alist) {
-        return Err(SkyliteProcError::DataError(format!("Not an alist: {}", form_to_string(ctx, alist))))
+pub(crate) unsafe fn assq_str(key: &str, alist: SCM) -> Result<Option<SCM>, SkyliteProcError> {
+    if scm_is_false(scm_pair_p(alist)) {
+        return Err(SkyliteProcError::DataError(format!("Not an alist: {}", form_to_string(alist))))
     }
 
     let key_cstr = CString::new(Into::<Vec<u8>>::into(key.as_bytes().to_owned())).unwrap();
-    let sexp_str = ctx.make_var(
-        catch_err(sexp_c_string(ctx.c, key_cstr.as_ptr(), key.len() as i64))?
-    );
-    let sexp_symbol = ctx.make_var(
-        catch_err(sexp_string_to_symbol(ctx.c, *sexp_str.get()))?
-    );
-    let res = ctx.make_var(sexp_assq(ctx.c, *sexp_symbol.get(), alist));
-    if sexp_booleanp(*res.get()) {
+    let res = scm_assq(scm_from_utf8_symbol(key_cstr.as_ptr()), alist);
+    if scm_is_bool(res) != 0 {
         Ok(None)
-    } else if sexp_pairp(sexp_cdr(*res.get())){
+    } else if scm_to_bool(scm_pair_p(scm_cdr(res))) != 0 {
         // For ('key val)
-        Ok(Some(sexp_car(sexp_cdr(*res.get()))))
+        Ok(Some(scm_cadr(res)))
     } else {
         // For ('key . val)
-        Ok(Some(sexp_cdr(*res.get())))
+        Ok(Some(scm_cdr(res)))
     }
 }
 
 /// Converts a Scheme fixnum to an an integer of type `T`.
-pub(crate) unsafe fn conv_int<T>(ctx: &ChibiContext, obj: sexp) -> Result<T, SkyliteProcError>
+pub(crate) unsafe fn conv_int<T>(obj: SCM) -> Result<T, SkyliteProcError>
 where
     T: TryFrom<i64>,
     <T as TryFrom<i64>>::Error: Display
 {
-    if !sexp_numberp(obj) {
-        return Err(SkyliteProcError::DataError(format!("Expected integer, found {}", form_to_string(ctx, obj))));
+    if scm_is_integer(obj) == 0{
+        return Err(SkyliteProcError::DataError(format!("Expected integer, found {}", form_to_string(obj))));
     }
-    match T::try_from(sexp_unbox_fixnum(obj)) {
+    match T::try_from(scm_to_int64(obj)) {
         Ok(val) => Ok(val),
         Err(err) => Err(SkyliteProcError::DataError(format!("{}", err)))
     }
 }
 
 /// Converts a Scheme flonum to an `f64`.
-pub(crate) unsafe fn conv_f64(ctx: &ChibiContext, obj: sexp) -> Result<f64, SkyliteProcError>
+pub(crate) unsafe fn conv_f64(obj: SCM) -> Result<f64, SkyliteProcError>
 {
-    if !sexp_flonump(obj) {
-        return Err(SkyliteProcError::DataError(format!("Expected floating point numer, found {}", form_to_string(ctx, obj))));
+    if scm_is_real(obj) == 0 {
+        return Err(SkyliteProcError::DataError(format!("Expected floating point numer, found {}", form_to_string(obj))));
     }
-    Ok(sexp_flonum_value(obj))
+    Ok(scm_to_double(obj))
 }
 
 /// Converts a Scheme flonum to an `f32`.
-pub(crate) unsafe fn conv_f32(ctx: &ChibiContext, obj: sexp) -> Result<f32, SkyliteProcError> {
-    conv_f64(ctx, obj).map(|val| val as f32)
+pub(crate) unsafe fn conv_f32(obj: SCM) -> Result<f32, SkyliteProcError> {
+    conv_f64(obj).map(|val| val as f32)
 }
 
 /// Converts a Scheme boolean to a Rust `bool`.
-pub(crate) unsafe fn conv_bool(ctx: &ChibiContext, obj: sexp) -> Result<bool, SkyliteProcError> {
-    if !sexp_booleanp(obj) {
-        return Err(SkyliteProcError::DataError(format!("Expected boolean, found {}", form_to_string(ctx, obj))));
+pub(crate) unsafe fn conv_bool(obj: SCM) -> Result<bool, SkyliteProcError> {
+    if scm_is_bool(obj) == 0{
+        return Err(SkyliteProcError::DataError(format!("Expected boolean, found {}", form_to_string(obj))));
     }
 
-    Ok(sexp_unbox_boolean(obj))
+    Ok(scm_is_true(obj))
 }
 
 /// Converts a Scheme string to a Rust `String`.
-pub(crate) unsafe fn conv_string(ctx: &ChibiContext, obj: sexp) -> Result<String, SkyliteProcError> {
-    if !sexp_stringp(obj) {
-        return Err(SkyliteProcError::DataError(format!("Expected string, found {}", form_to_string(ctx, obj))));
+pub(crate) unsafe fn conv_string(obj: SCM) -> Result<String, SkyliteProcError> {
+    if scm_is_false(scm_string_p(obj)) {
+        return Err(SkyliteProcError::DataError(format!("Expected string, found {}", form_to_string(obj))));
     }
 
-    let bytes = std::slice::from_raw_parts(
-        sexp_string_data(obj) as *const u8,
-        sexp_string_size(obj) as usize
-    );
-    Ok(std::str::from_utf8(bytes).unwrap().to_owned())
+    let raw_string = scm_to_utf8_stringn(obj, null_mut());
+    let out = CStr::from_ptr(raw_string).to_str().unwrap().to_owned();
+    wrapper_free(raw_string as *mut c_void);
+    Ok(out)
 }
 
 /// Converts a Scheme symbol to a Rust `String`.
-pub(crate) unsafe fn conv_symbol(ctx: &ChibiContext, obj: sexp) -> Result<String, SkyliteProcError> {
-    if !sexp_symbolp(obj) {
-        return Err(SkyliteProcError::DataError(format!("Expected symbol, found {}", form_to_string(ctx, obj))));
+pub(crate) unsafe fn conv_symbol(obj: SCM) -> Result<String, SkyliteProcError> {
+    if !scm_is_symbol(obj) {
+        return Err(SkyliteProcError::DataError(format!("Expected symbol, found {}", form_to_string(obj))));
     }
 
-    let string = ctx.make_var(catch_err(sexp_symbol_to_string(ctx.c, obj))?);
-    Ok(conv_string(ctx, *string.get()).unwrap())
+    Ok(conv_string(scm_symbol_to_string(obj)).unwrap())
 }
 
-pub(crate) struct SchemeListIterator<'ctx> {
-    list: ChibiVar<'ctx>,
-    cursor: sexp
+pub(crate) struct SchemeListIterator {
+    cursor: SCM
 }
 
-impl<'ctx> Iterator for SchemeListIterator<'ctx> {
-    type Item = sexp;
+impl Iterator for SchemeListIterator {
+    type Item = SCM;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
-            if sexp_nullp(self.cursor) {
+            if scm_is_null(self.cursor) {
                 return None;
             }
-            let out = sexp_car(self.cursor);
-            self.cursor = sexp_cdr(self.cursor);
+            let out = scm_car(self.cursor);
+            self.cursor = scm_cdr(self.cursor);
             Some(out)
         }
     }
@@ -120,11 +115,11 @@ impl<'ctx> Iterator for SchemeListIterator<'ctx> {
 /// Iterate over items in a scheme list.
 ///
 /// Returns an `Err` if the input is not a list.
-pub(crate) unsafe fn iter_list(ctx: &ChibiContext, list: sexp) -> Result<SchemeListIterator, SkyliteProcError> {
-    if !sexp_unbox_boolean(catch_err(sexp_listp(ctx.c, list))?) {
-        Err(SkyliteProcError::DataError(format!("Not a list: {}", form_to_string(ctx, list))))
+pub(crate) unsafe fn iter_list(list: SCM) -> Result<SchemeListIterator, SkyliteProcError> {
+    if scm_is_false(scm_list_p(list)) {
+        Err(SkyliteProcError::DataError(format!("Not a list: {}", form_to_string(list))))
     } else {
-        Ok(SchemeListIterator { list: ctx.make_var(list), cursor: list })
+        Ok(SchemeListIterator { cursor: list })
     }
 }
 
@@ -135,15 +130,15 @@ pub(crate) enum CXROp {
 use CXROp::*;
 
 /// Performs a sequence of CAR/CDR operations.
-pub(crate) unsafe fn cxr(ctx: &ChibiContext, pair: sexp, ops: &[CXROp]) -> Result<sexp, SkyliteProcError> {
+pub(crate) unsafe fn cxr(pair: SCM, ops: &[CXROp]) -> Result<SCM, SkyliteProcError> {
     let mut cursor = pair;
     for op in ops {
-        if !sexp_pairp(cursor) {
-            return Err(SkyliteProcError::DataError(format!("Not a pair, cannot do car/cdr: {}", form_to_string(ctx, cursor))));
+        if scm_to_bool(scm_pair_p(cursor)) == 0 {
+            return Err(SkyliteProcError::DataError(format!("Not a pair, cannot do car/cdr: {}", form_to_string(cursor))));
         }
         match op {
-            CAR => cursor = sexp_car(cursor),
-            CDR => cursor = sexp_cdr(cursor),
+            CAR => cursor = scm_car(cursor),
+            CDR => cursor = scm_cdr(cursor),
         }
     }
     Ok(cursor)
@@ -177,112 +172,125 @@ pub enum TypedValue {
 ///   be a tuple of the same shape.
 /// - `(vec <type>)` to construct a vector of the given types. `data` must be a list of items
 ///   of the given type.
-pub(crate) unsafe fn parse_typed_value(ctx: &ChibiContext, item_type: sexp, data: sexp) -> Result<TypedValue, SkyliteProcError> {
-    if sexp_symbolp(item_type) {
-        let type_name = conv_symbol(ctx, item_type)?;
+pub(crate) unsafe fn parse_typed_value(item_type: SCM, data: SCM) -> Result<TypedValue, SkyliteProcError> {
+    if scm_is_symbol(item_type) {
+        let type_name = conv_symbol(item_type)?;
         match &type_name[..] {
-            "u8" => Ok(TypedValue::U8(conv_int(ctx, data)?)),
-            "u16" => Ok(TypedValue::U16(conv_int(ctx, data)?)),
-            "u32" => Ok(TypedValue::U32(conv_int(ctx, data)?)),
-            "u64" => Ok(TypedValue::U64(conv_int(ctx, data)?)),
-            "i8" => Ok(TypedValue::I8(conv_int(ctx, data)?)),
-            "i16" => Ok(TypedValue::I16(conv_int(ctx, data)?)),
-            "i32" => Ok(TypedValue::I32(conv_int(ctx, data)?)),
-            "i64" => Ok(TypedValue::I64(conv_int(ctx, data)?)),
-            "f32" => Ok(TypedValue::F32(conv_f32(ctx, data)?)),
-            "f64" => Ok(TypedValue::F64(conv_f64(ctx, data)?)),
-            "bool" => Ok(TypedValue::Bool(conv_bool(ctx, data)?)),
-            "string" => Ok(TypedValue::String(conv_string(ctx, data)?)),
+            "u8" => Ok(TypedValue::U8(conv_int(data)?)),
+            "u16" => Ok(TypedValue::U16(conv_int(data)?)),
+            "u32" => Ok(TypedValue::U32(conv_int(data)?)),
+            "u64" => Ok(TypedValue::U64(conv_int(data)?)),
+            "i8" => Ok(TypedValue::I8(conv_int(data)?)),
+            "i16" => Ok(TypedValue::I16(conv_int(data)?)),
+            "i32" => Ok(TypedValue::I32(conv_int(data)?)),
+            "i64" => Ok(TypedValue::I64(conv_int(data)?)),
+            "f32" => Ok(TypedValue::F32(conv_f32(data)?)),
+            "f64" => Ok(TypedValue::F64(conv_f64(data)?)),
+            "bool" => Ok(TypedValue::Bool(conv_bool(data)?)),
+            "string" => Ok(TypedValue::String(conv_string(data)?)),
             _ => Err(SkyliteProcError::DataError(format!("Unknown data type: {}", type_name)))
         }
-    } else if sexp_unbox_boolean(sexp_listp(ctx.c, item_type)) {
-        let car = sexp_car(item_type);
-        if sexp_symbolp(car) && conv_symbol(ctx, car)? == "vec" {
-            parse_typed_value_vec(ctx, item_type, data)
+    } else if scm_is_true(scm_list_p(item_type)) {
+        let car = scm_car(item_type);
+        if scm_is_symbol(car) && conv_symbol(car)? == "vec" {
+            parse_typed_value_vec(item_type, data)
         } else {
-            parse_typed_value_tuple(ctx, item_type, data)
+            parse_typed_value_tuple(item_type, data)
         }
     } else {
-        Err(SkyliteProcError::DataError(format!("Unsupported item type: {}", form_to_string(ctx, item_type))))
+        Err(SkyliteProcError::DataError(format!("Unsupported item type: {}", form_to_string(item_type))))
     }
 }
 
-unsafe fn parse_typed_value_vec(ctx: &ChibiContext, vec_type: sexp, data: sexp) -> Result<TypedValue, SkyliteProcError> {
-    let item_type = ctx.make_var(cxr(ctx, vec_type, &[CDR, CAR])?);
-    let data_var = ctx.make_var(data);
+unsafe fn parse_typed_value_vec(vec_type: SCM, data: SCM) -> Result<TypedValue, SkyliteProcError> {
+    let item_type = cxr(vec_type, &[CDR, CAR])?;
     let mut out: Vec<TypedValue> = Vec::new();
 
-    for item in iter_list(ctx, *data_var.get())? {
-        out.push(parse_typed_value(ctx, *item_type.get(), item)?)
+    for item in iter_list(data)? {
+        out.push(parse_typed_value(item_type, item)?)
     }
 
     Ok(TypedValue::Vec(out))
 }
 
-unsafe fn parse_typed_value_tuple(ctx: &ChibiContext, types: sexp, values: sexp) -> Result<TypedValue, SkyliteProcError> {
-    if sexp_unbox_fixnum(sexp_length(ctx.c, types)) != sexp_unbox_fixnum(sexp_length(ctx.c, values)) {
+unsafe fn parse_typed_value_tuple(types: SCM, values: SCM) -> Result<TypedValue, SkyliteProcError> {
+    if scm_to_int64(scm_length(types)) != scm_to_int64(scm_length(values)) {
         return Err(SkyliteProcError::DataError(format!("Tuple definition has differing number of types and values.")));
     }
 
     let mut out: Vec<TypedValue> = Vec::new();
-    for (t, v) in Iterator::zip(iter_list(ctx, types)?, iter_list(ctx, values)?) {
-        out.push(parse_typed_value(ctx, t, v)?);
+    for (t, v) in Iterator::zip(iter_list(types)?, iter_list(values)?) {
+        out.push(parse_typed_value(t, v)?);
     }
 
     Ok(TypedValue::Tuple(out))
 }
 
-pub(crate) unsafe fn eval_str(ctx: &ChibiContext, expr: &str) -> Result<sexp, SkyliteProcError> {
-    let c_expr = CString::new(expr).unwrap();
-    catch_err(sexp_eval_string(ctx.c, c_expr.as_ptr(), expr.len() as i64, null_mut()))
+pub(crate) unsafe fn eval_str(expr: &str) -> Result<SCM, SkyliteProcError> {
+    let safe_expr = format!("\
+        (with-exception-handler
+          (lambda (exc) `(err . ,exc))
+          (lambda () `(ok . ,{}))
+          #:unwind? #t)", expr);
+    let c_expr = CString::new(safe_expr).unwrap();
+    let res = scm_c_eval_string(c_expr.as_ptr());
+    if conv_symbol(scm_car(res))? == "err" {
+        println!("{}", form_to_string(scm_cdr(res)));
+        Err(SkyliteProcError::GuileException(scm_cdr(res)))
+    } else {
+        Ok(scm_cdr(res))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{chibi_scheme::{sexp_make_boolean, sexp_make_fixnum, sexp_make_flonum, sexp_unbox_fixnum}, chibi_util::ChibiContext, parse_util::{assq_str, eval_str}};
+    use crate::{guile::{scm_from_bool, scm_from_double, scm_from_int32, scm_to_int32}, parse_util::{assq_str, eval_str}, with_guile};
 
     use super::{parse_typed_value, TypedValue};
 
-    #[test]
-    fn test_assq_str() {
+    extern "C" fn test_assq_str_impl(_: &()) {
         unsafe {
-            let ctx = ChibiContext::new().unwrap();
-            let alist = eval_str(&ctx, "'((a 1) (b 2) (c 3) (d 4))").unwrap();
+            let alist = eval_str("'((a 1) (b 2) (c 3) (d 4))").unwrap();
 
-            match assq_str(&ctx, "c", alist) {
-                Ok(Some(v)) => assert_eq!(sexp_unbox_fixnum(v), 3),
-                _ => assert!(false)
+            match assq_str("c", alist) {
+                Ok(Some(v)) => assert_eq!(scm_to_int32(v), 3),
+                res @ _ => {
+                    println!("{:?}", res);
+                    assert!(false)
+                }
             }
 
-            assert!(assq_str(&ctx, "e", alist).unwrap().is_none());
-            assert!(assq_str(&ctx, "c", sexp_make_fixnum(15)).is_err());
+            assert!(assq_str("e", alist).unwrap().is_none());
+            assert!(assq_str("c", scm_from_int32(15)).is_err());
         }
     }
 
     #[test]
-    fn test_typed_value() {
+    fn test_assq_str() {
+        with_guile(test_assq_str_impl, ());
+    }
+
+    extern "C" fn test_typed_value_impl(_: &()) {
         unsafe {
-            let ctx = ChibiContext::new().unwrap();
+            let type_name = eval_str("'u8").unwrap();
+            assert_eq!(parse_typed_value(type_name, scm_from_int32(5)).unwrap(), TypedValue::U8(5));
+            assert!(parse_typed_value(type_name, scm_from_int32(300)).is_err());
 
-            let type_name = ctx.make_var(eval_str(&ctx, "'u8").unwrap());
-            assert_eq!(parse_typed_value(&ctx, *type_name.get(), sexp_make_fixnum(5)).unwrap(), TypedValue::U8(5));
-            assert!(parse_typed_value(&ctx, *type_name.get(), sexp_make_fixnum(300)).is_err());
+            let type_name = eval_str("'f64").unwrap();
+            let value = scm_from_double(1.0);
+            assert_eq!(parse_typed_value(type_name, value).unwrap(), TypedValue::F64(1.0));
 
-            let type_name = ctx.make_var(eval_str(&ctx, "'f64").unwrap());
-            let value = ctx.make_var(sexp_make_flonum(ctx.c, 1.0));
-            assert_eq!(parse_typed_value(&ctx, *type_name.get(), *value.get()).unwrap(), TypedValue::F64(1.0));
+            let type_name = eval_str("'string").unwrap();
+            let value = eval_str("\"test123\"").unwrap();
+            assert_eq!(parse_typed_value(type_name, value).unwrap(), TypedValue::String("test123".to_owned()));
 
-            let type_name = ctx.make_var(eval_str(&ctx, "'string").unwrap());
-            let value = ctx.make_var(eval_str(&ctx, "\"test123\"").unwrap());
-            assert_eq!(parse_typed_value(&ctx, *type_name.get(), *value.get()).unwrap(), TypedValue::String("test123".to_owned()));
+            let type_name = eval_str("'bool").unwrap();
+            assert_eq!(parse_typed_value(type_name, scm_from_bool(true)).unwrap(), TypedValue::Bool(true));
 
-            let type_name = ctx.make_var(eval_str(&ctx, "'bool").unwrap());
-            assert_eq!(parse_typed_value(&ctx, *type_name.get(), sexp_make_boolean(true)).unwrap(), TypedValue::Bool(true));
-
-            let type_name = ctx.make_var(eval_str(&ctx, "'(u8 bool (u16 u16))").unwrap());
-            let value = ctx.make_var(eval_str(&ctx, "'(1 #t (2 3))").unwrap());
+            let type_name = eval_str("'(u8 bool (u16 u16))").unwrap();
+            let value = eval_str("'(1 #t (2 3))").unwrap();
             assert_eq!(
-                parse_typed_value(&ctx, *type_name.get(), *value.get()).unwrap(),
+                parse_typed_value(type_name, value).unwrap(),
                 TypedValue::Tuple(vec![
                     TypedValue::U8(1),
                     TypedValue::Bool(true),
@@ -293,14 +301,19 @@ mod tests {
                 ])
             );
 
-            let type_name = ctx.make_var(eval_str(&ctx, "'(vec i16)").unwrap());
-            let value = ctx.make_var(eval_str(&ctx, "'(0 5 10 15 20 25)").unwrap());
+            let type_name = eval_str("'(vec i16)").unwrap();
+            let value = eval_str("'(0 5 10 15 20 25)").unwrap();
             assert_eq!(
-                parse_typed_value(&ctx, *type_name.get(), *value.get()).unwrap(),
+                parse_typed_value(type_name, value).unwrap(),
                 TypedValue::Vec(vec![
                     TypedValue::I16(0), TypedValue::I16(5), TypedValue::I16(10), TypedValue::I16(15), TypedValue::I16(20), TypedValue::I16(25)
                 ])
             );
         }
+    }
+
+    #[test]
+    fn test_typed_value() {
+        with_guile(test_typed_value_impl, ());
     }
 }

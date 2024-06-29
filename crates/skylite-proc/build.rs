@@ -1,36 +1,45 @@
-use std::process::Command;
-use std::path::{Path, PathBuf};
+use std::{path::PathBuf, process::Command};
 
-fn add_library(location: &Path, target: &str) {
-    println!("cargo:rerun-if-changed={}", location.to_string_lossy());
-    println!("cargo:rustc-link-search=native={}", location.to_string_lossy());
-    println!("cargo:rustc-link-lib=static={}", target);
-
-    Command::new("make")
-        .arg(format!("lib{}.a", target))
-        .current_dir(location)
-        .status()
-        .expect("Failed to build native library!");
+fn pkg_config(library: &str, config: &str) -> Vec<String> {
+    let output = Command::new("pkg-config")
+        .arg(library)
+        .arg(config)
+        .output()
+        .expect("Could not retrieve package config for guile")
+        .stdout;
+    String::from_utf8(output).unwrap().split_ascii_whitespace().map(|s| s.to_owned()).collect()
 }
 
 fn main() {
-    println!("cargo:rustc-link-lib=chibi-scheme");
+    // Declare native dependencies
+    pkg_config("guile-3.0", "--libs").iter()
+        .for_each(|arg| println!("cargo:rustc-link-lib={}", &arg[2..]));
 
+    // Compile + link the wrapper
     let mut wrapper_location: PathBuf = std::env::current_dir().expect("Unable to access current directory");
-    wrapper_location.push("chibi-scheme-wrapper");
-    add_library(&wrapper_location, "wrapper");
+    wrapper_location.push("guile-wrapper");
+    let res = Command::new("make")
+        .arg("libwrapper.a")
+        .current_dir(&wrapper_location)
+        .status()
+        .expect("Failed to build wrapper library!");
+    assert_eq!(res.code().unwrap(), 0, "Failed to build wrapper library!");
+    println!("cargo:rustc-link-search=native={}", wrapper_location.to_string_lossy());
+    println!("cargo:rustc-link-lib=static=wrapper");
+    println!("cargo:rerun-if-changed={}", wrapper_location.to_string_lossy());
 
+    // Generate bindings
     let bindings = bindgen::Builder::default()
         .header(wrapper_location.join("wrapper.h").to_string_lossy())
+        .clang_args(pkg_config("guile-3.0", "--cflags"))
         // Prevents bindgen from adding bindings for a bunch of libc stuff that we don't need.
-        .allowlist_file(".*/eval.h")
-        .allowlist_file(".*/sexp.h")
+        .allowlist_file(".*/libguile.*")
         .allowlist_file(".*/wrapper.h")
         .generate()
-        .expect("Unable to generate bindings for chibi-scheme!");
+        .expect("Unable to generate bindings for guile");
 
     let out_path = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     bindings
-        .write_to_file(out_path.join("chibi_scheme.rs"))
-        .expect("Couldn't write bindings for chibi-scheme!");
+        .write_to_file(out_path.join("guile.rs"))
+        .expect("Couldn't write bindings for guile!");
 }

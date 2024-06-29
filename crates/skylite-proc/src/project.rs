@@ -1,6 +1,5 @@
+use crate::guile::{scm_is_false, scm_list_p, SCM};
 use crate::parse_util::CXROp::{CAR, CDR};
-use crate::chibi_scheme::{sexp, sexp_listp, sexp_unbox_boolean};
-use crate::chibi_util::ChibiContext;
 use crate::SkyliteProcError;
 use glob::Pattern;
 use crate::parse_util::{assq_str, conv_string, conv_symbol, cxr, iter_list, parse_typed_value, TypedValue};
@@ -15,11 +14,11 @@ struct AssetDirectories {
     maps: Vec<Pattern>
 }
 
-fn parse_glob_list(ctx: &ChibiContext, list: sexp) -> Result<Vec<Pattern>, SkyliteProcError> {
+fn parse_glob_list(list: SCM) -> Result<Vec<Pattern>, SkyliteProcError> {
     let mut out: Vec<Pattern> = Vec::new();
     unsafe {
-        for g in iter_list(ctx, list)? {
-            let glob_raw = conv_string(ctx, g)?;
+        for g in iter_list(list)? {
+            let glob_raw = conv_string(g)?;
             out.push(Pattern::new(&glob_raw)
                 .or(Err(SkyliteProcError::DataError(format!("Not a valid glob: {}", glob_raw))))?);
         }
@@ -28,30 +27,30 @@ fn parse_glob_list(ctx: &ChibiContext, list: sexp) -> Result<Vec<Pattern>, Skyli
 }
 
 impl AssetDirectories {
-    fn from_scheme(ctx: &ChibiContext, alist: sexp) -> Result<AssetDirectories, SkyliteProcError> {
+    fn from_scheme(alist: SCM) -> Result<AssetDirectories, SkyliteProcError> {
         unsafe {
-            if !sexp_unbox_boolean(sexp_listp(ctx.c, alist)) {
+            if scm_is_false(scm_list_p(alist)) {
                 return Err(SkyliteProcError::DataError(format!("Asset directories must be defined as an associative list.")));
             }
             let mut out = Self::default();
 
-            if let Some(expr) = assq_str(ctx, "actors", alist)? {
-                out.actors = parse_glob_list(ctx, expr)?;
+            if let Some(expr) = assq_str("actors", alist)? {
+                out.actors = parse_glob_list(expr)?;
             }
-            if let Some(expr) = assq_str(ctx, "scenes", alist)? {
-                out.scenes = parse_glob_list(ctx, expr)?;
+            if let Some(expr) = assq_str("scenes", alist)? {
+                out.scenes = parse_glob_list(expr)?;
             }
-            if let Some(expr) = assq_str(ctx, "graphics", alist)? {
-                out.graphics = parse_glob_list(ctx, expr)?;
+            if let Some(expr) = assq_str("graphics", alist)? {
+                out.graphics = parse_glob_list(expr)?;
             }
-            if let Some(expr) = assq_str(ctx, "sprites", alist)? {
-                out.sprites = parse_glob_list(ctx, expr)?;
+            if let Some(expr) = assq_str("sprites", alist)? {
+                out.sprites = parse_glob_list(expr)?;
             }
-            if let Some(expr) = assq_str(ctx, "tilesets", alist)? {
-                out.tilesets = parse_glob_list(ctx, expr)?;
+            if let Some(expr) = assq_str("tilesets", alist)? {
+                out.tilesets = parse_glob_list(expr)?;
             }
-            if let Some(expr) = assq_str(ctx, "maps", alist)? {
-                out.maps = parse_glob_list(ctx, expr)?;
+            if let Some(expr) = assq_str("maps", alist)? {
+                out.maps = parse_glob_list(expr)?;
             }
 
             Ok(out)
@@ -79,14 +78,13 @@ struct SaveItem {
 }
 
 impl SaveItem {
-    fn from_scheme(ctx: &ChibiContext, definition: sexp) -> Result<SaveItem, SkyliteProcError> {
+    fn from_scheme(definition: SCM) -> Result<SaveItem, SkyliteProcError> {
         unsafe {
             Ok(SaveItem {
-                name: conv_symbol(ctx, cxr(ctx, definition, &[CAR])?)?,
+                name: conv_symbol(cxr(definition, &[CAR])?)?,
                 data: parse_typed_value(
-                    ctx,
-                    cxr(ctx, definition, &[CDR, CAR])?,
-                    cxr(ctx, definition, &[CDR, CDR, CAR])?
+                    cxr(definition, &[CDR, CAR])?,
+                    cxr(definition, &[CDR, CDR, CAR])?
                 )?
             })
         }
@@ -102,30 +100,29 @@ struct SkyliteProject {
 }
 
 impl SkyliteProject {
-    fn from_scheme(ctx: &ChibiContext, definition: sexp) -> Result<SkyliteProject, SkyliteProcError> {
+    fn from_scheme(definition: SCM) -> Result<SkyliteProject, SkyliteProcError> {
         unsafe {
             let name = conv_symbol(
-                ctx,
-                assq_str(ctx, "name", definition)?.ok_or(SkyliteProcError::DataError("Missing required field 'name'".to_owned()))?
+                assq_str("name", definition)?.ok_or(SkyliteProcError::DataError("Missing required field 'name'".to_owned()))?
             )?;
 
-            let assets = if let Some(alist) = assq_str(ctx, "assets", definition)? {
-                AssetDirectories::from_scheme(ctx, alist)?
+            let assets = if let Some(alist) = assq_str("assets", definition)? {
+                AssetDirectories::from_scheme(alist)?
             } else {
                 AssetDirectories::default()
             };
 
             let mut save_data = Vec::new();
-            if let Some(list) = assq_str(ctx, "save-data", definition)? {
-                for item in iter_list(ctx, list)? {
-                    save_data.push(SaveItem::from_scheme(ctx, item)?)
+            if let Some(list) = assq_str("save-data", definition)? {
+                for item in iter_list(list)? {
+                    save_data.push(SaveItem::from_scheme(item)?)
                 }
             }
 
             let mut tile_types = Vec::new();
-            if let Some(list) = assq_str(ctx, "tile-types", definition)? {
-                for item in iter_list(ctx, list)? {
-                    tile_types.push(conv_symbol(ctx, item)?)
+            if let Some(list) = assq_str("tile-types", definition)? {
+                for item in iter_list(list)? {
+                    tile_types.push(conv_symbol(item)?)
                 }
             }
 
@@ -147,24 +144,21 @@ impl SkyliteProject {
 mod tests {
     use glob::Pattern;
 
-    use crate::{chibi_util::ChibiContext, parse_util::{eval_str, TypedValue}, project::{AssetDirectories, SaveItem}};
+    use crate::{parse_util::{eval_str, TypedValue}, project::{AssetDirectories, SaveItem}, with_guile};
 
     use super::SkyliteProject;
 
-    #[test]
-    fn test_project_parsing() {
+    extern "C" fn test_project_parsing_impl(_: &()) {
         unsafe {
-            let ctx = ChibiContext::new().unwrap();
-
-            let definition = ctx.make_var(eval_str(&ctx,
+            let definition = eval_str(
                 r#"'((name TestProject)
                      (assets ((actors ("./test1/*.scm" "./test2/*.scm"))
                               (maps ("./test3/*.scm"))))
                      (save-data
                        ((flag1 bool #f)
                         (val2 u8 5)))
-                     (tile-types (solid semi-solid non-solid)))"#).unwrap());
-            let project = SkyliteProject::from_scheme(&ctx, *definition.get()).unwrap();
+                     (tile-types (solid semi-solid non-solid)))"#).unwrap();
+            let project = SkyliteProject::from_scheme(definition).unwrap();
             assert_eq!(project, SkyliteProject {
                 name: "TestProject".to_owned(),
                 assets: AssetDirectories {
@@ -188,5 +182,10 @@ mod tests {
                 tile_types: vec!["solid".to_owned(), "semi-solid".to_owned(), "non-solid".to_owned()]
             });
         }
+    }
+
+    #[test]
+    fn test_project_parsing() {
+        with_guile(test_project_parsing_impl, ());
     }
 }
