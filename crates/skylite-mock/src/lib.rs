@@ -1,9 +1,9 @@
 use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
-use crate::SkyliteTarget;
+use skylite_core::SkyliteTarget;
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum Call {
+pub enum Call {
     DrawSub {
         // Hash of the actual data. Storing the actual data here
         // would use up too much memory.
@@ -44,10 +44,10 @@ fn apply_transform(pos: (i16, i16), w: u16, h: u16, flip_h: bool, flip_v: bool, 
     }
 }
 
-pub(crate) struct MockTarget {
-    pub(crate) call_history: Vec<Call>,
-    pub(crate) screen_buffer: [u8; 128 * 128],
-    pub(crate) state: Vec<u8>
+pub struct MockTarget {
+    pub call_history: Vec<Call>,
+    pub screen_buffer: [u8; 128 * 128],
+    pub state: Vec<u8>
 }
 
 impl SkyliteTarget for MockTarget {
@@ -93,7 +93,7 @@ impl SkyliteTarget for MockTarget {
 mod tests {
     use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
-    use crate::{mock::Call, SkyliteTarget};
+    use crate::{Call, SkyliteTarget};
 
     use super::MockTarget;
 

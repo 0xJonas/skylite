@@ -1,8 +1,15 @@
+use std::fs::read_to_string;
+use std::path::Path;
+
 use crate::guile::{scm_is_false, scm_list_p, SCM};
-use crate::parse_util::CXROp::{CAR, CDR};
+use crate::scheme_util::CXROp::{CAR, CDR};
+use crate::util::{change_case, IdentCase};
 use crate::SkyliteProcError;
 use glob::Pattern;
-use crate::parse_util::{assq_str, conv_string, conv_symbol, cxr, iter_list, parse_typed_value, TypedValue};
+use proc_macro2::{Ident, Span, TokenStream};
+use quote::{format_ident, quote};
+use syn::Item;
+use crate::scheme_util::{assq_str, conv_string, conv_symbol, cxr, eval_str, iter_list, parse_typed_value, with_guile, TypedValue};
 
 #[derive(PartialEq, Debug)]
 struct AssetDirectories {
@@ -92,7 +99,7 @@ impl SaveItem {
 }
 
 #[derive(PartialEq, Debug)]
-struct SkyliteProject {
+pub(crate) struct SkyliteProject {
     name: String,
     assets: AssetDirectories,
     save_data: Vec<SaveItem>,
@@ -138,13 +145,72 @@ impl SkyliteProject {
             })
         }
     }
+
+    pub(crate) fn from_file(path: &Path) -> Result<SkyliteProject, SkyliteProcError> {
+        // Since we are not actually accessing anything from this signature from C,
+        // we can get away with ignoring the missing C representations.
+        #[allow(improper_ctypes_definitions)]
+        extern "C" fn from_file_guile(path: &Path) -> Result<SkyliteProject, SkyliteProcError> {
+            let definition_raw = read_to_string(path).map_err(|e| SkyliteProcError::OtherError(e.to_string()))?;
+            let definition = unsafe {
+                eval_str(&definition_raw)?
+            };
+            SkyliteProject::from_scheme(definition)
+        }
+        with_guile(from_file_guile, path)
+    }
+
+    fn tile_type_name(&self) -> Ident {
+        format_ident!("{}Tiles", change_case(&self.name, IdentCase::UpperCamelCase))
+    }
+
+    fn generate_tile_type_enum(&self) -> TokenStream {
+        let tile_type_name = self.tile_type_name();
+        let tile_types = self.tile_types.iter()
+            .map(|tt| Ident::new(&change_case(tt, IdentCase::UpperCamelCase), Span::call_site()));
+        quote! {
+            #[derive(Clone, Copy)]
+            pub enum #tile_type_name {
+                #(#tile_types),*
+            }
+        }
+    }
+
+    fn generate_project_type(&self, target_type: &TokenStream) -> TokenStream {
+        let project_name = Ident::new(&change_case(&self.name, IdentCase::UpperCamelCase), Span::call_site());
+        quote! {
+            pub struct #project_name {
+                target: #target_type,
+                // TODO
+            }
+        }
+    }
+
+    fn generate_project_implementation(&self, target_type: &TokenStream) -> Result<TokenStream, SkyliteProcError> {
+        let project_name = Ident::new(&change_case(&self.name, IdentCase::UpperCamelCase), Span::call_site());
+        let tile_type_name = self.tile_type_name();
+        Ok(quote! {
+            impl SkyliteProject for #project_name {
+                type TileType = #tile_type_name;
+                type Target = #target_type;
+            }
+        })
+    }
+
+    pub(crate) fn generate(&self, target_type: &TokenStream) -> Result<Vec<Item>, SkyliteProcError> {
+        Ok(vec![
+            Item::Verbatim(self.generate_tile_type_enum()),
+            Item::Verbatim(self.generate_project_type(&target_type)),
+            Item::Verbatim(self.generate_project_implementation(&target_type)?)
+        ])
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use glob::Pattern;
 
-    use crate::{parse_util::{eval_str, TypedValue}, project::{AssetDirectories, SaveItem}, with_guile};
+    use crate::{project::{AssetDirectories, SaveItem}, scheme_util::{eval_str, with_guile, TypedValue}};
 
     use super::SkyliteProject;
 
@@ -186,6 +252,6 @@ mod tests {
 
     #[test]
     fn test_project_parsing() {
-        with_guile(test_project_parsing_impl, ());
+        with_guile(test_project_parsing_impl, &());
     }
 }

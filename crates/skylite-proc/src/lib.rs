@@ -1,9 +1,15 @@
-use std::{os::raw::c_void, ptr::null_mut, sync::{Mutex, MutexGuard}};
+use std::{path::PathBuf, str::FromStr};
 
-use guile::{scm_with_guile, SCM};
+use quote::{quote, ToTokens};
+use guile::SCM;
+use scheme_util::form_to_string;
+use proc_macro2::TokenStream;
+use project::SkyliteProject;
+use syn::{parse::Parser, parse2, parse_quote, punctuated::Punctuated, Expr, ExprLit, ExprPath, Item, ItemMod, Lit, Path as SynPath, Token};
 
 mod guile;
-mod parse_util;
+mod scheme_util;
+mod util;
 mod project;
 
 extern crate glob;
@@ -11,72 +17,108 @@ extern crate glob;
 #[derive(Debug, Clone)]
 enum SkyliteProcError {
     GuileException(SCM),
-    DataError(String)
+    DataError(String),
+    SyntaxError(String),
+    OtherError(String)
 }
 
-static guile_init_lock: Mutex<()> = Mutex::new(());
-
-struct CallInfo<'a, P, R> {
-    func: extern "C" fn(&P) -> R,
-    params: P,
-    res: Option<R>,
-    guard: Option<MutexGuard<'a, ()>>
-}
-
-/// Runs code with access to Guile.
-fn with_guile<P, R>(func: extern "C" fn(&P) -> R, params: P) -> R {
-    // This function has to jump a few hoops to deal with some of
-    // libguile's shenanigans:
-    // - Any Guile function can do a nonlocal exit (via longjmp), which is
-    //   crazy unsafe. A nonlocal exit is detected by executing the actual
-    //   user code inside a wrapper function, which either sets a result
-    //   variable (CallInfo::res) if the code ran successfully, or does not
-    //   set a result, if a nonlocal exit back up to the enclosing scm_with_guile
-    //   call was done. In the latter case, we simply panic, because we just leaked
-    //   a bunch of memory by subverting Rust's borrow checker with a longjmp.
-    //   User code must ensure that this never happens.
-    // - Guile initialization is not actually thread-safe (at least the
-    //   initialization of any thread after the first one isn't). So the code
-    //   before calling scm_with_guile until actually running the user code
-    //   must happen while holding a lock.
-
-    unsafe extern "C" fn wrapper<P, R>(user_data: *mut c_void) -> *mut c_void {
-        let call = user_data as *mut CallInfo<P, R>;
-        // Unlocks guile_init_lock
-        drop((*call).guard.take().unwrap());
-
-        // Guile might do a nonlocal return on this line, causing res to not be set.
-        // TODO: catch_unwind
-        (*call).res = Some(((*call).func)(&(*call).params));
-        null_mut()
-    }
-
-    // Lock during Guile initialization, because something in there is not thread-safe.
-    let guard = guile_init_lock.lock().unwrap();
-    let call = CallInfo { func, params, res: None, guard: Some(guard) };
-    unsafe {
-        scm_with_guile(Some(wrapper::<P, R>), &call as *const CallInfo<P, R> as *mut c_void);
-        match call.res {
-            Some(v) => v,
-            None => panic!("Nonlocal exit from Guile mode!")
+impl std::fmt::Display for SkyliteProcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GuileException(scm) => write!(f, "Scheme Exception: {}", form_to_string(*scm)),
+            Self::DataError(str) => write!(f, "Data Error: {}", str),
+            Self::SyntaxError(str) => write!(f, "Syntax Error: {}", str),
+            Self::OtherError(str) => write!(f, "Error: {}", str)
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::{guile::{scm_car, scm_from_int16}, with_guile};
-
-
-    extern "C" fn guile_bad(_: &()) -> () {
-        unsafe {
-            let _ = scm_car(scm_from_int16(0));
+impl Into<TokenStream> for SkyliteProcError {
+    fn into(self) -> TokenStream {
+        let msg = self.to_string();
+        quote! {
+            std::compile_error!(#msg);
         }
     }
+}
 
-    #[test]
-    #[should_panic(expected = "Nonlocal exit from Guile mode!")]
-    fn test_exception() {
-        with_guile(guile_bad, ());
-    }
+struct SkyliteProjectArgs {
+    path: PathBuf,
+    target: SynPath
+}
+
+fn parse_skylite_project_args(args_raw: TokenStream) -> Result<SkyliteProjectArgs, SkyliteProcError> {
+    let parser = Punctuated::<Expr, Token![,]>::parse_terminated;
+    let mut iter = parser.parse2(args_raw)
+        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
+        .into_iter();
+
+    // Extract path to project root file
+    let path_str = match iter.next() {
+        Some(
+            Expr::Lit(ExprLit {
+                lit: Lit::Str(lit),
+                ..
+            }
+        )) => lit.value(),
+        _ => return Err(SkyliteProcError::SyntaxError("Expected project path".to_owned()))
+    };
+    let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
+    let relative_path = match PathBuf::from_str(&path_str) {
+        Ok(p) => p,
+        Err(e) => return Err(SkyliteProcError::SyntaxError("Project path invalid".to_owned() + &e.to_string()))
+    };
+
+    // Extract type of the Skylite target
+    let target = match iter.next() {
+        Some(
+            Expr::Path(ExprPath {
+                path,
+                ..
+            })
+        ) => path,
+        _ => return Err(SkyliteProcError::SyntaxError("Expected target type".to_owned()))
+    };
+
+    Ok(SkyliteProjectArgs { path: base_dir.join(relative_path), target: target.clone() })
+}
+
+fn get_default_imports() -> Item {
+    Item::Use(
+        parse_quote! {
+            use skylite_core::SkyliteProject;
+        }
+    )
+}
+
+fn skylite_project_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenStream {
+    let mut body_parsed: ItemMod = match parse2(body_raw) {
+        Ok(ast) => ast,
+        Err(err) => return SkyliteProcError::SyntaxError(err.to_string()).into()
+    };
+
+    let args = match parse_skylite_project_args(args_raw) {
+        Ok(args) => args,
+        Err(err) => return err.into()
+    };
+
+    let project = match SkyliteProject::from_file(&args.path) {
+        Ok(project) => project,
+        Err(err) => return err.into()
+    };
+
+    let mut items = match project.generate(&args.target.into_token_stream()) {
+        Ok(items) => items,
+        Err(err) => return err.into()
+    };
+
+    body_parsed.content.as_mut().unwrap().1.append(&mut items);
+    body_parsed.content.as_mut().unwrap().1.insert(0, get_default_imports());
+
+    body_parsed.into_token_stream()
+}
+
+#[proc_macro_attribute]
+pub fn skylite_project(args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    skylite_project_impl(args.into(), body.into()).into()
 }

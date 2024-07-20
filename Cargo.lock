@@ -328,6 +328,17 @@ dependencies = [
 [[package]]
 name = "skylite-core"
 version = "0.1.0"
+dependencies = [
+ "skylite-mock",
+ "skylite-proc",
+]
+
+[[package]]
+name = "skylite-mock"
+version = "0.1.0"
+dependencies = [
+ "skylite-core",
+]
 
 [[package]]
 name = "skylite-proc"

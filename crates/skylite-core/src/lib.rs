@@ -1,8 +1,5 @@
-#[cfg(test)]
-mod mock;
-
 /// Defines which functions a backend must provide to work with Skylite.
-trait SkyliteTarget {
+pub trait SkyliteTarget {
     /// Creates a new instance of the target.
     fn new() -> Self;
 
@@ -34,4 +31,9 @@ trait SkyliteTarget {
 
     /// Loads data from the given location. `location` can be any arbitrary string.
     fn load_state(&self, location: &str) -> Vec<u8>;
+}
+
+pub trait SkyliteProject {
+    type Target: SkyliteTarget;
+    type TileType: Copy;
 }
