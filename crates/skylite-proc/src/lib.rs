@@ -12,8 +12,6 @@ mod scheme_util;
 mod util;
 mod project;
 
-extern crate glob;
-
 #[derive(Debug, Clone)]
 enum SkyliteProcError {
     GuileException(SCM),
