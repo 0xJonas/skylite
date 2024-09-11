@@ -329,6 +329,7 @@ dependencies = [
 name = "skylite-core"
 version = "0.1.0"
 dependencies = [
+ "skylite-compress",
  "skylite-mock",
  "skylite-proc",
 ]

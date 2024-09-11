@@ -6,6 +6,9 @@ edition = "2021"
 [lib]
 crate-type = ["lib", "cdylib"]
 
+[dependencies]
+skylite-compress.workspace = true
+
 [dev-dependencies]
 skylite-proc.workspace = true
 skylite-mock.workspace = true

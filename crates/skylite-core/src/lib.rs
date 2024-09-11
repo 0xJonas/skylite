@@ -1,3 +1,8 @@
+use actor::AnyActor;
+
+mod scene;
+mod actor;
+
 /// Defines which functions a backend must provide to work with Skylite.
 pub trait SkyliteTarget {
     /// Creates a new instance of the target.
@@ -33,7 +38,21 @@ pub trait SkyliteTarget {
     fn load_state(&self, location: &str) -> Vec<u8>;
 }
 
+/// The main type for skylite projects.
 pub trait SkyliteProject {
     type Target: SkyliteTarget;
     type TileType: Copy;
+    type Actors: AnyActor<P = Self>;
+}
+
+/// Holds the rendering state.
+///
+/// The `DrawContext` contains all information required for graphics
+/// rendering, such as a handle of the current [`SkyliteTarget`],
+/// the cache for the currently loaded graphics, or the current camera focus.
+pub struct DrawContext<'project, P: SkyliteProject> {
+    target: &'project P::Target,
+    graphics_cache: Vec<std::rc::Weak<u8>>,
+    focus_x: i32,
+    focus_y: i32
 }

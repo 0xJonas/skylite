@@ -39,7 +39,7 @@ pub fn encode(data: &[bool]) -> (Vec<bool>, u16) {
 
     // Since the goal of the bit prediction is to reduce the number of 1-bits, the initial
     // number of mispredictions to beat is the number of 1-bits in the input data
-    let mut best_result_mispredictions = data.iter().filter(|b| (**b).into()).count();
+    let mut best_result_mispredictions = data.iter().filter(|b| **b).count();
 
     for i in 0..16 {
         let res = test_encode(data, taps | (1 << i));
