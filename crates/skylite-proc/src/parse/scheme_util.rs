@@ -1,8 +1,6 @@
 use std::{ffi::{c_void, CStr, CString}, fmt::Display, ptr::null_mut, sync::{Mutex, MutexGuard}};
 
-use crate::{
-    guile::{scm_assq, scm_c_eval_string, scm_cadr, scm_car, scm_cdr, scm_from_utf8_symbol, scm_is_bool, scm_is_false, scm_is_integer, scm_is_null, scm_is_real, scm_is_symbol, scm_is_true, scm_length, scm_list_p, scm_object_to_string, scm_pair_p, scm_string_p, scm_symbol_to_string, scm_to_bool, scm_to_double, scm_to_int64, scm_to_utf8_stringn, scm_with_guile, wrapper_free, SCM}, SkyliteProcError
-};
+use crate::{parse::guile::{scm_assq, scm_c_eval_string, scm_cadr, scm_car, scm_cdr, scm_from_utf8_symbol, scm_is_bool, scm_is_false, scm_is_integer, scm_is_null, scm_is_real, scm_is_symbol, scm_is_true, scm_length, scm_list_p, scm_object_to_string, scm_pair_p, scm_string_p, scm_symbol_to_string, scm_to_bool, scm_to_double, scm_to_int64, scm_to_utf8_stringn, scm_with_guile, wrapper_free, SCM}, SkyliteProcError};
 
 static GUILE_INIT_LOCK: Mutex<()> = Mutex::new(());
 
@@ -291,7 +289,7 @@ pub(crate) unsafe fn eval_str(expr: &str) -> Result<SCM, SkyliteProcError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{guile::{scm_from_bool, scm_from_double, scm_from_int32, scm_to_int32, scm_car, scm_from_int16}, scheme_util::{assq_str, eval_str}};
+    use crate::parse::{guile::{scm_from_bool, scm_from_double, scm_from_int32, scm_to_int32, scm_car, scm_from_int16}, scheme_util::{assq_str, eval_str}};
 
     use super::{parse_typed_value, with_guile, TypedValue};
 

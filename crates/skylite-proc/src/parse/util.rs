@@ -54,7 +54,7 @@ pub(crate) fn change_case(input: &str, case: IdentCase) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::util::{change_case, IdentCase};
+    use crate::parse::util::{change_case, IdentCase};
 
     #[test]
     fn test_change_case() {

@@ -1,16 +1,14 @@
 use std::{path::PathBuf, str::FromStr};
 
 use quote::{quote, ToTokens};
-use guile::SCM;
-use scheme_util::form_to_string;
+use parse::guile::SCM;
+use parse::scheme_util::form_to_string;
 use proc_macro2::TokenStream;
-use project::SkyliteProject;
-use syn::{parse::Parser, parse2, parse_quote, punctuated::Punctuated, Expr, ExprLit, ExprPath, Item, ItemMod, Lit, Path as SynPath, Token};
+use parse::project::SkyliteProject;
+use syn::{parse::Parser, parse2, punctuated::Punctuated, Expr, ExprLit, ExprPath, Item, ItemMod, Lit, Path as SynPath, Token};
 
-mod guile;
-mod scheme_util;
-mod util;
-mod project;
+mod parse;
+mod generate;
 
 #[derive(Debug, Clone)]
 enum SkyliteProcError {
@@ -82,9 +80,10 @@ fn parse_skylite_project_args(args_raw: TokenStream) -> Result<SkyliteProjectArg
 }
 
 fn get_default_imports() -> Item {
-    Item::Use(
-        parse_quote! {
-            use skylite_core::SkyliteProject;
+    Item::Verbatim(
+        quote! {
+            use skylite_core::SkyliteTarget;
+            use skylite_core;
         }
     )
 }
@@ -105,13 +104,13 @@ fn skylite_project_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenSt
         Err(err) => return err.into()
     };
 
-    let mut items = match project.generate(&args.target.into_token_stream()) {
+    let mut items = match project.generate(&args.target.into_token_stream(), &body_parsed) {
         Ok(items) => items,
         Err(err) => return err.into()
     };
 
-    body_parsed.content.as_mut().unwrap().1.append(&mut items);
     body_parsed.content.as_mut().unwrap().1.insert(0, get_default_imports());
+    body_parsed.content.as_mut().unwrap().1.append(&mut items);
 
     body_parsed.into_token_stream()
 }
@@ -120,3 +119,18 @@ fn skylite_project_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenSt
 pub fn skylite_project(args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     skylite_project_impl(args.into(), body.into()).into()
 }
+
+#[proc_macro_attribute]
+pub fn init(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+
+#[proc_macro_attribute]
+pub fn pre_update(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+
+#[proc_macro_attribute]
+pub fn post_update(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+
+#[proc_macro_attribute]
+pub fn pre_render(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+
+#[proc_macro_attribute]
+pub fn post_render(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }

@@ -50,14 +50,18 @@ pub struct MockTarget {
     pub state: Vec<u8>
 }
 
-impl SkyliteTarget for MockTarget {
-    fn new() -> Self {
+impl MockTarget {
+
+    fn new() -> MockTarget {
         MockTarget {
             call_history: Vec::new(),
             screen_buffer: [0; 128 * 128],
             state: Vec::new()
         }
     }
+}
+
+impl SkyliteTarget for MockTarget {
 
     fn draw_sub(&mut self, data: &[u8], x: i16, y: i16, src_x: i16, src_y: i16, src_w: u16, src_h: u16, flip_h: bool, flip_v: bool, rotate: bool) {
         let mut hasher = DefaultHasher::new();
@@ -75,7 +79,7 @@ impl SkyliteTarget for MockTarget {
         }
     }
 
-    fn get_screen_size() -> (u16, u16) {
+    fn get_screen_size(&self) -> (u16, u16) {
         (128, 128)
     }
 

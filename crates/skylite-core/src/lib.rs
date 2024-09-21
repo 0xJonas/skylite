@@ -1,12 +1,10 @@
 use actor::AnyActor;
 
-mod scene;
-mod actor;
+pub mod scene;
+pub mod actor;
 
 /// Defines which functions a backend must provide to work with Skylite.
 pub trait SkyliteTarget {
-    /// Creates a new instance of the target.
-    fn new() -> Self;
 
     /// Draws a region from a texture atlas to the screen.
     ///
@@ -27,7 +25,7 @@ pub trait SkyliteTarget {
 
     /// Returns the screen size of the target as a (width, height) tuple.
     /// This must always return the same value during the lifetime of the instance.
-    fn get_screen_size() -> (u16, u16);
+    fn get_screen_size(&self) -> (u16, u16);
 
     /// Saves the given data at the specified location. `location` can be any arbitrary string.
     ///
@@ -43,6 +41,10 @@ pub trait SkyliteProject {
     type Target: SkyliteTarget;
     type TileType: Copy;
     type Actors: AnyActor<P = Self>;
+
+    fn new(target: Self::Target) -> Self;
+    fn render(&self);
+    fn update(&mut self);
 }
 
 /// Holds the rendering state.
@@ -50,9 +52,9 @@ pub trait SkyliteProject {
 /// The `DrawContext` contains all information required for graphics
 /// rendering, such as a handle of the current [`SkyliteTarget`],
 /// the cache for the currently loaded graphics, or the current camera focus.
-pub struct DrawContext<'project, P: SkyliteProject> {
-    target: &'project P::Target,
-    graphics_cache: Vec<std::rc::Weak<u8>>,
-    focus_x: i32,
-    focus_y: i32
+pub struct DrawContext<P: SkyliteProject> {
+    #[doc(hidden)] pub target: P::Target,
+    #[doc(hidden)] pub graphics_cache: Vec<std::rc::Weak<u8>>,
+    #[doc(hidden)] pub focus_x: i32,
+    #[doc(hidden)] pub focus_y: i32
 }

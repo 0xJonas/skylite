@@ -1,15 +1,14 @@
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 
-use crate::guile::{scm_is_false, scm_list_p, SCM};
-use crate::scheme_util::CXROp::{CAR, CDR};
-use crate::util::{change_case, IdentCase};
+use crate::parse::guile::{scm_is_false, scm_list_p, SCM};
+use crate::parse::scheme_util::{
+    CXROp::{CAR, CDR},
+    {assq_str, conv_string, conv_symbol, cxr, eval_str, iter_list, parse_typed_value, with_guile, TypedValue}
+};
+use crate::parse::util::{change_case, IdentCase};
 use crate::SkyliteProcError;
 use glob::{GlobError, Pattern};
-use proc_macro2::{Ident, Span, TokenStream};
-use quote::{format_ident, quote};
-use syn::Item;
-use crate::scheme_util::{assq_str, conv_string, conv_symbol, cxr, eval_str, iter_list, parse_typed_value, with_guile, TypedValue};
 
 fn normalize_glob(glob: &str, base_dir: &Path) -> String {
     if Path::new(&glob).is_relative() {
@@ -120,14 +119,14 @@ impl<'base> IntoIterator for &'base AssetGroup {
 
 /// Container for `AssetGroups` for all asset types used by Skylite.
 #[derive(PartialEq, Debug)]
-struct AssetGroups {
-    actors: AssetGroup,
-    scenes: AssetGroup,
-    plays: AssetGroup,
-    graphics: AssetGroup,
-    sprites: AssetGroup,
-    tilesets: AssetGroup,
-    maps: AssetGroup
+pub(crate) struct AssetGroups {
+    pub actors: AssetGroup,
+    pub scenes: AssetGroup,
+    pub plays: AssetGroup,
+    pub graphics: AssetGroup,
+    pub sprites: AssetGroup,
+    pub tilesets: AssetGroup,
+    pub maps: AssetGroup
 }
 
 impl AssetGroups {
@@ -184,7 +183,7 @@ fn create_default_asset_groups(base_dir: &Path) -> AssetGroups {
 }
 
 #[derive(PartialEq, Debug)]
-struct SaveItem {
+pub(crate) struct SaveItem {
     name: String,
     data: TypedValue
 }
@@ -207,10 +206,10 @@ impl SaveItem {
 /// of a Skylite project.
 #[derive(PartialEq, Debug)]
 pub(crate) struct SkyliteProject {
-    name: String,
-    assets: AssetGroups,
-    save_data: Vec<SaveItem>,
-    tile_types: Vec<String>
+    pub name: String,
+    pub assets: AssetGroups,
+    pub save_data: Vec<SaveItem>,
+    pub tile_types: Vec<String>
 }
 
 impl SkyliteProject {
@@ -274,57 +273,14 @@ impl SkyliteProject {
         with_guile(from_file_guile, path)
     }
 
-    fn tile_type_name(&self) -> Ident {
-        format_ident!("{}Tiles", change_case(&self.name, IdentCase::UpperCamelCase))
-    }
 
-    fn generate_tile_type_enum(&self) -> TokenStream {
-        let tile_type_name = self.tile_type_name();
-        let tile_types = self.tile_types.iter()
-            .map(|tt| Ident::new(&change_case(tt, IdentCase::UpperCamelCase), Span::call_site()));
-        quote! {
-            #[derive(Clone, Copy)]
-            pub enum #tile_type_name {
-                #(#tile_types),*
-            }
-        }
-    }
-
-    fn generate_project_type(&self, target_type: &TokenStream) -> TokenStream {
-        let project_name = Ident::new(&change_case(&self.name, IdentCase::UpperCamelCase), Span::call_site());
-        quote! {
-            pub struct #project_name {
-                target: #target_type,
-                // TODO
-            }
-        }
-    }
-
-    fn generate_project_implementation(&self, target_type: &TokenStream) -> Result<TokenStream, SkyliteProcError> {
-        let project_name = Ident::new(&change_case(&self.name, IdentCase::UpperCamelCase), Span::call_site());
-        let tile_type_name = self.tile_type_name();
-        Ok(quote! {
-            impl SkyliteProject for #project_name {
-                type TileType = #tile_type_name;
-                type Target = #target_type;
-            }
-        })
-    }
-
-    pub(crate) fn generate(&self, target_type: &TokenStream) -> Result<Vec<Item>, SkyliteProcError> {
-        Ok(vec![
-            Item::Verbatim(self.generate_tile_type_enum()),
-            Item::Verbatim(self.generate_project_type(&target_type)),
-            Item::Verbatim(self.generate_project_implementation(&target_type)?)
-        ])
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::{fs::{create_dir, remove_dir_all, File}, path::PathBuf};
 
-    use crate::{project::{asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem}, scheme_util::{eval_str, with_guile, TypedValue}};
+    use crate::parse::{project::{asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem}, scheme_util::{eval_str, with_guile, TypedValue}};
 
     use super::SkyliteProject;
 
