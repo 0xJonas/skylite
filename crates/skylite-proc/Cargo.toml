@@ -12,5 +12,7 @@ syn = {version = "^2.0", features = ["full", "parsing", "printing"]}
 quote = "^1.0"
 glob = "0.3.1"
 
+skylite-compress = { workspace = true, default-features = true }
+
 [build-dependencies]
 bindgen = "0.65.1"

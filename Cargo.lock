@@ -349,6 +349,7 @@ dependencies = [
  "glob",
  "proc-macro2",
  "quote",
+ "skylite-compress",
  "syn",
 ]
 

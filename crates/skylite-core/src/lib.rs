@@ -1,5 +1,6 @@
 use actor::AnyActor;
 
+pub mod decode;
 pub mod scene;
 pub mod actor;
 

@@ -2,7 +2,7 @@
 mod range_coding;
 use std::{mem::size_of, ops::{BitAnd, BitOrAssign, ShlAssign, Shr}};
 
-use fibonacci_code::{decode_fibonacci, encode_fibonacci};
+pub use fibonacci_code::{decode_fibonacci, encode_fibonacci};
 #[cfg(feature = "rc")]
 use range_coding::*;
 
