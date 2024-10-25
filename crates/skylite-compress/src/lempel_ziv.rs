@@ -1,37 +1,37 @@
-use crate::{fibonacci_code::{self, decode_fibonacci, encode_fibonacci}, Decoder};
+use crate::Decoder;
 
-const MAX_RECALL_DIST: usize = 2048;
+const MAX_LENGTH: usize = 128;
+const MAX_RECALL_DIST: usize = 256;
 
 struct RingBuffer {
-    content: [u8; MAX_RECALL_DIST / 8],
+    content: [u8; MAX_RECALL_DIST],
     input_idx: usize
 }
 
 impl RingBuffer {
     pub fn new() -> RingBuffer {
         RingBuffer {
-            content: [0; MAX_RECALL_DIST / 8],
+            content: [0; MAX_RECALL_DIST],
             input_idx: 0
         }
     }
 
-    pub fn push(&mut self, value: bool) {
-        self.content[self.input_idx >> 3] &= !(1 << (self.input_idx & 0x7));
-        self.content[self.input_idx >> 3] |= (value as u8) << (self.input_idx & 0x7);
+    pub fn push(&mut self, value: u8) {
+        self.content[self.input_idx] = value;
         self.input_idx += 1;
         if self.input_idx >= MAX_RECALL_DIST {
             self.input_idx = 0;
         }
     }
 
-    pub fn read(&self, offset: usize) -> bool {
+    pub fn read(&self, offset: usize) -> u8 {
         let idx = if offset + 1 <= self.input_idx {
             self.input_idx - (offset + 1)
         } else {
             MAX_RECALL_DIST - (offset + 1 - self.input_idx)
         };
 
-        (self.content[idx >> 3] & (1 << (idx &0x7))) != 0
+        self.content[idx]
     }
 }
 
@@ -40,7 +40,7 @@ struct LZ77Encoder {
     buffer: RingBuffer,
     recall_distances: Vec<usize>,
     recall_length: usize,
-    out: Vec<bool>
+    out: Vec<u8>
 }
 
 impl LZ77Encoder {
@@ -55,19 +55,12 @@ impl LZ77Encoder {
         }
     }
 
-    fn emit_bits(&mut self, bits: &[bool]) {
-        for b in bits {
-            self.out.push(*b);
-        }
-    }
-
     fn emit_direct_data_code(&mut self, len: usize) {
         if len == 0 {
             return;
         }
 
-        self.out.push(false);
-        self.out.append(&mut encode_fibonacci(len));
+        self.out.push((len - 1) as u8);
 
         for i in 0 .. len {
             self.out.push(self.buffer.read(self.pending_symbols - i - 1));
@@ -75,27 +68,24 @@ impl LZ77Encoder {
         self.pending_symbols -= len;
     }
 
-    fn generate_recall_code(&self, distance: usize, len: usize) -> Vec<bool>{
+    fn emit_recall_code(&mut self, distance: usize, len: usize) {
         if len == 0 {
-            return vec![];
+            return
         }
 
-        let len_fibonacci = fibonacci_code::encode_fibonacci(len);
-        let distance_fibonacci = fibonacci_code::encode_fibonacci(distance);
-
-        [vec![true], len_fibonacci, distance_fibonacci].into_iter().flatten().collect()
+        self.out.push((len - 1) as u8 | 0x80);
+        self.out.push(distance as u8);
+        self.pending_symbols -= len;
     }
 
-    pub fn push_symbol(&mut self, symbol: bool) {
+    pub fn push_symbol(&mut self, symbol: u8) {
         if !self.recall_distances.is_empty() {
             let current_max_recall_distance = *self.recall_distances.iter().max().unwrap();
             self.recall_distances.retain(|dist| (self.buffer.read(*dist) == symbol));
             if self.recall_distances.is_empty() {
-                let recall_code = self.generate_recall_code(current_max_recall_distance, self.recall_length);
-                if recall_code.len() < self.recall_length {
+                if self.recall_length > 2 {
                     self.emit_direct_data_code(self.pending_symbols - self.recall_length);
-                    self.emit_bits(&recall_code);
-                    self.pending_symbols -= self.recall_length;
+                    self.emit_recall_code(current_max_recall_distance, self.recall_length);
                 }
                 self.recall_length = 0;
             } else {
@@ -114,36 +104,33 @@ impl LZ77Encoder {
         self.pending_symbols += 1;
 
         // Check if an output needs to be forced, to prevent the ring buffer from overwriting unprocessed data
-        if self.pending_symbols >= MAX_RECALL_DIST {
+        if self.pending_symbols >= MAX_LENGTH {
             self.emit_direct_data_code(self.pending_symbols - self.recall_length);
         }
 
-        if self.recall_length >= MAX_RECALL_DIST {
+        if self.recall_length >= MAX_LENGTH {
             let current_max_recall_distance = *self.recall_distances.iter().max().unwrap();
-            let recall_code = self.generate_recall_code(current_max_recall_distance, self.recall_length);
-            self.emit_bits(&recall_code);
-            self.pending_symbols -= self.recall_length;
+            self.emit_recall_code(current_max_recall_distance, self.recall_length);
             self.recall_distances.clear();
             self.recall_length = 0;
         }
     }
 
-    pub fn finish(mut self) -> Vec<bool> {
+    pub fn finish(mut self) -> Vec<u8> {
         if self.pending_symbols > 0 {
             self.emit_direct_data_code(self.pending_symbols - self.recall_length);
         }
 
         if self.recall_length > 0 {
             let current_max_recall_distance = *self.recall_distances.iter().max().unwrap();
-            let recall_code = self.generate_recall_code(current_max_recall_distance, self.recall_length);
-            self.emit_bits(&recall_code);
+            self.emit_recall_code(current_max_recall_distance, self.recall_length);
         }
 
         self.out
     }
 }
 
-pub fn encode_lz77<'a>(data: &[bool]) -> Vec<bool> {
+pub fn encode_lz77<'a>(data: &[u8]) -> Vec<u8> {
     let mut encoder = LZ77Encoder::new();
     for b in data {
         encoder.push_symbol(*b);
@@ -176,17 +163,18 @@ impl<'a> LZ77Decoder<'a> {
 
 impl<'a> Decoder for LZ77Decoder<'a> {
 
-    fn decode_bit(&mut self) -> bool {
+    fn decode_u8(&mut self) -> u8 {
         let len = match self.opcode {
             LZ77Opcode::DirectData(len) => len,
             LZ77Opcode::Recall(_, len) => len
         };
 
         if self.progress >= len {
-            let code_type = self.source.decode_bit();
-            let len = decode_fibonacci(self.source.as_mut());
+            let opcode = self.source.decode_u8();
+            let code_type = opcode >> 7 != 0;
+            let len = (opcode & 0x7f) as usize + 1;
             if code_type {
-                let distance = decode_fibonacci(self.source.as_mut());
+                let distance = self.source.decode_u8() as usize;
                 self.opcode = LZ77Opcode::Recall(distance, len);
             } else {
                 self.opcode = LZ77Opcode::DirectData(len);
@@ -195,7 +183,7 @@ impl<'a> Decoder for LZ77Decoder<'a> {
         }
 
         let out = match self.opcode {
-            LZ77Opcode::DirectData(_) => self.source.decode_bit(),
+            LZ77Opcode::DirectData(_) => self.source.decode_u8(),
             LZ77Opcode::Recall(distance, _) => self.buffer.read(distance)
         };
         self.buffer.push(out);
@@ -215,7 +203,7 @@ mod tests {
         quickcheck, TestResult
     };
 
-    use crate::{bits_to_data, data_to_bits, decode_symbol, encode_lz77, lempel_ziv::LZ77Decoder, RawSliceDecoder};
+    use crate::{encode_lz77, lempel_ziv::LZ77Decoder, Decoder, RawSliceDecoder};
 
     #[test]
     fn test_compression() {
@@ -229,13 +217,13 @@ mod tests {
             })
             .collect();
 
-        let encoded = bits_to_data(&encode_lz77(&data_to_bits(&data)));
+        let encoded = encode_lz77(&data);
 
-        let expectation = &[3, 0, 25, 29, 145, 129, 85, 84, 137, 209, 117, 72, 152, 144, 78, 169, 19, 18, 9, 196, 130, 98, 65, 48];
+        let expectation = &[5, 0, 17, 17, 17, 0, 85, 255, 9, 255, 129, 255, 249, 255, 249, 255, 249, 255, 249, 255, 249, 249, 249];
         assert_eq!(&encoded[..], expectation);
 
         let mut decoder = LZ77Decoder::new(Box::new(RawSliceDecoder::new(&encoded)));
-        let decoded: Vec<u8> = repeat_with(|| decode_symbol::<u8>(&mut decoder)).take(data.len()).collect();
+        let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8()).take(data.len()).collect();
         assert_eq!(decoded[..], data);
     }
 
@@ -250,10 +238,10 @@ mod tests {
                 return TestResult::discard();
             }
 
-            let encoded = bits_to_data(&encode_lz77(&data_to_bits(&expanded_data)));
+            let encoded = encode_lz77(&expanded_data);
 
             let mut decoder = LZ77Decoder::new(Box::new(RawSliceDecoder::new(&encoded)));
-            let decoded: Vec<u8> = repeat_with(|| decode_symbol::<u8>(&mut decoder)).take(expanded_data.len()).collect();
+            let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8()).take(expanded_data.len()).collect();
             return TestResult::from_bool(decoded.cmp(&expanded_data) == Ordering::Equal);
         }
     }

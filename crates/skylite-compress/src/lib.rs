@@ -1,8 +1,7 @@
 #[cfg(feature = "rc")]
 mod range_coding;
-use std::{mem::size_of, ops::{BitAnd, BitOrAssign, ShlAssign, Shr}};
 
-pub use fibonacci_code::{decode_fibonacci, encode_fibonacci};
+// pub use fibonacci_code::{decode_fibonacci, encode_fibonacci};
 #[cfg(feature = "rc")]
 use range_coding::*;
 
@@ -11,20 +10,8 @@ mod lempel_ziv;
 #[cfg(feature = "lz77")]
 use lempel_ziv::*;
 
-mod bit_prediction;
-mod fibonacci_code;
-
-pub(crate) fn symbol_to_bits<T>(symbol: T) -> Vec<bool>
-where
-    T: BitAnd<T, Output = T> + Shr<usize, Output = T> + From<u8> + PartialEq + Copy,
-{
-    let zero = Into::<T>::into(0);
-    let one = Into::<T>::into(1);
-    (0..(size_of::<T>() * 8))
-        .rev()
-        .map(|b| ((symbol >> b) & one) != zero)
-        .collect()
-}
+// mod bit_prediction;
+// mod fibonacci_code;
 
 pub(crate) fn data_to_bits(data: &[u8]) -> Vec<bool> {
     data.iter()
@@ -53,53 +40,36 @@ pub(crate) fn bits_to_data(bits: &[bool]) -> Vec<u8> {
 /// A `Decoder` decodes a compressed data stream.
 pub trait Decoder {
 
-    /// Decode the next bit from the data stream.
+    /// Decode the next byte from the data stream.
     ///
     /// This method does not indicate when the meaningful data
     /// has ended, so the length of the original data must be
     /// known to the caller.
-    fn decode_bit(&mut self) -> bool;
-}
-
-pub(crate) fn decode_symbol<T>(decoder: &mut dyn Decoder) -> T
-where T: ShlAssign<u8> + BitOrAssign<T> + Default + From<bool>
-{
-    let mut out = T::default();
-    for _ in 0..(size_of::<T>() * 8) {
-        out <<= 1;
-        out |= decoder.decode_bit().into();
-    }
-    out
+    fn decode_u8(&mut self) -> u8;
 }
 
 struct RawSliceDecoder<'a> {
     data: &'a [u8],
     index: u16,
-    bit_index: u8
 }
 
 impl<'a> RawSliceDecoder<'a> {
     fn new<'b>(data: &'b [u8]) -> RawSliceDecoder<'b> {
         RawSliceDecoder {
             data,
-            index: 0,
-            bit_index: 0
+            index: 0
         }
     }
 }
 
 impl<'a> Decoder for RawSliceDecoder<'a> {
-    fn decode_bit(&mut self) -> bool {
+    fn decode_u8(&mut self) -> u8 {
         if (self.index as usize) < self.data.len() {
-            let out = self.data[self.index as usize] & (1 << (7 - self.bit_index));
-            self.bit_index += 1;
-            if self.bit_index >= 8 {
-                self.bit_index = 0;
-                self.index += 1;
-            }
-            out != 0
+            let out = self.data[self.index as usize];
+            self.index += 1;
+            out
         } else {
-            false
+            0
         }
     }
 }
@@ -130,10 +100,9 @@ pub struct CompressionReport {
 /// The function returns both the compressed data and a list of `CompressionReport`s,
 /// with one entry for each compression method.
 pub fn compress(data: &[u8], methods: &[CompressionMethods]) -> (Vec<u8>, Vec<CompressionReport>) {
-    let mut out = data_to_bits(data);
+    let mut out = data.to_owned();
     let mut reports = Vec::with_capacity(methods.len());
-    out.insert(0, true);
-    out.insert(0, true);
+    out.insert(0, 0);
     for method in methods {
         let mut new = match method {
             CompressionMethods::Raw => out.clone(),
@@ -141,7 +110,7 @@ pub fn compress(data: &[u8], methods: &[CompressionMethods]) -> (Vec<u8>, Vec<Co
             #[cfg(feature = "rc")] CompressionMethods::RC => encode_rc(&out)
         };
         if new.len() + 1 < out.len() {
-            let mut tag = encode_fibonacci(method.to_owned() as usize);
+            let mut tag = vec![method.to_owned() as u8];
             tag.append(&mut new);
             out = tag;
             reports.push(CompressionReport { method: *method, compressed_size: out.len(), skipped: false });
@@ -149,7 +118,7 @@ pub fn compress(data: &[u8], methods: &[CompressionMethods]) -> (Vec<u8>, Vec<Co
             reports.push(CompressionReport { method: *method, compressed_size: out.len(), skipped: true });
         }
     }
-    (bits_to_data(&out), reports)
+    (out, reports)
 }
 
 /// Creates a `Decoder` for the compressed data.
@@ -163,7 +132,7 @@ pub fn compress(data: &[u8], methods: &[CompressionMethods]) -> (Vec<u8>, Vec<Co
 pub fn make_decoder<'a>(data: &'a [u8]) -> Box<dyn Decoder + 'a> {
     let mut decoder: Box<dyn Decoder + 'a> = Box::new(RawSliceDecoder::new(data));
     loop {
-        let method = decode_fibonacci(decoder.as_mut());
+        let method = decoder.decode_u8();
         match method {
             #[cfg(feature = "lz77")] 1 => decoder = Box::new(LZ77Decoder::new(decoder)),
             #[cfg(feature = "rc")] 2 => decoder = Box::new(RCDecoder::new(decoder)),
@@ -180,7 +149,7 @@ mod tests {
 
     use std::{cmp::Ordering, iter::repeat_with};
 
-    use crate::{compress, decode_symbol, make_decoder, CompressionMethods};
+    use crate::{compress, make_decoder, CompressionMethods};
 
     use super::quickcheck::{
         quickcheck, TestResult
@@ -200,7 +169,7 @@ mod tests {
             let (encoded, _) = compress(&expanded_data, &[CompressionMethods::LZ77, CompressionMethods::RC]);
 
             let mut decoder = make_decoder(&encoded);
-            let decoded: Vec<u8> = repeat_with(|| decode_symbol::<u8>(decoder.as_mut())).take(expanded_data.len()).collect();
+            let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8()).take(expanded_data.len()).collect();
             TestResult::from_bool(decoded.cmp(&expanded_data) == Ordering::Equal)
         }
     }

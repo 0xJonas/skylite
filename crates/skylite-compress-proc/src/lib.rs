@@ -36,7 +36,7 @@ fn print_compression_report(data_name: &str, initial_size: usize, reports: &[Com
             println!("{}: from {} to {} (reduction of {:.2}%)", data_name, initial_size, final_size, calc_percent_reduction(initial_size, final_size));
         },
         ReportMode::Full => {
-            let prev_size = initial_size;
+            let mut prev_size = initial_size;
             println!("{}:", data_name);
             for report in reports {
                 let method_name = match report.method {
@@ -49,6 +49,7 @@ fn print_compression_report(data_name: &str, initial_size: usize, reports: &[Com
                 } else {
                     println!("\t{}: from {} to {} (reduction of {:.2}%)", method_name, prev_size, report.compressed_size, calc_percent_reduction(prev_size, report.compressed_size));
                 }
+                prev_size = report.compressed_size;
             }
         },
         ReportMode::None => {}
