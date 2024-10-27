@@ -4,9 +4,9 @@ fn emit_code(start: u64, width: u64) -> (u8, u64, u64) {
     let code = (start >> 24) as u8;
     let start_masked = start & 0x00ff_ffff;
 
-    // If start and start + width to not share the same leading nibble,
+    // If start and start + width to not share the same leading byte,
     // either start or width has to be adjusted so that the leading
-    // nibble is the same for both ends of the range.
+    // byte is the same for both ends of the range.
     let discrepancy = (0xff00_0000 & start) + 0x0100_0000 - start;
     if discrepancy < width {
         // Adjust range from the top

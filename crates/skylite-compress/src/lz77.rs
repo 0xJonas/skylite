@@ -203,7 +203,7 @@ mod tests {
         quickcheck, TestResult
     };
 
-    use crate::{encode_lz77, lempel_ziv::LZ77Decoder, Decoder, RawSliceDecoder};
+    use crate::{encode_lz77, lz77::LZ77Decoder, Decoder, RawSliceDecoder};
 
     #[test]
     fn test_compression() {

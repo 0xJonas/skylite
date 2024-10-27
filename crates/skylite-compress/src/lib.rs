@@ -1,16 +1,22 @@
-#[cfg(feature = "rc")]
-mod range_coding;
-
 // pub use fibonacci_code::{decode_fibonacci, encode_fibonacci};
-#[cfg(feature = "rc")]
+
+#[cfg(feature = "range_coding")]
+mod range_coding;
+#[cfg(feature = "range_coding")]
 use range_coding::*;
 
 #[cfg(feature = "lz77")]
-mod lempel_ziv;
+mod lz77;
 #[cfg(feature = "lz77")]
-use lempel_ziv::*;
+use lz77::*;
 
-// mod bit_prediction;
+#[cfg(feature = "lz78")]
+mod lz78;
+#[cfg(feature = "lz78")]
+use lz78::*;
+
+#[cfg(feature = "bit_prediction")]
+mod bit_prediction;
 // mod fibonacci_code;
 
 pub(crate) fn data_to_bits(data: &[u8]) -> Vec<bool> {
@@ -79,7 +85,8 @@ impl<'a> Decoder for RawSliceDecoder<'a> {
 pub enum CompressionMethods {
     Raw = 0,
     #[cfg(feature = "lz77")] LZ77 = 1,
-    #[cfg(feature = "rc")] RC = 2
+    #[cfg(feature = "lz78")] LZ78 = 2,
+    #[cfg(feature = "range_coding")] RC = 3
 }
 
 /// Information on the invocation of a compression method.
@@ -107,7 +114,8 @@ pub fn compress(data: &[u8], methods: &[CompressionMethods]) -> (Vec<u8>, Vec<Co
         let mut new = match method {
             CompressionMethods::Raw => out.clone(),
             #[cfg(feature = "lz77")] CompressionMethods::LZ77 => encode_lz77(&out),
-            #[cfg(feature = "rc")] CompressionMethods::RC => encode_rc(&out)
+            #[cfg(feature = "lz78")] CompressionMethods::LZ78 => encode_lz78(&out),
+            #[cfg(feature = "range_coding")] CompressionMethods::RC => encode_rc(&out)
         };
         if new.len() + 1 < out.len() {
             let mut tag = vec![method.to_owned() as u8];
@@ -135,7 +143,8 @@ pub fn make_decoder<'a>(data: &'a [u8]) -> Box<dyn Decoder + 'a> {
         let method = decoder.decode_u8();
         match method {
             #[cfg(feature = "lz77")] 1 => decoder = Box::new(LZ77Decoder::new(decoder)),
-            #[cfg(feature = "rc")] 2 => decoder = Box::new(RCDecoder::new(decoder)),
+            #[cfg(feature = "lz78")] 2 => decoder = Box::new(LZ78Decoder::new(decoder)),
+            #[cfg(feature = "range_coding")] 3 => decoder = Box::new(RCDecoder::new(decoder)),
             _ => return decoder,
         }
     }

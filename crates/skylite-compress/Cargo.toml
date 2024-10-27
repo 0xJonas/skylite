@@ -10,6 +10,8 @@ crate-type = ["lib", "cdylib"]
 quickcheck = "^1"
 
 [features]
-default = ["lz77", "rc"]
+default = ["lz77", "bit_prediction", "range_coding"]
 lz77 = []
-rc = []
+lz78 = []
+bit_prediction = []
+range_coding = []

@@ -41,8 +41,9 @@ fn print_compression_report(data_name: &str, initial_size: usize, reports: &[Com
             for report in reports {
                 let method_name = match report.method {
                     CompressionMethods::Raw => "Raw data",
-                    CompressionMethods::LZ77 => "Lempel-Ziv 77",
-                    CompressionMethods::RC => "Range Coding"
+                    #[cfg(feature = "lz77")] CompressionMethods::LZ77 => "Lempel-Ziv 77",
+                    #[cfg(feature = "lz78")] CompressionMethods::LZ78 => "Lempel-Ziv 78",
+                    #[cfg(feature = "range_coding")] CompressionMethods::RC => "Range Coding"
                 };
                 if report.skipped {
                     println!("\t{}: (skipped)", method_name);
@@ -154,8 +155,9 @@ fn literals_to_methods(iter: DelimitedListIterator) -> Result<Vec<CompressionMet
             Err(ProcError::Syntax("Expected compression methods identifier".to_owned()))
         })
         .map(|l| match l?.to_string().as_str() {
-            "lz77" => Ok(CompressionMethods::LZ77),
-            "rc" => Ok(CompressionMethods::RC),
+            #[cfg(feature = "lz77")] "lz77" => Ok(CompressionMethods::LZ77),
+            #[cfg(feature = "lz78")] "lz78" => Ok(CompressionMethods::LZ78),
+            #[cfg(feature = "range_coding")] "range_coding" => Ok(CompressionMethods::RC),
             s @ _ => Err(ProcError::Data(format!("Unknown compression method {}", s)))
         })
         .collect();
