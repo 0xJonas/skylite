@@ -17,57 +17,39 @@ fn emit_code(start: u64, width: u64) -> (u8, u64, u64) {
     }
 }
 
-fn split_nibbles(data: &[u8]) -> Vec<u8> {
-    data.iter()
-        .flat_map(|b| [b >> 4, b & 0xf])
-        .collect()
-}
-
-fn calculate_probabilities(nibbles: &[u8]) -> [u8; 16] {
-    let len = nibbles.len();
-    let mut counts = [0; 16];
-    for n in nibbles {
-        counts[*n as usize] += 1;
-    }
-
-    let mut out = [0_u8; 16];
-    for i in 1..16 {
-        // Use 0xf0 here instead of 0xff, to ensure that corrections
-        // added by .max(1) do not overflow.
-        out[i] = out[i - 1] + (counts[i - 1] * 0xf0 / len).max(1) as u8;
-    }
-
-    out
-}
-
 /// Encode `data` using range coding.
 pub fn encode_rc<'a>(data: &[u8]) -> Vec<u8> {
     assert!(data.len() > 0);
 
-    let nibbles = split_nibbles(data);
+    let mut out = Vec::new();
 
-    let probabilities_raw = calculate_probabilities(&nibbles);
-    let mut out: Vec<u8> = Vec::new();
+    // The ring buffer is used to manage the counts array.
+    // It needs to be 255 bytes long, because otherwise it would be
+    // possible for 256 of the same byte to be in the buffer, which would not fit
+    // the counts array (max is 255).
+    // The ring buffer is initialized to contain all values from 0 to 254, which
+    // corresponds to a counts array of all ones, except for counts[255] which is zero.
+    let mut ring_buffer: [u8; 255] = std::array::from_fn(|i| i as u8);
+    let mut ring_buffer_idx = 0;
 
-    for p in &probabilities_raw[1..16] {
-        out.push(*p);
-    }
-
-    let probabilities: Vec<u64> = (0..17)
-        .map(|i| if i < 16 {
-            (probabilities_raw[i] as u64) << 24
-        } else {
-            0xffff_ffff
-        })
-        .collect();
+    // The number of occurances of each byte in the ring buffer at the current time.
+    // These counts are used directly as the probabilities for the current byte to be encoded.
+    // The sum of all counts will always be 255 (it should ideally be 256, but that is not
+    // possible without increasing the size of the array type).
+    let mut counts = [1_u8; 256];
+    counts[255] = 0;
 
     let mut start: u64 = 0;
     let mut width: u64 = 0x1_0000_0000;
 
-    for nibble in nibbles {
-        // println!("start = {:x}, width = {:x}, nibble = {:x}", start, width, nibble);
-        start += width * probabilities[nibble as usize] / 0x1_0000_0000;
-        width = width * (probabilities[(nibble + 1) as usize] - probabilities[nibble as usize]) / 0x1_0000_0000;
+    for byte in data {
+        let count_acc: u64 = counts[0 .. (*byte as usize)]
+            .iter()
+            .map(|c| *c as u64 + 1)
+            .sum::<u64>() << 23;
+        // println!("start = {:x}, width = {:x}, byte = {:x}, p = {:x}, t = {:x}", start, width, byte, probability, total_scaled);
+        start += width * count_acc / 0x1_0000_0000;
+        width = width * ((counts[*byte as usize] as u64 + 1) << 23) / 0x1_0000_0000;
 
         while (start >> 24) == (start + width >> 24) || width <= 0xffff {
             // print!("start = {:x}, width = {:x} ... emitting", start, width);
@@ -76,8 +58,15 @@ pub fn encode_rc<'a>(data: &[u8]) -> Vec<u8> {
             out.push(code);
             // println!(" => {:x}", code);
         }
+
+        // Update counts and ring buffer.
+        counts[ring_buffer[ring_buffer_idx] as usize] -= 1;
+        counts[*byte as usize] += 1;
+        ring_buffer[ring_buffer_idx] = *byte;
+        ring_buffer_idx = (ring_buffer_idx + 1) % 255;
     }
 
+    // Finish up
     while width < 0x1_0000_0000 {
         let code: u8;
         (code, start, width) = emit_code(start, width);
@@ -90,7 +79,9 @@ pub fn encode_rc<'a>(data: &[u8]) -> Vec<u8> {
 /// Decoder state for range coding.
 pub struct RCDecoder<'a> {
     source: Box<dyn Decoder + 'a>,
-    probabilities: [u64; 17],
+    counts: [u8; 256],
+    ring_buffer: [u8; 255],
+    ring_buffer_idx: usize,
     start: u64,
     width: u64,
     x: u64
@@ -99,20 +90,18 @@ pub struct RCDecoder<'a> {
 impl<'a> RCDecoder<'a> {
 
     pub fn new<'b>(mut source: Box<dyn Decoder + 'b>) -> RCDecoder<'b> {
-        let mut probabilities = [0_u64; 17];
-        for i in 1..16 {
-            probabilities[i] = (source.decode_u8() as u64) << 24;
-        }
-        probabilities[16] = 0xffff_ffff;
-
         let x = ((source.decode_u8() as u64) << 24)
                 + ((source.decode_u8() as u64) << 16)
                 + ((source.decode_u8() as u64) << 8)
                 + (source.decode_u8() as u64);
 
+        let mut counts = [1; 256];
+        counts[255] = 0;
         RCDecoder {
             source,
-            probabilities,
+            counts,
+            ring_buffer: std::array::from_fn(|i| i as u8),
+            ring_buffer_idx: 0,
             start: 0,
             width: 0x1_0000_0000,
             x
@@ -136,36 +125,43 @@ impl<'a> RCDecoder<'a> {
         self.x = (self.x & 0x00ff_ffff) << 8;
         self.x |= self.source.decode_u8() as u64;
     }
-
-    fn decode_nibble(&mut self) -> u8 {
-        // print!("start = {:x}, width = {:x}, x = {:x}", self.start, self.width, self.x);
-        let mut out = 0;
-        for nibble in 0..16 {
-            let threshold = self.start + self.width * self.probabilities[nibble + 1] / 0x1_0000_0000;
-            if self.x < threshold {
-                // print!(" threshold = {:x}", threshold);
-                out = nibble;
-                break;
-            }
-        }
-        // println!(" => {:x}", out);
-
-        self.start += self.width * self.probabilities[out] / 0x1_0000_0000;
-        self.width = self.width * (self.probabilities[out + 1] - self.probabilities[out]) / 0x1_0000_0000;
-
-        while (self.start >> 24) == (self.start + self.width >> 24) || self.width <= 0xffff {
-            // println!("start = {:x}, width = {:x}, x = {:x} ... adjusting", self.start, self.width, self.x);
-            self.adjust_range();
-        }
-
-        out as u8
-    }
 }
 
 impl<'a> Decoder for RCDecoder<'a> {
 
     fn decode_u8(&mut self) -> u8 {
-        (self.decode_nibble() << 4) + self.decode_nibble()
+        // print!("start = {:x}, width = {:x}, x = {:x}", self.start, self.width, self.x);
+        let mut out = 0;
+        let mut count_acc = 0;
+        let mut count_inc = 0;
+        for byte in 0..=255_u8 {
+            count_inc = (self.counts[byte as usize] as u64 + 1) << 23;
+            let threshold = self.start + self.width * (count_acc + count_inc) / 0x1_0000_0000;
+            out = byte;
+            if self.x < threshold {
+                // print!(", threshold = {:x}, acc = {:x}, inc = {:x}", threshold, count_acc, count_inc);
+                break;
+            }
+            count_acc += count_inc;
+        }
+        // println!(" => {:x}", out);
+
+        self.start += self.width * count_acc / 0x1_0000_0000;
+        self.width = self.width * count_inc / 0x1_0000_0000;
+
+        while (self.start >> 24) == (self.start + self.width >> 24) || self.width <= 0xffff {
+            // println!("start = {:x}, width = {:x}, x = {:x} ... adjusting", self.start, self.width, self.x);
+            self.adjust_range();
+            assert_ne!(self.width, 0);
+        }
+
+        // Update counts
+        self.counts[self.ring_buffer[self.ring_buffer_idx] as usize] -= 1;
+        self.counts[out as usize] += 1;
+        self.ring_buffer[self.ring_buffer_idx] = out as u8;
+        self.ring_buffer_idx = (self.ring_buffer_idx + 1) % 255;
+
+        out as u8
     }
 }
 
@@ -196,24 +192,26 @@ mod tests {
 
         let encoded = encode_rc(&data);
         let expectation = &[
-            142, 215, 216, 217,
-            218, 242, 243, 244,
-            245, 246, 247, 248,
-            249, 250, 251,
-            61, 25, 19, 186,
-            173, 250, 34, 33,
-            164, 213, 42, 91,
-            58, 228, 120, 65,
-            42, 149, 1, 187,
-            222, 22, 224, 173,
-            126, 210, 62, 180,
-            86, 186, 31, 228,
-            210, 210, 202, 160,
-            96, 53, 230, 188,
-            201, 96, 108, 169,
-            190, 75, 108, 100
+            0, 17, 16, 152,
+            0, 255, 0, 0,
+            0, 0, 13, 249,
+            149, 21, 251, 66,
+            0, 0, 162, 197,
+            241, 247, 189, 96,
+            1, 194, 112, 3,
+            60, 38, 0, 101,
+            41, 118, 176, 223,
+            27, 229, 165, 44,
+            146, 19, 13, 62,
+            72, 145, 23, 173,
+            175, 72, 129, 76,
+            21, 252, 94, 40,
+            139, 132, 59, 229,
+            205, 25, 134, 53,
+            31, 97, 216, 14,
+            37, 79, 151, 19,
+            180, 72, 181, 129
         ];
-
         assert_eq!(&encoded[..], expectation);
 
         let mut decoder = RCDecoder::new(Box::new(RawSliceDecoder::new(&encoded)));
