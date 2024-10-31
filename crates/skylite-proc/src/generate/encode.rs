@@ -2,43 +2,26 @@
 
 #![allow(non_snake_case)]
 
-use skylite_compress::{compress, encode_fibonacci, CompressionMethods};
+use skylite_compress::{compress, CompressionMethods};
 
 pub trait Serialize {
-    fn serialize(&self, buffer: &mut ByteBuffer);
+    fn serialize(&self, buffer: &mut CompressionBuffer);
 }
 
-pub struct ByteBuffer {
-    buffer: Vec<u8>,
-    current_bit: u8
+pub struct CompressionBuffer {
+    buffer: Vec<u8>
 }
 
-impl ByteBuffer {
+impl CompressionBuffer {
 
-    pub fn new() -> ByteBuffer {
-        ByteBuffer {
-            buffer: Vec::new(),
-            current_bit: 0
+    pub fn new() -> CompressionBuffer {
+        CompressionBuffer {
+            buffer: Vec::new()
         }
-    }
-
-    fn write_bit(&mut self, val: bool) {
-        if self.current_bit == 0 {
-            self.buffer.push(0);
-        }
-        *self.buffer.last_mut().unwrap() |= (val as u8) << (7 - self.current_bit);
-        self.current_bit = (self.current_bit + 1) & 0x7;
     }
 
     fn write_byte(&mut self, byte: u8) {
-        if self.current_bit == 0 {
-            self.buffer.push(byte);
-        } else {
-            let head = byte >> self.current_bit;
-            let tail: u8 = (((byte as u16) << (8 - self.current_bit)) & 0xff).try_into().unwrap();
-            *self.buffer.last_mut().unwrap() |= head;
-            self.buffer.push(tail);
-        }
+        self.buffer.push(byte);
     }
 
     pub fn write<T: Serialize>(&mut self, val: T) {
@@ -46,7 +29,10 @@ impl ByteBuffer {
     }
 
     pub fn encode(self) -> Vec<u8> {
-        let (out, _reports) = compress(&self.buffer, &[CompressionMethods::LZ77, CompressionMethods::RC]);
+        let (out, reports) = compress(&self.buffer, &[CompressionMethods::LZ77, CompressionMethods::RC]);
+        for r in reports {
+            println!("{}", r);
+        }
         // TODO: print reports to stdout
         out
     }
@@ -55,7 +41,7 @@ impl ByteBuffer {
 macro_rules! serialize_for_primitive {
     ($typename:ident) => {
         impl Serialize for $typename {
-            fn serialize(&self, buffer: &mut ByteBuffer) {
+            fn serialize(&self, buffer: &mut CompressionBuffer) {
                 let bytes = self.to_be_bytes();
                 bytes.iter().for_each(|b| buffer.write_byte(*b));
             }
@@ -73,16 +59,21 @@ serialize_for_primitive!(f32);
 serialize_for_primitive!(f64);
 
 impl Serialize for bool {
-    fn serialize(&self, buffer: &mut ByteBuffer) {
-        buffer.write_bit(*self);
+    fn serialize(&self, buffer: &mut CompressionBuffer) {
+        buffer.write_byte(*self as u8);
     }
 }
 
 impl<T: Serialize> Serialize for &[T] {
 
-    fn serialize(&self, buffer: &mut ByteBuffer) {
-        let len_bits = encode_fibonacci(self.len());
-        len_bits.into_iter().for_each(|bit| buffer.write_bit(bit));
+    fn serialize(&self, buffer: &mut CompressionBuffer) {
+        let len = self.len();
+        let mut writes = len.ilog2() / 7;
+        while writes > 1 {
+            buffer.write_byte(((len >> (writes * 7)) & 0x7f | 0x80) as u8);
+            writes -= 1;
+        }
+        buffer.write_byte((len & 0x7f) as u8);
         for item in *self {
             item.serialize(buffer);
         }
@@ -90,7 +81,7 @@ impl<T: Serialize> Serialize for &[T] {
 }
 
 impl Serialize for &str {
-    fn serialize(&self, buffer: &mut ByteBuffer) {
+    fn serialize(&self, buffer: &mut CompressionBuffer) {
         self.as_bytes().serialize(buffer);
     }
 }
@@ -98,7 +89,7 @@ impl Serialize for &str {
 macro_rules! serialize_for_tuple {
     ($($t:ident),+) => {
         impl<$($t: Serialize),+> Serialize for ($($t),+,) {
-            fn serialize(&self, buffer: &mut ByteBuffer) {
+            fn serialize(&self, buffer: &mut CompressionBuffer) {
                 let ($($t),+,) = self;
                 $(
                     $t.serialize(buffer);
@@ -119,11 +110,11 @@ serialize_for_tuple!(T1, T2, T3, T4, T5, T6, T7, Z8);
 
 #[cfg(test)]
 mod tests {
-    use super::ByteBuffer;
+    use super::CompressionBuffer;
 
     #[test]
     fn test_serialize() {
-        let mut buffer = ByteBuffer::new();
+        let mut buffer = CompressionBuffer::new();
 
         buffer.write(0x12_u8);
         buffer.write(0x1234_u16);
@@ -147,21 +138,23 @@ mod tests {
 
         let encoded = buffer.encode();
         let expected = vec![
-            98, 23, 137, 9,
-            26, 9, 26, 43,
-            60, 119, 118, 230,
-            118, 229, 212, 196,
-            31, 136, 157, 1,
-            131, 255, 0, 202,
-            44, 136, 192, 208,
-            72, 21, 25, 92,
-            221, 8, 72, 60,
-            39, 227, 173, 74,
-            209, 12, 29, 189,
-            90, 14, 33, 165,
-            147, 120, 72, 48,
-            140, 153, 2, 23,
-            32, 192
+            3,
+            0, 1, 6, 18,
+            64, 232, 140, 25,
+            133, 254, 148, 114,
+            121, 80, 150, 38,
+            203, 10, 145, 49,
+            75, 159, 24, 235,
+            88, 128, 173, 107,
+            26, 106, 176, 79,
+            150, 183, 6, 57,
+            242, 188, 94, 113,
+            15, 244, 245, 231,
+            182, 250, 51, 110,
+            98, 154, 5, 119,
+            126, 131, 176, 116,
+            178, 13, 45, 142,
+            113, 4, 128
         ];
         assert_eq!(encoded, expected);
     }

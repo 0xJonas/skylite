@@ -2,28 +2,20 @@
 
 #![allow(non_snake_case)]
 use skylite_compress::Decoder;
-pub use skylite_compress::decode_fibonacci;
 
 pub trait Deserialize {
     fn deserialize(decoder: &mut dyn Decoder) -> Self;
-}
-
-fn read_bytes<const BYTES: usize>(decoder: &mut dyn Decoder) -> [u8; BYTES] {
-    let mut out = [0; BYTES];
-    for byte in 0..BYTES {
-        for _ in 0..8 {
-            out[byte] <<= 1;
-            out[byte] |= decoder.decode_bit() as u8;
-        }
-    }
-    out
 }
 
 macro_rules! deserialize_for_primitive {
     ($typename:ident, $bytes:expr) => {
         impl Deserialize for $typename {
             fn deserialize(decoder: &mut dyn Decoder) -> $typename {
-                $typename::from_be_bytes(read_bytes::<$bytes>(decoder))
+                let mut data = [0; $bytes];
+                for i in 0..$bytes {
+                    data[i] = decoder.decode_u8();
+                }
+                $typename::from_be_bytes(data)
             }
         }
     };
@@ -38,10 +30,22 @@ deserialize_for_primitive!(i32, 4);
 deserialize_for_primitive!(f32, 4);
 deserialize_for_primitive!(f64, 8);
 
+fn read_varint(decoder: &mut dyn Decoder) -> usize {
+    let mut out = 0;
+    loop {
+        let byte = decoder.decode_u8();
+        out = (out << 7) + (byte & 0x7f) as usize;
+        if byte < 0x80 {
+            break;
+        }
+    }
+    out
+}
+
 impl<T: Deserialize> Deserialize for Vec<T> {
 
     fn deserialize(decoder: &mut dyn Decoder) -> Vec<T> {
-        let len = decode_fibonacci(decoder);
+        let len = read_varint(decoder);
         let mut out = Vec::with_capacity(len);
         for _ in 0..len {
             out.push(<T as Deserialize>::deserialize(decoder));
@@ -76,7 +80,7 @@ deserialize_for_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 impl Deserialize for String {
     fn deserialize(decoder: &mut dyn Decoder) -> Self {
-        let len = decode_fibonacci(decoder);
+        let len = read_varint(decoder);
         let bytes = (0..len)
             .map(|_| u8::deserialize(decoder))
             .collect::<Vec<u8>>();
@@ -93,7 +97,7 @@ impl Deserialize for String {
 
 impl Deserialize for bool {
     fn deserialize(decoder: &mut dyn Decoder) -> Self {
-        decoder.decode_bit()
+        decoder.decode_u8() != 0
     }
 }
 
@@ -107,21 +111,23 @@ mod tests {
     fn test_deserialize() {
         // Should be the same as the result in the test from encode.rs
         let input = vec![
-            98, 23, 137, 9,
-            26, 9, 26, 43,
-            60, 119, 118, 230,
-            118, 229, 212, 196,
-            31, 136, 157, 1,
-            131, 255, 0, 202,
-            44, 136, 192, 208,
-            72, 21, 25, 92,
-            221, 8, 72, 60,
-            39, 227, 173, 74,
-            209, 12, 29, 189,
-            90, 14, 33, 165,
-            147, 120, 72, 48,
-            140, 153, 2, 23,
-            32, 192
+            3,
+            0, 1, 6, 18,
+            64, 232, 140, 25,
+            133, 254, 148, 114,
+            121, 80, 150, 38,
+            203, 10, 145, 49,
+            75, 159, 24, 235,
+            88, 128, 173, 107,
+            26, 106, 176, 79,
+            150, 183, 6, 57,
+            242, 188, 94, 113,
+            15, 244, 245, 231,
+            182, 250, 51, 110,
+            98, 154, 5, 119,
+            126, 131, 176, 116,
+            178, 13, 45, 142,
+            113, 4, 128
         ];
         let mut decoder = make_decoder(&input);
 

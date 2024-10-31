@@ -17,6 +17,22 @@ fn emit_code(start: u64, width: u64) -> (u8, u64, u64) {
     }
 }
 
+fn calc_ring_buffer_init(data: &[u8]) -> [u8; 4] {
+    let mut counts = [0; 256];
+    for d in data {
+        counts[*d as usize] += 1;
+    }
+
+    let mut counts_indexed: Vec<(usize, usize)> = counts.into_iter().enumerate().collect();
+    counts_indexed.sort_by_key(|(_, c)| !*c);
+    [
+        counts_indexed[0].0 as u8,
+        counts_indexed[1].0 as u8,
+        counts_indexed[2].0 as u8,
+        counts_indexed[3].0 as u8,
+    ]
+}
+
 /// Encode `data` using range coding.
 pub fn encode_rc<'a>(data: &[u8]) -> Vec<u8> {
     assert!(data.len() > 0);
@@ -27,17 +43,28 @@ pub fn encode_rc<'a>(data: &[u8]) -> Vec<u8> {
     // It needs to be 255 bytes long, because otherwise it would be
     // possible for 256 of the same byte to be in the buffer, which would not fit
     // the counts array (max is 255).
-    // The ring buffer is initialized to contain all values from 0 to 254, which
-    // corresponds to a counts array of all ones, except for counts[255] which is zero.
-    let mut ring_buffer: [u8; 255] = std::array::from_fn(|i| i as u8);
+    // The ring buffer is initialized by repeating the four most common bytes in
+    // the first 255 bytes of the data.
+    let ring_buffer_init = calc_ring_buffer_init(&data[0 .. 255.min(data.len())]);
+    let mut ring_buffer: [u8; 255] = std::array::from_fn(|i| ring_buffer_init[i & 0x3]);
     let mut ring_buffer_idx = 0;
 
     // The number of occurances of each byte in the ring buffer at the current time.
     // These counts are used directly as the probabilities for the current byte to be encoded.
     // The sum of all counts will always be 255 (it should ideally be 256, but that is not
     // possible without increasing the size of the array type).
-    let mut counts = [1_u8; 256];
-    counts[255] = 0;
+    let mut counts = [0_u8; 256];
+    counts[ring_buffer_init[0] as usize] = 64;
+    counts[ring_buffer_init[1] as usize] = 64;
+    counts[ring_buffer_init[2] as usize] = 64;
+    counts[ring_buffer_init[3] as usize] = 63;
+
+    // The ring buffer initialization must be part of the output,
+    // since the decoder has to initialize its ring buffer with
+    // the same data as the encoder.
+    for i in ring_buffer_init {
+        out.push(i);
+    }
 
     let mut start: u64 = 0;
     let mut width: u64 = 0x1_0000_0000;
@@ -90,17 +117,28 @@ pub struct RCDecoder<'a> {
 impl<'a> RCDecoder<'a> {
 
     pub fn new<'b>(mut source: Box<dyn Decoder + 'b>) -> RCDecoder<'b> {
+        let ring_buffer_init = [
+            source.decode_u8(),
+            source.decode_u8(),
+            source.decode_u8(),
+            source.decode_u8()
+        ];
+
+        let mut counts = [0; 256];
+        counts[ring_buffer_init[0] as usize] = 64;
+        counts[ring_buffer_init[1] as usize] = 64;
+        counts[ring_buffer_init[2] as usize] = 64;
+        counts[ring_buffer_init[3] as usize] = 63;
+
         let x = ((source.decode_u8() as u64) << 24)
                 + ((source.decode_u8() as u64) << 16)
                 + ((source.decode_u8() as u64) << 8)
                 + (source.decode_u8() as u64);
 
-        let mut counts = [1; 256];
-        counts[255] = 0;
         RCDecoder {
             source,
             counts,
-            ring_buffer: std::array::from_fn(|i| i as u8),
+            ring_buffer: std::array::from_fn(|i| ring_buffer_init[i & 0x3]),
             ring_buffer_idx: 0,
             start: 0,
             width: 0x1_0000_0000,
@@ -192,25 +230,19 @@ mod tests {
 
         let encoded = encode_rc(&data);
         let expectation = &[
-            0, 17, 16, 152,
-            0, 255, 0, 0,
-            0, 0, 13, 249,
-            149, 21, 251, 66,
-            0, 0, 162, 197,
-            241, 247, 189, 96,
-            1, 194, 112, 3,
-            60, 38, 0, 101,
-            41, 118, 176, 223,
-            27, 229, 165, 44,
-            146, 19, 13, 62,
-            72, 145, 23, 173,
-            175, 72, 129, 76,
-            21, 252, 94, 40,
-            139, 132, 59, 229,
-            205, 25, 134, 53,
-            31, 97, 216, 14,
-            37, 79, 151, 19,
-            180, 72, 181, 129
+            0, 17, 85, 1,
+            10, 115, 248, 183,
+            244, 208, 233, 246,
+            143, 246, 104, 202,
+            59, 38, 2, 131,
+            66, 90, 223, 250,
+            135, 18, 227, 13,
+            12, 164, 160, 175,
+            89, 143, 71, 255,
+            118, 5, 21, 65,
+            75, 88, 204, 114,
+            117, 15, 160, 88,
+            239, 207
         ];
         assert_eq!(&encoded[..], expectation);
 

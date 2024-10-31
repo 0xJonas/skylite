@@ -2,6 +2,8 @@
 
 #[cfg(feature = "range_coding")]
 mod range_coding;
+use std::fmt::Display;
+
 #[cfg(feature = "range_coding")]
 use range_coding::*;
 
@@ -15,33 +17,7 @@ mod lz78;
 #[cfg(feature = "lz78")]
 use lz78::*;
 
-#[cfg(feature = "bit_prediction")]
-mod bit_prediction;
 // mod fibonacci_code;
-
-pub(crate) fn data_to_bits(data: &[u8]) -> Vec<bool> {
-    data.iter()
-        .flat_map(|v| (0..8)
-            .rev()
-            .map(move |bit| (v & (1 << bit)) != 0))
-        .collect()
-}
-
-pub(crate) fn bits_to_data(bits: &[bool]) -> Vec<u8> {
-    let mut bit_index = 0;
-    let mut out = Vec::new();
-    for b in bits {
-        if bit_index == 0 {
-            out.push(0);
-        }
-        *out.last_mut().unwrap() |= (*b as u8) << (7 - bit_index);
-        bit_index += 1;
-        if bit_index >= 8 {
-            bit_index = 0;
-        }
-    }
-    out
-}
 
 /// A `Decoder` decodes a compressed data stream.
 pub trait Decoder {
@@ -89,6 +65,17 @@ pub enum CompressionMethods {
     #[cfg(feature = "range_coding")] RC = 3
 }
 
+impl Display for CompressionMethods {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompressionMethods::Raw => write!(f, "Raw"),
+            #[cfg(feature = "lz77")] CompressionMethods::LZ77 => write!(f, "LZ77"),
+            #[cfg(feature = "lz78")] CompressionMethods::LZ78 => write!(f, "LZ78"),
+            #[cfg(feature = "range_coding")] CompressionMethods::RC => write!(f, "Range Coding")
+        }
+    }
+}
+
 /// Information on the invocation of a compression method.
 pub struct CompressionReport {
     /// The compression method used.
@@ -98,6 +85,16 @@ pub struct CompressionReport {
     pub compressed_size: usize,
     /// Whether this method was skipped within `compress`
     pub skipped: bool
+}
+
+impl Display for CompressionReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.skipped {
+            write!(f, "{}: <skipped>", self.method)
+        } else {
+            write!(f, "{}: Reduced to {} bytes", self.method, self.compressed_size)
+        }
+    }
 }
 
 /// Compresses the data using the list of `CompressionMethods`.

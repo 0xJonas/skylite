@@ -75,7 +75,8 @@ impl std::fmt::Display for ProcError {
 impl Into<TokenStream> for ProcError {
     fn into(self) -> TokenStream {
         vec![
-            TokenTree::Ident(Ident::new("compile_error!", Span::call_site())),
+            TokenTree::Ident(Ident::new("compile_error", Span::call_site())),
+            TokenTree::Punct(Punct::new('!', Spacing::Alone)),
             TokenTree::Group(Group::new(proc_macro2::Delimiter::Parenthesis, TokenTree::Literal(Literal::string(&self.to_string())).into()))
         ].into_iter().collect()
     }
@@ -226,7 +227,7 @@ fn compressed2(stream: TokenStream) -> TokenStream {
 /// ```rust
 /// # #[macro_use] extern crate skylite_compress_proc;
 /// # use skylite_compress_proc::compressed;
-/// const MY_DATA: &[u8] = &compressed!([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3], [lz77, rc], "test");
+/// const MY_DATA: &[u8] = &compressed!([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3], [lz77, range_coding], "test");
 /// ```
 #[proc_macro]
 pub fn compressed(stream: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -243,7 +244,7 @@ mod tests {
 
     #[test]
     fn compression_success() {
-        let res = compressed2(quote!( [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3], [lz77, rc], "test" ));
-        assert_eq!(res.to_string(), "[99u8 , 234u8 , 53u8 , 29u8 , 44u8 , 57u8 , 90u8 , 89u8 , 54u8 , 6u8 , 88u8 , 96u8 ,]");
+        let res = compressed2(quote!( [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3], [lz77, range_coding], "test" ));
+        assert_eq!(res.to_string(), "[3u8 , 3u8 , 8u8 , 1u8 , 2u8 , 32u8 , 199u8 , 114u8 , 143u8 , 244u8 , 64u8 , 75u8 , 202u8 , 53u8 , 81u8 ,]");
     }
 }
