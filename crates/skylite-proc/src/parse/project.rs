@@ -4,11 +4,14 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 use crate::parse::guile::{scm_is_false, scm_list_p, SCM};
 use crate::parse::scheme_util::{
     CXROp::{CAR, CDR},
-    {assq_str, conv_string, conv_symbol, cxr, eval_str, iter_list, parse_typed_value, with_guile, TypedValue}
+    {assq_str, parse_string, parse_symbol, cxr, eval_str, iter_list, with_guile}
 };
 use crate::parse::util::{change_case, IdentCase};
 use crate::SkyliteProcError;
 use glob::{GlobError, Pattern};
+
+use super::values::{parse_type, parse_typed_value, TypedValue};
+
 
 fn normalize_glob(glob: &str, base_dir: &Path) -> String {
     if Path::new(&glob).is_relative() {
@@ -34,7 +37,7 @@ impl AssetGroup {
         let mut globs: Vec<String> = Vec::new();
         unsafe {
             for g in iter_list(list)? {
-                let glob = normalize_glob(&conv_string(g)?, base_dir);
+                let glob = normalize_glob(&parse_string(g)?, base_dir);
                 Pattern::new(&glob).map_err(|err| SkyliteProcError::DataError(format!("Error parsing glob: {}", err)))?;
                 globs.push(glob);
             }
@@ -191,10 +194,11 @@ pub(crate) struct SaveItem {
 impl SaveItem {
     fn from_scheme(definition: SCM) -> Result<SaveItem, SkyliteProcError> {
         unsafe {
+            let typename = parse_type(cxr(definition, &[CDR, CAR])?)?;
             Ok(SaveItem {
-                name: conv_symbol(cxr(definition, &[CAR])?)?,
+                name: parse_symbol(cxr(definition, &[CAR])?)?,
                 data: parse_typed_value(
-                    cxr(definition, &[CDR, CAR])?,
+                    &typename,
                     cxr(definition, &[CDR, CDR, CAR])?
                 )?
             })
@@ -215,7 +219,7 @@ pub(crate) struct SkyliteProject {
 impl SkyliteProject {
     fn from_scheme(definition: SCM, project_root: &Path) -> Result<SkyliteProject, SkyliteProcError> {
         unsafe {
-            let name = conv_symbol(
+            let name = parse_symbol(
                 assq_str("name", definition)?.ok_or(SkyliteProcError::DataError("Missing required field 'name'".to_owned()))?
             )?;
 
@@ -225,19 +229,21 @@ impl SkyliteProject {
                 create_default_asset_groups(&project_root)
             };
 
-            let mut save_data = Vec::new();
-            if let Some(list) = assq_str("save-data", definition)? {
-                for item in iter_list(list)? {
-                    save_data.push(SaveItem::from_scheme(item)?)
-                }
-            }
+            let save_data = if let Some(list) = assq_str("save-data", definition)? {
+                iter_list(list)?
+                    .map(SaveItem::from_scheme)
+                    .collect::<Result<Vec<SaveItem>, SkyliteProcError>>()?
+            } else {
+                Vec::new()
+            };
 
-            let mut tile_types = Vec::new();
-            if let Some(list) = assq_str("tile-types", definition)? {
-                for item in iter_list(list)? {
-                    tile_types.push(conv_symbol(item)?)
-                }
-            }
+            let tile_types = if let Some(list) = assq_str("tile-types", definition)? {
+                iter_list(list)?
+                    .map(|t| parse_symbol(t))
+                    .collect::<Result<Vec<String>, SkyliteProcError>>()?
+            } else {
+                Vec::new()
+            };
 
             if tile_types.len() == 0 {
                 return Err(SkyliteProcError::DataError("At least one tile-type must be defined.".to_owned()))
@@ -280,7 +286,7 @@ impl SkyliteProject {
 mod tests {
     use std::{fs::{create_dir, remove_dir_all, File}, path::PathBuf};
 
-    use crate::parse::{project::{asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem}, scheme_util::{eval_str, with_guile, TypedValue}};
+    use crate::parse::{project::{asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem}, scheme_util::{eval_str, with_guile}, values::TypedValue};
 
     use super::SkyliteProject;
 

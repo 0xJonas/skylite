@@ -4,7 +4,7 @@ use syn::{Item, ItemFn, ItemMod, Meta, Path as SynPath};
 
 use crate::{parse::{project::SkyliteProject, util::{change_case, IdentCase}}, SkyliteProcError};
 
-use super::actor::generate_actors_type;
+use super::actors::generate_actors_type;
 
 fn get_annotated_function<'a>(items: &'a [Item], attribute: &str) -> Option<&'a ItemFn> {
     let attribute_path = syn::parse_str::<SynPath>(attribute).unwrap();
