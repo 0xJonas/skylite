@@ -30,7 +30,7 @@ deserialize_for_primitive!(i32, 4);
 deserialize_for_primitive!(f32, 4);
 deserialize_for_primitive!(f64, 8);
 
-fn read_varint(decoder: &mut dyn Decoder) -> usize {
+pub fn read_varint(decoder: &mut dyn Decoder) -> usize {
     let mut out = 0;
     loop {
         let byte = decoder.decode_u8();

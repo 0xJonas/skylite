@@ -1,7 +1,7 @@
 use std::{path::PathBuf, str::FromStr};
 
 use quote::{quote, ToTokens};
-use parse::guile::SCM;
+use parse::{guile::SCM, project::SkyliteProjectStub};
 use parse::scheme_util::form_to_string;
 use proc_macro2::TokenStream;
 use parse::project::SkyliteProject;
@@ -40,7 +40,9 @@ impl Into<TokenStream> for SkyliteProcError {
 
 struct SkyliteProjectArgs {
     path: PathBuf,
-    target: SynPath
+    target: SynPath,
+    #[cfg(debug_assertions)]
+    debug_out: Option<PathBuf>
 }
 
 fn parse_skylite_project_args(args_raw: TokenStream) -> Result<SkyliteProjectArgs, SkyliteProcError> {
@@ -76,7 +78,32 @@ fn parse_skylite_project_args(args_raw: TokenStream) -> Result<SkyliteProjectArg
         _ => return Err(SkyliteProcError::SyntaxError("Expected target type".to_owned()))
     };
 
-    Ok(SkyliteProjectArgs { path: base_dir.join(relative_path), target: target.clone() })
+    #[cfg(debug_assertions)]
+    {
+        let debug_out = match iter.next() {
+            Some(
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(lit),
+                    ..
+                }
+            )) => {
+                let debug_out_str = lit.value();
+                let relative_path = match PathBuf::from_str(&debug_out_str) {
+                    Ok(p) => p,
+                    Err(e) => return Err(SkyliteProcError::SyntaxError("Debug path invalid".to_owned() + &e.to_string()))
+                };
+                Some(base_dir.join(relative_path))
+            },
+            Some(_) => return Err(SkyliteProcError::SyntaxError("Invalid value for debug_out".to_owned())),
+            None => None
+        };
+        Ok(SkyliteProjectArgs { path: base_dir.join(relative_path), target: target.clone(), debug_out })
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        Ok(SkyliteProjectArgs { path: base_dir.join(relative_path), target: target.clone() })
+    }
 }
 
 fn get_default_imports() -> Item {
@@ -99,7 +126,11 @@ fn skylite_project_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenSt
         Err(err) => return err.into()
     };
 
-    let project = match SkyliteProject::from_file(&args.path) {
+    let project_stub = match SkyliteProjectStub::from_file(&args.path) {
+        Ok(stub) => stub,
+        Err(err) => return err.into()
+    };
+    let project = match SkyliteProject::from_stub(project_stub) {
         Ok(project) => project,
         Err(err) => return err.into()
     };
@@ -112,7 +143,16 @@ fn skylite_project_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenSt
     body_parsed.content.as_mut().unwrap().1.insert(0, get_default_imports());
     body_parsed.content.as_mut().unwrap().1.append(&mut items);
 
-    body_parsed.into_token_stream()
+    let out = body_parsed.into_token_stream();
+
+    #[cfg(debug_assertions)]
+    {
+        if let Some(debug_out) = args.debug_out {
+            std::fs::write(debug_out, out.to_string()).unwrap();
+        }
+    }
+
+    out
 }
 
 #[proc_macro_attribute]

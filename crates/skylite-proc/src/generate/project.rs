@@ -4,7 +4,7 @@ use syn::{Item, ItemFn, ItemMod, Meta, Path as SynPath};
 
 use crate::{parse::{project::SkyliteProject, util::{change_case, IdentCase}}, SkyliteProcError};
 
-use super::actors::generate_actors_type;
+use super::actors::{actor_type_name, generate_actors_type};
 
 fn get_annotated_function<'a>(items: &'a [Item], attribute: &str) -> Option<&'a ItemFn> {
     let attribute_path = syn::parse_str::<SynPath>(attribute).unwrap();
@@ -36,10 +36,6 @@ fn generate_special_function_call(items: &[Item], attribute: &str, args: TokenSt
 
 fn tile_type_name(project_name: &str) -> Ident {
     format_ident!("{}Tiles", change_case(project_name, IdentCase::UpperCamelCase))
-}
-
-pub(super) fn actor_type_name(project_name: &str) -> Ident {
-    format_ident!("{}Actors", change_case(project_name, IdentCase::UpperCamelCase))
 }
 
 fn generate_tile_type_enum<S: AsRef<str>>(project_name: &str, tile_types: &[S]) -> TokenStream {
@@ -83,7 +79,7 @@ fn generate_project_new_method(project_ident: &Ident, target_type: &TokenStream,
     }
 }
 
-fn generate_project_implementation(project_name: &str, target_type: &TokenStream, body: &ItemMod) -> Result<TokenStream, SkyliteProcError> {
+fn generate_project_implementation(project_name: &str, target_type: &TokenStream, body: &ItemMod) -> TokenStream {
     let project_ident = Ident::new(&change_case(project_name, IdentCase::UpperCamelCase), Span::call_site());
     let tile_type_name = tile_type_name(project_name);
     let actor_type_name = actor_type_name(project_name);
@@ -98,7 +94,7 @@ fn generate_project_implementation(project_name: &str, target_type: &TokenStream
 
     let new_method = generate_project_new_method(&project_ident, target_type, &init);
 
-    Ok(quote! {
+    quote! {
         impl skylite_core::SkyliteProject for #project_ident {
             type Target = #target_type;
             type TileType = #tile_type_name;
@@ -118,7 +114,7 @@ fn generate_project_implementation(project_name: &str, target_type: &TokenStream
                 #post_update
             }
         }
-    })
+    }
 }
 
 
@@ -127,9 +123,9 @@ impl SkyliteProject {
     pub(crate) fn generate(&self, target_type: &TokenStream, body: &ItemMod) -> Result<Vec<Item>, SkyliteProcError> {
         Ok(vec![
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
-            Item::Verbatim(generate_actors_type(&self.name, &self.assets.actors)),
+            Item::Verbatim(generate_actors_type(&self.name, &self.actors)?),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
-            Item::Verbatim(generate_project_implementation(&self.name, &target_type, body)?)
+            Item::Verbatim(generate_project_implementation(&self.name, &target_type, body))
         ])
     }
 }
@@ -154,7 +150,7 @@ mod tests {
                 #[skylite_proc::post_render]
                 fn post_render(project: &mut skylite_core::DrawContext<'static, Test1>) {}
             }
-        }).unwrap();
+        });
         let expectation = concat! {
             "impl skylite_core :: SkyliteProject for Test1 { ",
                 "type Target = MockTarget ; ",

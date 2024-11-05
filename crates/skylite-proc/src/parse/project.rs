@@ -10,6 +10,8 @@ use crate::parse::util::{change_case, IdentCase};
 use crate::SkyliteProcError;
 use glob::{GlobError, Pattern};
 
+use super::actors::Actor;
+use super::scenes::Scene;
 use super::values::{parse_type, parse_typed_value, TypedValue};
 
 
@@ -206,18 +208,19 @@ impl SaveItem {
     }
 }
 
-/// Main type for managing the asset files and code generation
-/// of a Skylite project.
+// Early form of `SkyliteProject`, where the assets are not yet
+// resolved and parsed. Used for contexts where the full representation
+// of the project is not required, e.g. actor_definition and `scene_definition`.
 #[derive(PartialEq, Debug)]
-pub(crate) struct SkyliteProject {
+pub(crate) struct SkyliteProjectStub {
     pub name: String,
     pub assets: AssetGroups,
     pub save_data: Vec<SaveItem>,
     pub tile_types: Vec<String>
 }
 
-impl SkyliteProject {
-    fn from_scheme(definition: SCM, project_root: &Path) -> Result<SkyliteProject, SkyliteProcError> {
+impl SkyliteProjectStub {
+    fn from_scheme(definition: SCM, project_root: &Path) -> Result<SkyliteProjectStub, SkyliteProcError> {
         unsafe {
             let name = parse_symbol(
                 assq_str("name", definition)?.ok_or(SkyliteProcError::DataError("Missing required field 'name'".to_owned()))?
@@ -249,7 +252,7 @@ impl SkyliteProject {
                 return Err(SkyliteProcError::DataError("At least one tile-type must be defined.".to_owned()))
             }
 
-            Ok(SkyliteProject {
+            Ok(SkyliteProjectStub {
                 name,
                 assets,
                 save_data,
@@ -261,12 +264,12 @@ impl SkyliteProject {
     /// Loads a project from a project definition file.
     ///
     /// The file at the given `Path` will be evaluated as a Scheme file, and the
-    /// resulting form will be parsed into an instance of `SkyliteProject`.
-    pub(crate) fn from_file(path: &Path) -> Result<SkyliteProject, SkyliteProcError> {
+    /// resulting form will be parsed into an instance of `SkyliteProjectStub`.
+    pub(crate) fn from_file(path: &Path) -> Result<SkyliteProjectStub, SkyliteProcError> {
         // Since we are not actually accessing anything from this signature from C,
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
-        extern "C" fn from_file_guile(path: &Path) -> Result<SkyliteProject, SkyliteProcError> {
+        extern "C" fn from_file_guile(path: &Path) -> Result<SkyliteProjectStub, SkyliteProcError> {
             let resolved_path = path.canonicalize().map_err(|e| SkyliteProcError::OtherError(format!("Error resolving project path: {}", e)))?;
             let definition_raw = read_to_string(path).map_err(|e| SkyliteProcError::OtherError(format!("Error reading project definition: {}", e)))?;
             let definition = unsafe {
@@ -274,12 +277,46 @@ impl SkyliteProject {
             };
 
             let project_root = resolved_path.parent().unwrap();
-            SkyliteProject::from_scheme(definition, project_root)
+            SkyliteProjectStub::from_scheme(definition, project_root)
         }
         with_guile(from_file_guile, path)
     }
+}
 
+/// Main type for managing the asset files and code generation
+/// of a Skylite project.
+pub(crate) struct SkyliteProject {
+    pub name: String,
+    pub actors: Vec<Actor>,
+    pub scenes: Vec<Scene>,
+    pub save_data: Vec<SaveItem>,
+    pub tile_types: Vec<String>
+}
 
+impl SkyliteProject {
+    pub(crate) fn from_stub(stub: SkyliteProjectStub) -> Result<SkyliteProject, SkyliteProcError> {
+        let actors = stub.assets.actors.into_iter()
+            .map(|path_res| {
+                let path = path_res.map_err(|err| SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string())))?;
+                Actor::from_file(path.as_path())
+            })
+            .collect::<Result<Vec<Actor>, SkyliteProcError>>()?;
+
+        let scenes = stub.assets.scenes.into_iter()
+            .map(|path_res| {
+                let path = path_res.map_err(|err| SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string())))?;
+                Scene::from_file(path.as_path(), &actors)
+            })
+            .collect::<Result<Vec<Scene>, SkyliteProcError>>()?;
+
+        Ok(SkyliteProject {
+            name: stub.name,
+            actors,
+            scenes,
+            save_data: stub.save_data,
+            tile_types: stub.tile_types
+        })
+    }
 }
 
 #[cfg(test)]
@@ -288,7 +325,7 @@ mod tests {
 
     use crate::parse::{project::{asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem}, scheme_util::{eval_str, with_guile}, values::TypedValue};
 
-    use super::SkyliteProject;
+    use super::SkyliteProjectStub;
 
     extern "C" fn test_project_parsing_impl(_: &()) {
         unsafe {
@@ -301,8 +338,8 @@ mod tests {
                         (val2 u8 5)))
                      (tile-types (solid semi-solid non-solid)))"#).unwrap();
             let project_root = PathBuf::new();
-            let project = SkyliteProject::from_scheme(definition, &project_root).unwrap();
-            assert_eq!(project, SkyliteProject {
+            let project = SkyliteProjectStub::from_scheme(definition, &project_root).unwrap();
+            assert_eq!(project, SkyliteProjectStub {
                 name: "TestProject".to_owned(),
                 assets: AssetGroups {
                     actors: AssetGroup {

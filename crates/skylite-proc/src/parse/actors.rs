@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fs::read_to_string, path::Path};
 
-use crate::{parse::scheme_util::parse_symbol, SkyliteProcError};
+use crate::{parse::{scheme_util::{eval_str, parse_symbol, with_guile}, util::{change_case, IdentCase}}, SkyliteProcError};
 
 use super::{guile::{scm_car, scm_cdr, scm_is_false, scm_is_null, scm_list_p, scm_pair_p, SCM}, scheme_util::{assq_str, form_to_string, iter_list, parse_string}, values::{parse_argument_list, parse_variable_definition, TypedValue, Variable}};
 
@@ -76,22 +76,15 @@ pub(crate) struct Actor {
 }
 
 impl Actor {
-    pub fn from_scheme(def: SCM) -> Result<Actor, SkyliteProcError> {
+    pub fn from_scheme(def: SCM, name: &str) -> Result<Actor, SkyliteProcError> {
         unsafe {
             if scm_is_false(scm_pair_p(def)) {
                 return Err(SkyliteProcError::DataError(format!("Expected list for action, got {}", form_to_string(def))));
             }
 
-            let maybe_name = assq_str("name", def)?;
             let maybe_parameters = assq_str("parameters", def)?;
             let maybe_actions = assq_str("actions", def)?;
             let maybe_initial_action = assq_str("initial-action", def)?;
-
-            let name = if let Some(n) = maybe_name {
-                parse_symbol(n)?
-            } else {
-                return Err(SkyliteProcError::DataError(format!("Missing required field 'name'")));
-            };
 
             let parameters = if let Some(ps) = maybe_parameters {
                 iter_list(ps)?
@@ -120,9 +113,25 @@ impl Actor {
             };
 
             Ok(Actor {
-                name, parameters, actions, initial_action
+                name: name.to_owned(), parameters, actions, initial_action
             })
         }
+    }
+
+    pub(crate) fn from_file(path: &Path) -> Result<Actor, SkyliteProcError> {
+        // Since we are not actually accessing anything from this signature from C,
+        // we can get away with ignoring the missing C representations.
+        #[allow(improper_ctypes_definitions)]
+        extern "C" fn from_file_guile(path: &Path) -> Result<Actor, SkyliteProcError> {
+            let definition_raw = read_to_string(path).map_err(|e| SkyliteProcError::OtherError(format!("Error reading project definition: {}", e)))?;
+            let definition = unsafe {
+                eval_str(&definition_raw)?
+            };
+            let name = change_case(&path.file_stem().unwrap().to_string_lossy(), IdentCase::UpperCamelCase);
+            Actor::from_scheme(definition, &name)
+        }
+
+        with_guile(from_file_guile, path)
     }
 }
 
@@ -138,14 +147,13 @@ mod tests {
     extern "C" fn test_parse_actor_impl(_: &()) {
         unsafe {
             let def = eval_str("
-                '((name . TestActor)
-                  (parameters . ((x u16) (y u16)))
+                '((parameters . ((x u16) (y u16)))
                   (actions .
                     ((action1 ((dx u8) (dy u8)) \"action 1\")
                      (action2 ((val u8)) \"test\")
                      (action3)))
                    (initial-action . (action2 5)))").unwrap();
-            let actor = Actor::from_scheme(def).unwrap();
+            let actor = Actor::from_scheme(def, "TestActor").unwrap();
             assert_eq!(actor, Actor {
                 name: "TestActor".to_owned(),
                 parameters: vec![

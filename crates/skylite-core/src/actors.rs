@@ -27,7 +27,7 @@ impl<T: TypeId> InstanceId for T {
 ///
 /// Defines the base interface for actors, which is shared
 /// among [`Actor`] and [`AnyActor`].
-pub trait ActorBase: TypeId + InstanceId {
+pub trait ActorBase: InstanceId {
     type P: SkyliteProject;
 
     #[doc(hidden)] fn _private_decode(decoder: &mut dyn Decoder) -> Self;
@@ -75,7 +75,7 @@ pub trait ActorAction {
 /// by its own dedicated update method, which is called exactly once per `Scene`
 /// update (and, by extension, once per project update). An actor must perform
 /// exactly one action at a time.
-pub trait Actor: ActorBase {
+pub trait Actor: ActorBase + TypeId {
     type Action: ActorAction;
 
     fn set_action(&mut self, action: Self::Action);

@@ -1,6 +1,6 @@
 use skylite_compress::Decoder;
 
-use crate::{actor::{Actor, AnyActor, InstanceId, TypeId}, DrawContext, SkyliteProject};
+use crate::{actors::{Actor, AnyActor, InstanceId, TypeId}, DrawContext, SkyliteProject};
 
 /// A `Scene` is a single screen or context of a project, e.g. an individual level or menu.
 /// There are two lists of [`Actors`][Actor] which make up a `Scene`:
@@ -88,7 +88,7 @@ fn apply_to_actors<P: SkyliteProject, A: Actor, F: Fn(&mut A)>(scene: &mut dyn S
 
 #[doc(hidden)]
 pub mod _private {
-    use crate::{actor::ActorBase, DrawContext, SkyliteProject};
+    use crate::{actors::ActorBase, DrawContext, SkyliteProject};
 
     use super::Scene;
 

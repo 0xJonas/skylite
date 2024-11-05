@@ -1,8 +1,8 @@
-use actor::AnyActor;
+use actors::AnyActor;
 
 pub mod decode;
 pub mod scene;
-pub mod actor;
+pub mod actors;
 
 /// Defines which functions a backend must provide to work with Skylite.
 pub trait SkyliteTarget {
