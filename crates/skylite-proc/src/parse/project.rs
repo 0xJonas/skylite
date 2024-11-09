@@ -47,7 +47,7 @@ impl AssetGroup {
         Ok(AssetGroup { globs })
     }
 
-    /// Returns a unique id for a given asset name. The name of an asset is the
+    /// Returns a unique id and the file path for a given asset name. The name of an asset is the
     /// last component of its filename without the file extension. The name is also
     /// normalized to UpperCamelCase. For example, the name of the asset at
     /// `./tilesets/town_1.scm` would be `Town1`.
@@ -57,7 +57,7 @@ impl AssetGroup {
     ///
     /// The ids can be used to reference a particular asset in the encoded data
     /// of other assets.
-    pub(crate) fn calc_id_for_asset(&self, name: &str) -> Result<usize, SkyliteProcError> {
+    pub(crate) fn find_asset(&self, name: &str) -> Result<(usize, PathBuf), SkyliteProcError> {
         let name_camel_case = change_case(name, IdentCase::UpperCamelCase);
 
         let mut out: Option<(usize, PathBuf)> = None;
@@ -78,8 +78,8 @@ impl AssetGroup {
             out = Some((idx, entry));
         }
 
-        if let Some((idx, _)) = out {
-            Ok(idx)
+        if let Some(id_and_path) = out {
+            Ok(id_and_path)
         } else {
             Err(SkyliteProcError::DataError(format!("Name not found: {}", name)))
         }
@@ -390,16 +390,16 @@ mod tests {
         let asset_group1 = asset_group_from_single("test_?.scm", &test_dir);
 
         // Test different casings
-        assert_eq!(asset_group1.calc_id_for_asset("test_1").unwrap(), 0);
-        assert_eq!(asset_group1.calc_id_for_asset("TEST_1").unwrap(), 0);
-        assert_eq!(asset_group1.calc_id_for_asset("test-2").unwrap(), 1);
+        assert_eq!(asset_group1.find_asset("test_1").unwrap().0, 0);
+        assert_eq!(asset_group1.find_asset("TEST_1").unwrap().0, 0);
+        assert_eq!(asset_group1.find_asset("test-2").unwrap().0, 1);
 
         // Test name not matched by glob
-        assert!(asset_group1.calc_id_for_asset("asset").is_err());
+        assert!(asset_group1.find_asset("asset").is_err());
 
         // Test ambiguous name
         let asset_group2 = asset_group_from_single("**/asset.scm", &test_dir);
-        assert!(asset_group2.calc_id_for_asset("asset").is_err());
+        assert!(asset_group2.find_asset("asset").is_err());
 
         remove_dir_all(test_dir).unwrap();
     }

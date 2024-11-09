@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::read_to_string, path::Path};
+use std::{fs::read_to_string, path::Path};
 
 use crate::{parse::{scheme_util::{eval_str, parse_symbol, with_guile}, util::{change_case, IdentCase}}, SkyliteProcError};
 
@@ -6,6 +6,7 @@ use super::{guile::{scm_car, scm_cdr, scm_is_false, scm_is_null, scm_list_p, scm
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct Action {
+    pub name: String,
     pub params: Vec<Variable>,
     pub description: Option<String>
 }
@@ -13,27 +14,30 @@ pub(crate) struct Action {
 impl Action {
     pub(crate) fn from_scheme(def: SCM) -> Result<Action, SkyliteProcError> {
         unsafe {
-            if scm_is_null(def) {
-                return Ok(Action { params: vec![], description: None });
-            }
-
-            if scm_is_false(scm_list_p(def)) {
+            if scm_is_false(scm_list_p(def)) && !scm_is_null(def) {
                 return Err(SkyliteProcError::DataError(format!("Expected list for action definition, got {}", form_to_string(def))));
             }
 
-            let params = iter_list(scm_car(def))?
+            let name = parse_symbol(scm_car(def))?;
+
+            let tail = scm_cdr(def);
+            if scm_is_null(tail) {
+                return Ok(Action { name, params: Vec::new(), description: None });
+            }
+
+            let params = iter_list(scm_car(tail))?
                 .map(|p| parse_variable_definition(p))
                 .collect::<Result<Vec<Variable>, SkyliteProcError>>()?;
 
-            let tail = scm_cdr(def);
-            let description = if scm_is_null(tail) {
-                None
-            } else {
-                Some(parse_string(scm_car(tail))?)
-            };
+            let tail = scm_cdr(tail);
+            if scm_is_null(tail) {
+                return Ok(Action { name, params, description: None });
+            }
+
+            let description = Some(parse_string(scm_car(tail))?);
 
             Ok(Action {
-                params, description
+                name, params, description
             })
         }
     }
@@ -46,14 +50,14 @@ pub(crate) struct ActionInstance {
 }
 
 impl ActionInstance {
-    pub fn from_scheme(def: SCM, actions: &HashMap<String, Action>) -> Result<ActionInstance, SkyliteProcError> {
+    pub fn from_scheme(def: SCM, actions: &[Action]) -> Result<ActionInstance, SkyliteProcError> {
         unsafe {
-            if scm_is_false(scm_pair_p(def)) {
+            if scm_is_false(scm_pair_p(def)) && !scm_is_null(def) {
                 return Err(SkyliteProcError::DataError(format!("Expected list for action instantiation, got {}", form_to_string(def))));
             }
 
             let name = parse_symbol(scm_car(def))?;
-            let action = match actions.get(&name) {
+            let action = match actions.iter().find(|a| a.name == name) {
                 Some(a) => a,
                 None => return Err(SkyliteProcError::DataError(format!("No action {} found", name)))
             };
@@ -71,15 +75,15 @@ impl ActionInstance {
 pub(crate) struct Actor {
     pub name: String,
     pub parameters: Vec<Variable>,
-    pub actions: HashMap<String, Action>,
+    pub actions: Vec<Action>,
     pub initial_action: ActionInstance
 }
 
 impl Actor {
     pub fn from_scheme(def: SCM, name: &str) -> Result<Actor, SkyliteProcError> {
         unsafe {
-            if scm_is_false(scm_pair_p(def)) {
-                return Err(SkyliteProcError::DataError(format!("Expected list for action, got {}", form_to_string(def))));
+            if scm_is_false(scm_pair_p(def)) && !scm_is_null(def) {
+                return Err(SkyliteProcError::DataError(format!("Expected list for actor, got {}", form_to_string(def))));
             }
 
             let maybe_parameters = assq_str("parameters", def)?;
@@ -99,9 +103,9 @@ impl Actor {
                     .map(|a| if scm_is_false(scm_pair_p(a)) {
                         Err(SkyliteProcError::DataError(format!("Expected (name params [description]) for action definition, got {}", form_to_string(a))))
                     } else {
-                        Ok((parse_symbol(scm_car(a))?, Action::from_scheme(scm_cdr(a))?))
+                        Action::from_scheme(a)
                     })
-                    .collect::<Result<HashMap<String, Action>, SkyliteProcError>>()?
+                    .collect::<Result<Vec<Action>, SkyliteProcError>>()?
             } else {
                 return Err(SkyliteProcError::DataError(format!("Actor must contain at least one action")));
             };
@@ -137,8 +141,6 @@ impl Actor {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use crate::parse::{actors::{Action, ActionInstance, TypedValue}, scheme_util::{eval_str, with_guile}, values::{Type, Variable}};
 
     use super::Actor;
@@ -160,25 +162,28 @@ mod tests {
                     Variable { name: "x".to_owned(), typename: Type::U16, documentation: None, default: None },
                     Variable { name: "y".to_owned(), typename: Type::U16, documentation: None, default: None },
                 ],
-                actions: HashMap::from([
-                    ("action1".to_owned(), Action {
+                actions: vec![
+                    Action {
+                        name: "action1".to_owned(),
                         params: vec![
                             Variable { name: "dx".to_owned(), typename: Type::U8, documentation: None, default: None },
                             Variable { name: "dy".to_owned(), typename: Type::U8, documentation: None, default: None }
                         ],
                         description: Some("action 1".to_owned())
-                    }),
-                    ("action2".to_owned(), Action {
+                    },
+                    Action {
+                        name: "action2".to_owned(),
                         params: vec![
                             Variable { name: "val".to_owned(), typename: Type::U8, documentation: None, default: None }
                         ],
                         description: Some("test".to_owned())
-                    }),
-                    ("action3".to_owned(), Action {
+                    },
+                    Action {
+                        name: "action3".to_owned(),
                         params: vec![],
                         description: None
-                    })
-                ]),
+                    }
+                ],
                 initial_action: ActionInstance { name: "action2".to_owned(), args: vec![TypedValue::U8(5)] }
             });
         }

@@ -1,38 +1,10 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
-use syn::{Item, ItemFn, ItemMod, Meta, Path as SynPath};
+use syn::{Item, ItemFn, ItemMod};
 
-use crate::{parse::{project::SkyliteProject, util::{change_case, IdentCase}}, SkyliteProcError};
+use crate::{generate::util::get_annotated_function, parse::{project::SkyliteProject, util::{change_case, IdentCase}}, SkyliteProcError};
 
-use super::actors::{actor_type_name, generate_actors_type};
-
-fn get_annotated_function<'a>(items: &'a [Item], attribute: &str) -> Option<&'a ItemFn> {
-    let attribute_path = syn::parse_str::<SynPath>(attribute).unwrap();
-    items.iter()
-        // Find item with matching attribute
-        .find(|item| if let Item::Fn(fun) = item {
-            fun.attrs.iter()
-                .any(|attr| if let Meta::Path(ref p) = attr.meta { *p == attribute_path } else { false })
-        } else {
-            false
-        })
-        // Unpack generic item as function item
-        .map(|item| if let Item::Fn(fun) = item {
-            fun
-        } else {
-            panic!("Expected function item")
-        })
-}
-
-fn generate_special_function_call(items: &[Item], attribute: &str, args: TokenStream) -> TokenStream {
-    match get_annotated_function(items, attribute) {
-        Some(fun) => {
-            let ident = &fun.sig.ident;
-            quote! { #ident(#args); }
-        },
-        None => TokenStream::new()
-    }
-}
+use super::actors::{any_actor_type_name, generate_actors_type};
 
 fn tile_type_name(project_name: &str) -> Ident {
     format_ident!("{}Tiles", change_case(project_name, IdentCase::UpperCamelCase))
@@ -80,17 +52,38 @@ fn generate_project_new_method(project_ident: &Ident, target_type: &TokenStream,
 }
 
 fn generate_project_implementation(project_name: &str, target_type: &TokenStream, body: &ItemMod) -> TokenStream {
+    fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
+
     let project_ident = Ident::new(&change_case(project_name, IdentCase::UpperCamelCase), Span::call_site());
     let tile_type_name = tile_type_name(project_name);
-    let actor_type_name = actor_type_name(project_name);
+    let actor_type_name = any_actor_type_name(project_name);
 
     let items = &body.content.as_ref().unwrap().1;
 
-    let init = generate_special_function_call(items, "skylite_proc::init", quote!(&mut out));
-    let pre_update = generate_special_function_call(items, "skylite_proc::pre_update", quote!(self));
-    let post_update = generate_special_function_call(items, "skylite_proc::post_update", quote!(self));
-    let pre_render = generate_special_function_call(items, "skylite_proc::pre_render", quote!(&mut self.draw_context));
-    let post_render = generate_special_function_call(items, "skylite_proc::post_render", quote!(&mut self.draw_context));
+    let init = get_annotated_function(items, "skylite_proc::init")
+        .map(get_name)
+        .map(|name| quote!(#name(&mut out);))
+        .unwrap_or(TokenStream::new());
+
+    let pre_update = get_annotated_function(items, "skylite_proc::pre_update")
+        .map(get_name)
+        .map(|name| quote!(#name(self);))
+        .unwrap_or(TokenStream::new());
+
+    let post_update = get_annotated_function(items, "skylite_proc::post_update")
+        .map(get_name)
+        .map(|name| quote!(#name(self);))
+        .unwrap_or(TokenStream::new());
+
+    let pre_render = get_annotated_function(items, "skylite_proc::pre_render")
+        .map(get_name)
+        .map(|name| quote!(#name(&mut self.draw_context);))
+        .unwrap_or(TokenStream::new());
+
+    let post_render = get_annotated_function(items, "skylite_proc::post_render")
+        .map(get_name)
+        .map(|name| quote!(#name(&mut self.draw_context);))
+        .unwrap_or(TokenStream::new());
 
     let new_method = generate_project_new_method(&project_ident, target_type, &init);
 
@@ -151,37 +144,35 @@ mod tests {
                 fn post_render(project: &mut skylite_core::DrawContext<'static, Test1>) {}
             }
         });
-        let expectation = concat! {
-            "impl skylite_core :: SkyliteProject for Test1 { ",
-                "type Target = MockTarget ; ",
-                "type TileType = Test1Tiles ; ",
-                "type Actors = Test1Actors ; ",
+        let expectation = quote! {
+            impl skylite_core::SkyliteProject for Test1 {
+                type Target = MockTarget;
+                type TileType = Test1Tiles;
+                type Actors = Test1Actors;
 
-                "fn new (target : MockTarget) -> Test1 { ",
-                    "let (w , h) = target . get_screen_size () ; ",
-                    "let mut out = Test1 { ",
-                        "draw_context : skylite_core :: DrawContext { ",
-                            "target , ",
-                            "graphics_cache : Vec :: new () , ",
-                            "focus_x : w as i32 / 2 , ",
-                            "focus_y : h as i32 / 2 ",
-                        "} ",
-                    "} ; ",
+                fn new(target: MockTarget) -> Test1 {
+                    let (w, h) = target.get_screen_size();
+                    let mut out = Test1 {
+                        draw_context: skylite_core::DrawContext {
+                            target,
+                            graphics_cache: Vec::new(),
+                            focus_x: w as i32 / 2,
+                            focus_y: h as i32 / 2
+                        }
+                    };
+                    init(&mut out);
+                    out
+                }
 
-                    "init (& mut out) ; ",
-                    "out ",
-                "} ",
+                fn render(&self) {
+                    post_render(&mut self.draw_context);
+                }
 
-                "fn render (& self) { ",
-                    "post_render (& mut self . draw_context) ; ",
-                "} ",
-
-                "fn update (& mut self) { ",
-                    "pre_update (self) ; ",
-                "} ",
-
-            "}"
+                fn update(&mut self) {
+                    pre_update(self);
+                }
+            }
         };
-        assert_eq!(actual.to_string(), expectation);
+        assert_eq!(actual.to_string(), expectation.to_string());
     }
 }
