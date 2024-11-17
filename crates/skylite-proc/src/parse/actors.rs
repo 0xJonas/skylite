@@ -131,7 +131,7 @@ impl Actor {
             let definition = unsafe {
                 eval_str(&definition_raw)?
             };
-            let name = change_case(&path.file_stem().unwrap().to_string_lossy(), IdentCase::UpperCamelCase);
+            let name = &path.file_stem().unwrap().to_string_lossy();
             Actor::from_scheme(definition, &name)
         }
 

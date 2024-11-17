@@ -17,7 +17,7 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
     let type_name = any_actor_type_name(project_name);
 
     let actor_names: Vec<Ident> = actors.iter()
-        .map(|a| format_ident!("{}", a.name))
+        .map(|a| format_ident!("{}", change_case(&a.name, IdentCase::UpperCamelCase)))
         .collect();
     let actor_ids: Vec<Literal> = (0..actors.len())
         .map(|i| Literal::usize_unsuffixed(i))
@@ -54,10 +54,10 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
                 }
             }
 
-            fn _private_update(&mut self, project: &mut Self::P) {
+            fn _private_update(&mut self, scene: &mut dyn ::skylite_core::scenes::Scene<P=Self::P>, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
                 match *self {
                     #(
-                        #type_name::#actor_names(ref mut a) => a._private_update(project)
+                        #type_name::#actor_names(ref mut a) => a._private_update(scene, controls)
                     ),*
                 }
             }
@@ -332,22 +332,22 @@ fn gen_actor_update_fn(actions_type_name: &Ident, actions: &[Action], items: &[I
 
     let pre_update = get_annotated_function(items, "skylite_proc::pre_update")
         .map(get_name)
-        .map(|name| quote!(super::#name(self, project);))
+        .map(|name| quote!(super::#name(self, scene, controls);))
         .unwrap_or(TokenStream::new());
 
     let post_update = get_annotated_function(items, "skylite_proc::post_update")
         .map(get_name)
-        .map(|name| quote!(super::#name(self, project);))
+        .map(|name| quote!(super::#name(self, scene, controls);))
         .unwrap_or(TokenStream::new());
 
     Ok(quote! {
-        fn _private_update(&mut self, project: &mut Self::P) {
+        fn _private_update(&mut self, scene: &mut dyn ::skylite_core::scenes::Scene<P=Self::P>, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
             #pre_update
 
             self.clear_action_changed = self.action_changed;
             match self.current_action {
                 #(
-                    #actions_type_name::#action_names { #action_param_names } => super::#action_implementations(self, project, #action_args)
+                    #actions_type_name::#action_names { #action_param_names } => super::#action_implementations(self, scene, controls, #action_args)
                 ),*
             };
             if self.clear_action_changed {
@@ -414,6 +414,7 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: u32, project_na
 
     Ok(quote! {
         mod #actor_module_name {
+            #![allow(unused_imports)]
             #(
                 #imports
             )
@@ -629,14 +630,14 @@ mod tests {
                     TestActor::new(x, y)
                 }
 
-                fn _private_update(&mut self, project: &mut Self::P) {
-                    super::pre_update(self, project);
+                fn _private_update(&mut self, scene: &mut dyn ::skylite_core::scenes::Scene<P=Self::P>, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
+                    super::pre_update(self, scene, controls);
 
                     self.clear_action_changed = self.action_changed;
                     match self.current_action {
-                        TestActorActions::Action1 { dx, dy } => super::action1(self, project, dx.clone(), dy.clone()),
-                        TestActorActions::Action2 { val } => super::action2(self, project, val.clone()),
-                        TestActorActions::Action3 {} => super::action3(self, project,)
+                        TestActorActions::Action1 { dx, dy } => super::action1(self, scene, controls, dx.clone(), dy.clone()),
+                        TestActorActions::Action2 { val } => super::action2(self, scene, controls, val.clone()),
+                        TestActorActions::Action3 {} => super::action3(self, scene, controls,)
                     };
 
                     if self.clear_action_changed {

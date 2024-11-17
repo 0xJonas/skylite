@@ -4,6 +4,8 @@
 
 use skylite_compress::{compress, CompressionMethods};
 
+use crate::parse::values::TypedValue;
+
 pub trait Serialize {
     fn serialize(&self, buffer: &mut CompressionBuffer);
 }
@@ -28,13 +30,31 @@ impl CompressionBuffer {
         val.serialize(self);
     }
 
-    pub fn encode(self) -> Vec<u8> {
-        let (out, reports) = compress(&self.buffer, &[CompressionMethods::LZ77, CompressionMethods::RC]);
-        for r in reports {
-            println!("{}", r);
+    pub fn write_varint(&mut self, val: usize) {
+        if val == 0 {
+            self.write_byte(0);
+            return;
         }
+
+        let mut writes = val.ilog2() / 7;
+        while writes > 1 {
+            self.write_byte(((val >> (writes * 7)) & 0x7f | 0x80) as u8);
+            writes -= 1;
+        }
+        self.write_byte((val & 0x7f) as u8);
+    }
+
+    pub fn encode(self) -> Vec<u8> {
+        let (out, _reports) = compress(&self.buffer, &[CompressionMethods::LZ77, CompressionMethods::RC]);
+        // for r in reports {
+        //     println!("{}", r);
+        // }
         // TODO: print reports to stdout
         out
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffer.len()
     }
 }
 
@@ -52,9 +72,11 @@ macro_rules! serialize_for_primitive {
 serialize_for_primitive!(u8);
 serialize_for_primitive!(u16);
 serialize_for_primitive!(u32);
+serialize_for_primitive!(u64);
 serialize_for_primitive!(i8);
 serialize_for_primitive!(i16);
 serialize_for_primitive!(i32);
+serialize_for_primitive!(i64);
 serialize_for_primitive!(f32);
 serialize_for_primitive!(f64);
 
@@ -67,13 +89,7 @@ impl Serialize for bool {
 impl<T: Serialize> Serialize for &[T] {
 
     fn serialize(&self, buffer: &mut CompressionBuffer) {
-        let len = self.len();
-        let mut writes = len.ilog2() / 7;
-        while writes > 1 {
-            buffer.write_byte(((len >> (writes * 7)) & 0x7f | 0x80) as u8);
-            writes -= 1;
-        }
-        buffer.write_byte((len & 0x7f) as u8);
+        buffer.write_varint(self.len());
         for item in *self {
             item.serialize(buffer);
         }
@@ -107,6 +123,27 @@ serialize_for_tuple!(T1, T2, T3, T4, T5);
 serialize_for_tuple!(T1, T2, T3, T4, T5, T6);
 serialize_for_tuple!(T1, T2, T3, T4, T5, T6, T7);
 serialize_for_tuple!(T1, T2, T3, T4, T5, T6, T7, Z8);
+
+impl Serialize for TypedValue {
+    fn serialize(&self, buffer: &mut CompressionBuffer) {
+        match self {
+            TypedValue::U8(v) => v.serialize(buffer),
+            TypedValue::U16(v) => v.serialize(buffer),
+            TypedValue::U32(v) => v.serialize(buffer),
+            TypedValue::U64(v) => v.serialize(buffer),
+            TypedValue::I8(v) => v.serialize(buffer),
+            TypedValue::I16(v) => v.serialize(buffer),
+            TypedValue::I32(v) => v.serialize(buffer),
+            TypedValue::I64(v) => v.serialize(buffer),
+            TypedValue::F32(v) => v.serialize(buffer),
+            TypedValue::F64(v) => v.serialize(buffer),
+            TypedValue::Bool(v) => v.serialize(buffer),
+            TypedValue::String(v) => v.as_str().serialize(buffer),
+            TypedValue::Tuple(v) => v.iter().for_each(|i| i.serialize(buffer)),
+            TypedValue::Vec(v) => (&v[..]).serialize(buffer),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

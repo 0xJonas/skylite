@@ -1,7 +1,8 @@
 use actors::AnyActor;
+use scenes::Scene;
 
 pub mod decode;
-pub mod scene;
+pub mod scenes;
 pub mod actors;
 
 /// Defines which functions a backend must provide to work with Skylite.
@@ -44,7 +45,7 @@ pub trait SkyliteProject {
     type Actors: AnyActor<P = Self>;
 
     fn new(target: Self::Target) -> Self;
-    fn render(&self);
+    fn render(&mut self);
     fn update(&mut self);
 }
 
@@ -58,4 +59,12 @@ pub struct DrawContext<P: SkyliteProject> {
     #[doc(hidden)] pub graphics_cache: Vec<std::rc::Weak<u8>>,
     #[doc(hidden)] pub focus_x: i32,
     #[doc(hidden)] pub focus_y: i32
+}
+
+/// Type used to change various parts of a `SkyliteProject` instance.
+///
+/// This is the main type that scenes and actors have access to in their
+/// update/action methods.
+pub struct ProjectControls<P: SkyliteProject> {
+    #[doc(hidden)] pub pending_scene: Option<Box<dyn Scene<P=P>>>
 }

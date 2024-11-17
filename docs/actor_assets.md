@@ -10,14 +10,14 @@ The root element of an actor asset is an associative list ('alist') with the fol
 '(
   ; List of the actions and their parameters. This is required and
   ; must include at least one action to serve as the initial-action.
-  (actions (...))
+  (actions . (...))
 
   ; List of parameters for the actor. These are different from
   ; the actor's properties.
-  (parameters (...))
+  (parameters . (...))
 
   ; The action with which this actor starts after it is instantiated.
-  (initial-action (...)))
+  (initial-action . (...)))
 ```
 
 The meaning of each of these keys is described in the following sections.
@@ -75,7 +75,7 @@ Let's put everything together in order to build a complete actor asset:
 ```scheme
 ; actors/my_actor.scm:
 
-'((actions
+'((actions .
     ; Define three actions, 'move', 'idle' and 'set-position'.
     ((move ((dx i8 "change in x-coordinate")
             (dy i8 "change in y-coordinate"))
@@ -87,11 +87,11 @@ Let's put everything together in order to build a complete actor asset:
      (set-position ((x i16) (y i16))
                    "Moves the actor to the given position, then idles.")))
 
-  (parameters
+  (parameters .
     ; Define two parameters, 'x' and 'y'
     ((x i16 "initial x-coordinate")
      (y i16 "initial y-coordinate")))
 
   ; Start the actor in the 'idle' action, which takes no parameters.
-  (initial-action (idle)))
+  (initial-action . (idle)))
 ```

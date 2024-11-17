@@ -11,7 +11,7 @@ use crate::SkyliteProcError;
 use glob::{GlobError, Pattern};
 
 use super::actors::Actor;
-use super::scenes::Scene;
+use super::scenes::{Scene, SceneInstance};
 use super::values::{parse_type, parse_typed_value, TypedValue};
 
 
@@ -216,6 +216,7 @@ pub(crate) struct SkyliteProjectStub {
     pub name: String,
     pub assets: AssetGroups,
     pub save_data: Vec<SaveItem>,
+    pub initial_scene: SceneInstance,
     pub tile_types: Vec<String>
 }
 
@@ -240,6 +241,12 @@ impl SkyliteProjectStub {
                 Vec::new()
             };
 
+            let initial_scene = {
+                let instance_def = assq_str("initial-scene", definition)?.ok_or(SkyliteProcError::DataError(format!("Missing required field 'initial-scene'")))?;
+                SceneInstance::from_scheme(instance_def, &assets.scenes)?
+            };
+
+
             let tile_types = if let Some(list) = assq_str("tile-types", definition)? {
                 iter_list(list)?
                     .map(|t| parse_symbol(t))
@@ -256,6 +263,7 @@ impl SkyliteProjectStub {
                 name,
                 assets,
                 save_data,
+                initial_scene,
                 tile_types
             })
         }
@@ -290,6 +298,7 @@ pub(crate) struct SkyliteProject {
     pub actors: Vec<Actor>,
     pub scenes: Vec<Scene>,
     pub save_data: Vec<SaveItem>,
+    pub initial_scene: SceneInstance,
     pub tile_types: Vec<String>
 }
 
@@ -314,6 +323,7 @@ impl SkyliteProject {
             actors,
             scenes,
             save_data: stub.save_data,
+            initial_scene: stub.initial_scene,
             tile_types: stub.tile_types
         })
     }
@@ -321,23 +331,29 @@ impl SkyliteProject {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::{create_dir, remove_dir_all, File}, path::PathBuf};
+    use std::{fs::{create_dir, remove_dir_all, File}, path::PathBuf, str::FromStr};
 
-    use crate::parse::{project::{asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem}, scheme_util::{eval_str, with_guile}, values::TypedValue};
+    use crate::parse::{project::{asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem}, scenes::SceneInstance, scheme_util::{eval_str, with_guile}, values::TypedValue};
 
     use super::SkyliteProjectStub;
 
     extern "C" fn test_project_parsing_impl(_: &()) {
         unsafe {
-            let definition = eval_str(
-                r#"'((name TestProject)
-                     (assets ((actors ("./test1/*.scm" "./test2/*.scm"))
-                              (maps ("./test3/*.scm"))))
-                     (save-data
-                       ((flag1 bool #f)
-                        (val2 u8 5)))
-                     (tile-types (solid semi-solid non-solid)))"#).unwrap();
-            let project_root = PathBuf::new();
+            let definition = eval_str(r#"
+                '((name . TestProject)
+                  (assets .
+                    ((actors . ("./test1/*.scm" "./test2/*.scm"))
+                     (maps . ("./test3/*.scm"))))
+
+                    (save-data .
+                      ((flag1 bool #f)
+                      (val2 u8 5)))
+
+                    (initial-scene . (test_scene #t 5))
+                    (tile-types . (solid semi-solid non-solid)))"#).unwrap();
+
+            // Use a path to the test project to resolve the initial-scene
+            let project_root = PathBuf::from_str("../skylite-core/tests/test-project-1/").unwrap();
             let project = SkyliteProjectStub::from_scheme(definition, &project_root).unwrap();
             assert_eq!(project, SkyliteProjectStub {
                 name: "TestProject".to_owned(),
@@ -365,6 +381,13 @@ mod tests {
                         data: TypedValue::U8(5)
                     }
                 ],
+                initial_scene: SceneInstance {
+                    name: "TestScene".to_owned(),
+                    args: vec![
+                        TypedValue::Bool(true),
+                        TypedValue::U8(5)
+                    ]
+                },
                 tile_types: vec!["solid".to_owned(), "semi-solid".to_owned(), "non-solid".to_owned()]
             });
         }

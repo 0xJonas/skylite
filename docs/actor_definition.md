@@ -26,10 +26,12 @@ Within the body of `actor_definition`, there are several items with special mean
 
   ```rust
   skylite_proc::properties! {
-      x: u16,
-      y: u16
+      pub x: u16,
+      pub y: u16
   }
   ```
+
+  In order for the properties to be visible to the other items in the `actor_definition`, they must be declared as `pub`.
 
   Properties are separate from the parameters, which are defined in the actor asset file. The properties are initialized through the `#[skylite_proc::create_properties]` special function (see below).
 
@@ -47,7 +49,8 @@ Within the body of `actor_definition`, there are several items with special mean
 
   Marks a function that is called at the beginning of an update. The function marked by this attribute must take exactly the following parameters:
   - A mutable reference to the actor's **main type**.
-  - A mutable reference to the project type.
+  - A mutable reference to a `Scene` trait object (`&mut dyn Scene<P=MyProject>`)
+  - A mutable reference to the `ProjectControls` instance (`&mut ProjectControls<MyProject>`)
 
   Example:
   ```rust
@@ -79,7 +82,8 @@ Within the body of `actor_definition`, there are several items with special mean
 
   The functions marked by this attribute must take the following parameters:
   - A mutable reference to the actor's **main type**.
-  - A mutable reference to the project type.
+  - A mutable reference to a `Scene` trait object (`&mut dyn Scene<P=MyProject>`)
+  - A mutable reference to the `ProjectControls` instance (`&mut ProjectControls<MyProject>`)
   - Any parameters to the action that were defined in the asset file, in the same order and with the same types.
 
   Example:
@@ -104,8 +108,8 @@ skylite_proc::actor_definition! {
 
     // These properties will form the body of the type `MyActorProperties`
     skylite_proc::properties {
-        x: i16,
-        y: i16
+        pub x: i16,
+        pub y: i16
     }
 
     // Mark the function which is used to initialize the actor's properties from its parameters.
@@ -117,16 +121,16 @@ skylite_proc::actor_definition! {
     // Provide implementations to the actor's actions.
 
     #[skylite_proc::action("move")]
-    fn move(actor: &mut MyActor, _project: &mut MyProject, dx: i8, dy: i8) {
+    fn r#move(actor: &mut MyActor, _scene: &mut Scene<P=MyProject>, _controls: &mut ProjectControls<MyProject>, dx: i8, dy: i8) {
         actor.properties.x += dx as i16;
         actor.properties.y += dy as i16;
     }
 
     #[skylite_proc::action("idle")]
-    fn idle(_actor: &mut MyActor, _project: &mut MyProject) {}
+    fn idle(_actor: &mut MyActor, _scene: &mut Scene<P=MyProject>, _controls: &mut ProjectControls<MyProject>) {}
 
     #[skylite_proc::action("set-position")]
-    fn set_position(actor: &mut MyActor, _project: &mut MyProject, x: i16, y: i16) {
+    fn set_position(actor: &mut MyActor, _scene: &mut Scene<P=MyProject>, _controls: &mut ProjectControls<MyProject>, x: i16, y: i16) {
         actor.properties.x = x;
         actor.properties.y = y;
 
