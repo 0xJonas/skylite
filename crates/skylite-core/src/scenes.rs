@@ -18,13 +18,9 @@ pub trait Scene {
 
     #[doc(hidden)] fn _private_decode(decode: &mut dyn Decoder) -> Self where Self: Sized;
     #[doc(hidden)] fn _private_update(&mut self, controls: &mut ProjectControls<Self::P>);
-    #[doc(hidden)] fn _private_render(&self, ctx: DrawContext<Self::P>);
-    #[doc(hidden)] fn _private_actors(&self) -> RefMut<'_, Vec<<Self::P as SkyliteProject>::Actors>>;
-    #[doc(hidden)] fn _private_take_actors(&mut self) -> Vec<<Self::P as SkyliteProject>::Actors>;
-    #[doc(hidden)] fn _private_restore_actors(&mut self, actors: Vec<<Self::P as SkyliteProject>::Actors>);
+    #[doc(hidden)] fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
+    #[doc(hidden)] fn _private_actors(&mut self) -> &mut [<Self::P as SkyliteProject>::Actors];
     #[doc(hidden)] fn _private_extras(&mut self) -> &mut Vec<<Self::P as SkyliteProject>::Actors>;
-    #[doc(hidden)] fn _private_take_extras(&mut self) -> Vec<<Self::P as SkyliteProject>::Actors>;
-    #[doc(hidden)] fn _private_restore_extras(&mut self, extras: Vec<<Self::P as SkyliteProject>::Actors>);
 
     /// Returns the main actors of a `Scene`. The list of main actors
     /// fixed by the scene definition and cannot be modified.
@@ -40,10 +36,10 @@ pub trait Scene {
         self._private_extras().push(extra)
     }
 
-    /// Removes the extra at the given `index`.
-    fn remove_extra(&mut self, index: usize) {
-        self._private_extras().remove(index);
-    }
+    /// Removes the extra that is currently being updated.
+    /// Must be called from an `Actor` context, i.e. an action
+    /// or one of the update hooks.
+    fn remove_current_extra(&mut self);
 }
 
 /// Returns all `Actors` in a `scene` of a specific type. This includes both the main
@@ -94,31 +90,9 @@ fn apply_to_actors<P: SkyliteProject, A: Actor, F: Fn(&mut A)>(scene: &mut dyn S
 
 #[doc(hidden)]
 pub mod _private {
-    use crate::{actors::ActorBase, DrawContext, ProjectControls, SkyliteProject};
+    use crate::{actors::ActorBase, DrawContext, SkyliteProject};
 
     use super::Scene;
-
-    pub fn update_scene<P: SkyliteProject>(scene: &mut dyn Scene<P=P>, controls: &mut ProjectControls<P>) {
-        // We need to take the lists of actors and scenes out of the scene here,
-        // to pass the borrow checks. After each actor and extra is updated, the
-        // lists are restored.
-        let mut actors = scene._private_take_actors();
-        let mut extras = scene._private_take_extras();
-
-        for actor in actors.iter_mut() {
-            actor._private_update(scene, controls);
-        }
-        scene._private_restore_actors(actors);
-
-        for extra in extras.iter_mut() {
-            extra._private_update(scene, controls);
-        }
-        // Restoring the extras has the additional effect, that any extras
-        // added by any of the update calls to not get updated themselves in the
-        // same cycle, which is intended. _private_restore_extras must make sure
-        // to re-add the existing extras in the proper order, i.e. at the front.
-        scene._private_restore_extras(extras);
-    }
 
     pub fn render_scene<'scene, P: SkyliteProject>(scene: &'scene dyn Scene<P=P>, ctx: &mut DrawContext<P>) {
         let mut z_sorted: Vec<&P::Actors> = Vec::new();

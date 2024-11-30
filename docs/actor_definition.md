@@ -6,7 +6,7 @@ The `actor_definition` macro defines all types needed for an actor to be used in
 
 - The actor's **main type**, which has the same name as the asset file converted to *UpperCamelCase*. E.g. an asset file with name `my_actor` would have a **main type** called `MyActor`. This type also implements the `Actor` and `ActorBase` traits.
 - The actor's **action type**, which is an `enum` with a variant for each action defined in the asset file. Each variant is a struct containing the parameters for the respective action. The action type's name is the name of the **main type** with `Actions` appended to it, the names of the variants are the names of the actions converted to *UpperCamelCase*. E.g. an asset file with name `my_actor` would have a **action type** called `MyActorActions`.
-- The actors **property type**: This type is always generated, even when the actor does not define any properties. The name of this type is the name of the **main type** with `Properties` appended to it. E.g. an asset file with name `my_actor` would have a **property type** called `MyActorProperties`.
+- The actors **property type**: This type is always generated, even when the actor does not define any properties. The name of this type is the name of the **main type** with `Properties` appended to it. E.g. an asset file with name `my_actor` would have a **property type** called `MyActorProperties`. Each instance of the actor's main type contains an instance of the actor's property type, which is accessible through the `.properties` member on the main type.
 
 Calls to `actor_definition` must be made visible (e.g. through `use`) to the projects main `mod` marked with the `#[skylite_project(...)]` attribute.
 
@@ -16,13 +16,17 @@ Within the body of `actor_definition`, there are several items with special mean
 
 - `skylite_proc::asset_file!(...);`
 
-  Sets the asset file for this `actor_definition`. The first argument is the path to the project's main definition file relative to the project's root directory, the second argument is the name of the [actor asset file](actor_assets.md) without the file extension: `skylite_proc::asset_file!("path/project.scm", "asset-name");`.
+  Sets the asset file for this `actor_definition`. The first argument is the path to the project's main definition file relative to the project's root directory, the second argument is the name of the [actor asset file](actor_assets.md) without the file extension:
+
+  ```rust
+  skylite_proc::asset_file!("path/project.scm", "asset-name");
+  ```
 
   This macro invocation is always **required**.
 
 - `skylite_proc::properties! { ... }`
 
-  Declares the properties of the actor. Properties are the data that an actor instance holds and that can be changed by user code, e.g. through action implementations. The properties are declared in the same way as the members of a `struct`:
+  Declares the properties of the actor, which are accessible through the actor's **property type**. Properties are the data that an actor instance holds and that can be changed by user code, e.g. through action implementations. The properties are declared in the same way as the members of a `struct`:
 
   ```rust
   skylite_proc::properties! {
@@ -34,8 +38,6 @@ Within the body of `actor_definition`, there are several items with special mean
   In order for the properties to be visible to the other items in the `actor_definition`, they must be declared as `pub`.
 
   Properties are separate from the parameters, which are defined in the actor asset file. The properties are initialized through the `#[skylite_proc::create_properties]` special function (see below).
-
-  The content of the `skylite_proc::properties` macro is directly used to construct the actor's **property type**. This type is a struct type with the name of the actor converted to *UpperCamelCase* and `Properties` appended to it, and contains the members declared by this macro. Each instance of the actor's **main type** has a member called `properties`, which contains the instance of the actor's **property type**.
 
 - `#[skylite_proc::create_properties]`
 

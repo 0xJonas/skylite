@@ -1,8 +1,10 @@
 use std::{path::PathBuf, str::FromStr};
 
 use generate::actors::generate_actor_definition;
+use generate::scenes::generate_scene_definition;
 use generate::util::get_macro_item;
 use parse::actors::Actor;
+use parse::scenes::SceneStub;
 use quote::{quote, ToTokens};
 use parse::{guile::SCM, project::SkyliteProjectStub};
 use parse::scheme_util::form_to_string;
@@ -176,6 +178,28 @@ fn extract_asset_file(definition_file: &Macro) -> Result<(SkyliteProjectStub, St
     return Ok((stub, args[1].value()));
 }
 
+#[cfg(debug_assertions)]
+fn process_debug_output(out: &TokenStream, items: &[Item]) -> Result<(), SkyliteProcError> {
+    let mac = match get_macro_item("skylite_proc::debug_output", &items)? {
+        Some(m) => m,
+        None => return Ok(())
+    };
+
+    let path = match mac.tokens.clone().into_iter().next() {
+        Some(TokenTree::Literal(lit)) => {
+            let path_str = lit.to_string();
+            PathBuf::try_from(&path_str[1 .. path_str.len() - 1])
+                    .map_err(|e| SkyliteProcError::SyntaxError(format!("{}", e.to_string())))?
+        },
+        _ => return Err(SkyliteProcError::SyntaxError(format!("Wrong argument for debug_output!, expected string literal")))
+    };
+
+    let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
+    std::fs::write(base_dir.join(path), out.to_string()).unwrap();
+
+    Ok(())
+}
+
 fn actor_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
     let items = parse2::<File>(body_raw.clone())
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
@@ -191,30 +215,40 @@ fn actor_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skyli
     let out = generate_actor_definition(&actor, id as u32, &project_stub.name, &items, &body_raw)?;
 
     #[cfg(debug_assertions)]
-    'dbg: {
-        let mac = match get_macro_item("skylite_proc::debug_output", &items)? {
-            Some(m) => m,
-            None => break 'dbg
-        };
+    process_debug_output(&out, &items)?;
 
-        let path = match mac.tokens.clone().into_iter().next() {
-            Some(TokenTree::Literal(lit)) => {
-                let path_str = lit.to_string();
-                PathBuf::try_from(&path_str[1 .. path_str.len() - 1])
-                        .map_err(|e| SkyliteProcError::SyntaxError(format!("{}", e.to_string())))?
-            },
-            _ => return Err(SkyliteProcError::SyntaxError(format!("Wrong argument for debug_output!, expected string literal")))
-        };
+    Ok(out)
+}
 
-        let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
-        std::fs::write(base_dir.join(path), out.to_string()).unwrap();
-    }
+fn scene_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
+    let items = parse2::<File>(body_raw.clone())
+        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
+        .items;
+
+    let mac = get_macro_item("skylite_proc::asset_file", &items)?
+        .ok_or(SkyliteProcError::DataError(format!("Missing required macro asset_file!")))?;
+    let (project_stub, name) = extract_asset_file(mac)?;
+
+    let (id, path) = project_stub.assets.scenes.find_asset(&name)?;
+    let scene = SceneStub::from_file(&path)?;
+
+    let out = generate_scene_definition(&scene, id as u32, &items, &project_stub.name, &body_raw)?;
+
+    #[cfg(debug_assertions)]
+    process_debug_output(&out, &items)?;
 
     Ok(out)
 }
 
 fn actor_definition_impl(body_raw: TokenStream) -> TokenStream {
     match actor_definition_fallible(body_raw) {
+        Ok(stream) => stream,
+        Err(err) => err.into()
+    }
+}
+
+fn scene_definition_impl(body_raw: TokenStream) -> TokenStream {
+    match scene_definition_fallible(body_raw) {
         Ok(stream) => stream,
         Err(err) => err.into()
     }
@@ -229,6 +263,12 @@ pub fn skylite_project(args: proc_macro::TokenStream, body: proc_macro::TokenStr
 #[proc_macro]
 pub fn actor_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     actor_definition_impl(body.into()).into()
+}
+
+#[doc = include_str!("../../../docs/scene_definition.md")]
+#[proc_macro]
+pub fn scene_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    scene_definition_impl(body.into()).into()
 }
 
 /// Marks a function to be called to initialize an instance of `SkyliteProject` or `Scene.`

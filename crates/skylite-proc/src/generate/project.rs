@@ -2,7 +2,7 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Item, ItemFn, ItemMod};
 
-use crate::{generate::util::{get_annotated_function, typed_value_to_rust}, parse::{project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
+use crate::{generate::{scenes::scene_type_name, util::{get_annotated_function, typed_value_to_rust}}, parse::{project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
 
 use super::{actors::{any_actor_type_name, generate_actors_type}, scenes::generate_scenes_type};
 
@@ -22,8 +22,12 @@ fn generate_tile_type_enum<S: AsRef<str>>(project_name: &str, tile_types: &[S]) 
     }
 }
 
+pub(crate) fn project_type_name(project_name: &str) -> Ident {
+    format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase))
+}
+
 fn generate_project_type(project_name: &str, target_type: &TokenStream) -> TokenStream {
-    let project_name = Ident::new(&change_case(project_name, IdentCase::UpperCamelCase), Span::call_site());
+    let project_name = project_type_name(project_name);
     quote! {
         pub struct #project_name {
             draw_context: ::skylite_core::DrawContext<#project_name>,
@@ -35,7 +39,7 @@ fn generate_project_type(project_name: &str, target_type: &TokenStream) -> Token
 }
 
 fn generate_project_new_method(project_ident: &Ident, target_type: &TokenStream, init_call: &TokenStream, initial_scene: &SceneInstance) -> TokenStream {
-    let initial_scene_name = format_ident!("{}", initial_scene.name);
+    let initial_scene_name = scene_type_name(&initial_scene.name);
     let initial_scene_params = initial_scene.args.iter().map(typed_value_to_rust);
     quote! {
         fn new(target: #target_type) -> #project_ident {
@@ -47,7 +51,7 @@ fn generate_project_new_method(project_ident: &Ident, target_type: &TokenStream,
                     focus_x: w as i32 / 2,
                     focus_y: h as i32 / 2
                 },
-                scene: ::std::boxed::Box::new(#initial_scene_name::create_new(#(#initial_scene_params),*)),
+                scene: ::std::boxed::Box::new(#initial_scene_name::new(#(#initial_scene_params),*)),
                 controls: ::skylite_core::ProjectControls { pending_scene: None }
             };
 
@@ -60,7 +64,7 @@ fn generate_project_new_method(project_ident: &Ident, target_type: &TokenStream,
 fn generate_project_implementation(project_name: &str, target_type: &TokenStream, initial_scene: &SceneInstance, body: &ItemMod) -> TokenStream {
     fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
 
-    let project_ident = Ident::new(&change_case(project_name, IdentCase::UpperCamelCase), Span::call_site());
+    let project_ident = project_type_name(project_name);
     let tile_type_name = tile_type_name(project_name);
     let actors_type_name = any_actor_type_name(project_name);
 
@@ -118,7 +122,7 @@ fn generate_project_implementation(project_name: &str, target_type: &TokenStream
                 #pre_update
 
                 // Main update
-                ::skylite_core::scenes::_private::update_scene(self.scene.as_mut(), &mut self.controls);
+                self.scene._private_update(&mut self.controls);
 
                 #post_update
             }
