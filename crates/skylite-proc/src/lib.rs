@@ -5,13 +5,14 @@ use generate::scenes::generate_scene_definition;
 use generate::util::get_macro_item;
 use parse::actors::Actor;
 use parse::scenes::SceneStub;
-use quote::{quote, ToTokens};
+use parse::util::{change_case, IdentCase};
+use quote::{format_ident, quote};
 use parse::{guile::SCM, project::SkyliteProjectStub};
 use parse::scheme_util::form_to_string;
 use proc_macro2::{TokenStream, TokenTree};
 use parse::project::SkyliteProject;
-use syn::{Block, File, LitStr, Macro, Stmt};
-use syn::{parse::Parser, parse2, punctuated::Punctuated, Expr, ExprLit, ExprPath, Item, ItemMod, Lit, Path as SynPath, Token};
+use syn::{File, LitStr};
+use syn::{parse::Parser, parse2, punctuated::Punctuated, Item, Token};
 
 mod parse;
 mod generate;
@@ -44,125 +45,91 @@ impl Into<TokenStream> for SkyliteProcError {
     }
 }
 
-struct SkyliteProjectArgs {
-    path: PathBuf,
-    target: SynPath,
-    #[cfg(debug_assertions)]
-    debug_out: Option<PathBuf>
-}
+fn parse_project_file(tokens: &TokenStream) -> Result<PathBuf, SkyliteProcError> {
+    let path_raw = parse2::<LitStr>(tokens.clone())
+        .map(|lit| lit.value())
+        .map_err(|err| SkyliteProcError::SyntaxError(format!("Illegal arguments to project_file!: {}", err)))?;
 
-fn parse_skylite_project_args(args_raw: TokenStream) -> Result<SkyliteProjectArgs, SkyliteProcError> {
-    let parser = Punctuated::<Expr, Token![,]>::parse_terminated;
-    let mut iter = parser.parse2(args_raw)
-        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
-        .into_iter();
-
-    // Extract path to project root file
-    let path_str = match iter.next() {
-        Some(
-            Expr::Lit(ExprLit {
-                lit: Lit::Str(lit),
-                ..
-            }
-        )) => lit.value(),
-        _ => return Err(SkyliteProcError::SyntaxError("Expected project path".to_owned()))
-    };
     let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
-    let relative_path = match PathBuf::from_str(&path_str) {
-        Ok(p) => p,
-        Err(e) => return Err(SkyliteProcError::SyntaxError("Project path invalid".to_owned() + &e.to_string()))
-    };
+    let relative_path = PathBuf::from_str(&path_raw)
+        .map_err(|err| SkyliteProcError::SyntaxError(format!("Invalid project path: {}", err)))?;
+    Ok(base_dir.join(relative_path))
+}
 
-    // Extract type of the Skylite target
-    let target = match iter.next() {
-        Some(
-            Expr::Path(ExprPath {
-                path,
-                ..
-            })
-        ) => path,
-        _ => return Err(SkyliteProcError::SyntaxError("Expected target type".to_owned()))
-    };
+fn get_crate_root_check() -> TokenStream {
+    quote! {
+        const _: () = {
+            let expected = env!("CARGO_CRATE_NAME").as_bytes();
+            let actual = module_path!().as_bytes();
 
-    #[cfg(debug_assertions)]
-    {
-        let debug_out = match iter.next() {
-            Some(
-                Expr::Lit(ExprLit {
-                    lit: Lit::Str(lit),
-                    ..
+            // Complicated string compare, because the == operator for str
+            // is not const, as well as various other functions that might
+            // have been more appropriate here.
+            let max = if expected.len() > actual.len() {
+                expected.len()
+            } else {
+                actual.len()
+            };
+            let mut i = 0;
+            while i < max {
+                if i >= expected.len() || i >= actual.len() || expected[i] != actual[i] {
+                    panic!("skylite_project! can only be called at the crate root.");
                 }
-            )) => {
-                let debug_out_str = lit.value();
-                let relative_path = match PathBuf::from_str(&debug_out_str) {
-                    Ok(p) => p,
-                    Err(e) => return Err(SkyliteProcError::SyntaxError("Debug path invalid".to_owned() + &e.to_string()))
-                };
-                Some(base_dir.join(relative_path))
-            },
-            Some(_) => return Err(SkyliteProcError::SyntaxError("Invalid value for debug_out".to_owned())),
-            None => None
+                i += 1;
+            }
         };
-        Ok(SkyliteProjectArgs { path: base_dir.join(relative_path), target: target.clone(), debug_out })
-    }
-
-    #[cfg(not(debug_assertions))]
-    {
-        Ok(SkyliteProjectArgs { path: base_dir.join(relative_path), target: target.clone() })
     }
 }
 
-fn get_default_imports() -> Item {
-    Item::Verbatim(
-        quote! {
-            use skylite_core::SkyliteTarget;
-            use skylite_core;
+fn skylite_project_imp_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
+    let items = parse2::<File>(body_raw)
+        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
+        .items;
+
+    let project_file_mac = get_macro_item("skylite_proc::project_file", &items)?
+        .ok_or(SkyliteProcError::DataError(format!("Missing required macro skylite_proc::project_file!")))?;
+    let path = parse_project_file(project_file_mac)?;
+
+    let target_type_mac = get_macro_item("skylite_proc::target_type", &items)?
+        .ok_or(SkyliteProcError::DataError(format!("Missing required macro skylite_proc::target_type!")))?;
+    // Verify that the content of target_type is actually a valid path.
+    parse2::<syn::Path>(target_type_mac.clone())
+        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
+
+    let project_stub = SkyliteProjectStub::from_file(&path)?;
+    let project = SkyliteProject::from_stub(project_stub)?;
+
+    let module_name = format_ident!("{}", change_case(&project.name, IdentCase::LowerSnakeCase));
+    let project_items = project.generate(&target_type_mac, &items)?;
+
+    let crate_root_check = get_crate_root_check();
+
+    let out = quote! {
+        #crate_root_check
+
+        #(#items)
+        *
+
+        mod #module_name {
+            use super::*;
+
+            #(#project_items)
+            *
         }
-    )
-}
 
-fn skylite_project_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenStream {
-    let mut body_parsed: ItemMod = match parse2(body_raw) {
-        Ok(ast) => ast,
-        Err(err) => return SkyliteProcError::SyntaxError(err.to_string()).into()
+        pub use #module_name::*;
     };
-
-    let args = match parse_skylite_project_args(args_raw) {
-        Ok(args) => args,
-        Err(err) => return err.into()
-    };
-
-    let project_stub = match SkyliteProjectStub::from_file(&args.path) {
-        Ok(stub) => stub,
-        Err(err) => return err.into()
-    };
-    let project = match SkyliteProject::from_stub(project_stub) {
-        Ok(project) => project,
-        Err(err) => return err.into()
-    };
-
-    let mut items = match project.generate(&args.target.into_token_stream(), &body_parsed) {
-        Ok(items) => items,
-        Err(err) => return err.into()
-    };
-
-    body_parsed.content.as_mut().unwrap().1.insert(0, get_default_imports());
-    body_parsed.content.as_mut().unwrap().1.append(&mut items);
-
-    let out = body_parsed.into_token_stream();
 
     #[cfg(debug_assertions)]
     {
-        if let Some(debug_out) = args.debug_out {
-            std::fs::write(debug_out, out.to_string()).unwrap();
-        }
+        process_debug_output(&out, &items)?;
     }
 
-    out
+    Ok(out)
 }
 
-fn extract_asset_file(definition_file: &Macro) -> Result<(SkyliteProjectStub, String), SkyliteProcError> {
-    let args = Parser::parse2(Punctuated::<LitStr, Token![,]>::parse_separated_nonempty, definition_file.tokens.clone())
+fn extract_asset_file(definition_file: &TokenStream) -> Result<(SkyliteProjectStub, String), SkyliteProcError> {
+    let args = Parser::parse2(Punctuated::<LitStr, Token![,]>::parse_separated_nonempty, definition_file.clone())
         .map_err(|err| SkyliteProcError::SyntaxError(format!("Failed to parse definition_file! macro: {}. Expected (\"project-path\", \"asset-name\")", err.to_string())))?;
 
     if args.len() != 2 {
@@ -180,12 +147,12 @@ fn extract_asset_file(definition_file: &Macro) -> Result<(SkyliteProjectStub, St
 
 #[cfg(debug_assertions)]
 fn process_debug_output(out: &TokenStream, items: &[Item]) -> Result<(), SkyliteProcError> {
-    let mac = match get_macro_item("skylite_proc::debug_output", &items)? {
+    let tokens = match get_macro_item("skylite_proc::debug_output", &items)? {
         Some(m) => m,
         None => return Ok(())
     };
 
-    let path = match mac.tokens.clone().into_iter().next() {
+    let path = match tokens.clone().into_iter().next() {
         Some(TokenTree::Literal(lit)) => {
             let path_str = lit.to_string();
             PathBuf::try_from(&path_str[1 .. path_str.len() - 1])
@@ -205,9 +172,9 @@ fn actor_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skyli
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
         .items;
 
-    let mac = get_macro_item("skylite_proc::asset_file", &items)?
+    let args = get_macro_item("skylite_proc::asset_file", &items)?
         .ok_or(SkyliteProcError::DataError(format!("Missing required macro asset_file!")))?;
-    let (project_stub, name) = extract_asset_file(mac)?;
+    let (project_stub, name) = extract_asset_file(args)?;
 
     let (id, path) = project_stub.assets.actors.find_asset(&name)?;
     let actor = Actor::from_file(&path)?;
@@ -240,6 +207,13 @@ fn scene_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skyli
     Ok(out)
 }
 
+fn skylite_project_impl(body_raw: TokenStream) -> TokenStream {
+    match skylite_project_imp_fallible(body_raw) {
+        Ok(t) => t,
+        Err(err) => err.into()
+    }
+}
+
 fn actor_definition_impl(body_raw: TokenStream) -> TokenStream {
     match actor_definition_fallible(body_raw) {
         Ok(stream) => stream,
@@ -254,9 +228,9 @@ fn scene_definition_impl(body_raw: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_attribute]
-pub fn skylite_project(args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    skylite_project_impl(args.into(), body.into()).into()
+#[proc_macro]
+pub fn skylite_project(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    skylite_project_impl(body.into()).into()
 }
 
 #[doc = include_str!("../../../docs/actor_definition.md")]
@@ -270,6 +244,12 @@ pub fn actor_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStrea
 pub fn scene_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     scene_definition_impl(body.into()).into()
 }
+
+#[proc_macro]
+pub fn project_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
+
+#[proc_macro]
+pub fn target_type(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
 
 /// Marks a function to be called to initialize an instance of `SkyliteProject` or `Scene.`
 ///

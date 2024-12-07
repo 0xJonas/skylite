@@ -4,7 +4,7 @@ use syn::{parse_str, Item, ItemFn, Meta};
 
 use crate::{parse::{actors::{Action, Actor}, util::{change_case, IdentCase}, values::Variable}, SkyliteProcError};
 
-use super::util::{generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust, typed_value_to_rust};
+use super::{project::{project_ident, project_type_name}, util::{generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust, typed_value_to_rust}};
 
 // region: AnyActor Type for skylite_project CodeGen
 
@@ -13,7 +13,7 @@ pub(super) fn any_actor_type_name(project_name: &str) -> Ident {
 }
 
 pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Result<TokenStream, SkyliteProcError> {
-    let project_ident = format_ident!("{}", project_name);
+    let project_ident = project_ident(project_name);
     let type_name = any_actor_type_name(project_name);
 
     let actor_names: Vec<Ident> = actors.iter()
@@ -215,7 +215,7 @@ fn gen_properties_type(actor: &Actor, items: &[Item]) -> Result<TokenStream, Sky
 
     // The properties are copied directly from the `skylite_proc::properties!` function macro.
     let properties = match get_macro_item("skylite_proc::properties", items)? {
-        Some(mac) => mac.tokens.clone(),
+        Some(tokens) => tokens.clone(),
         None => TokenStream::new()
     };
 
@@ -360,7 +360,7 @@ fn gen_actor_update_fn(actions_type_name: &Ident, actions: &[Action], items: &[I
     })
 }
 
-fn gen_actor_base_impl(actor: &Actor, project_type_ident: &Ident, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
+fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
 
     let actor_type_name = actor_type_name(&actor.name);
@@ -394,7 +394,7 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &Ident, items: &[Item]
 // region: generate_actor_definition Entrypoint
 
 pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: u32, project_name: &str, items: &[Item], body_raw: &TokenStream) -> Result<TokenStream, SkyliteProcError> {
-    let project_type = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
+    let project_type_name = project_type_name(project_name);
     let actor_module_name = format_ident!("{}", change_case(&actor.name, IdentCase::LowerSnakeCase));
     let actor_type_name = actor_type_name(&actor.name);
     let actor_id = Literal::u32_unsuffixed(actor_id);
@@ -410,7 +410,7 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: u32, project_na
 
     let properties_type = gen_properties_type(actor, items)?;
     let actor_type = gen_actor_type(actor);
-    let actor_base_impl = gen_actor_base_impl(actor, &project_type, items)?;
+    let actor_base_impl = gen_actor_base_impl(actor, &project_type_name, items)?;
 
     Ok(quote! {
         mod #actor_module_name {
@@ -618,10 +618,10 @@ mod tests {
     fn test_gen_actor_base_impl() {
         let actor = create_test_actor();
         let items = create_test_items();
-        let code = gen_actor_base_impl(&actor, &format_ident!("TestProject"), &items).unwrap();
+        let code = gen_actor_base_impl(&actor, &quote!(crate::TestProject), &items).unwrap();
         let expectation = quote! {
             impl ::skylite_core::actors::ActorBase for TestActor {
-                type P = TestProject;
+                type P = crate::TestProject;
 
                 fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> TestActor {
                     use skylite_core::decode::Deserialize;

@@ -30,8 +30,7 @@ fn encode_scene(scene: &Scene, actor_ids: &HashMap<String, usize>, buffer: &mut 
     }
 }
 
-pub(crate) fn generate_scenes_type(project_name: &str, scenes: &[Scene], actors: &[Actor]) -> TokenStream {
-    let any_actor_type_name = any_actor_type_name(project_name);
+pub(crate) fn generate_scene_data(scenes: &[Scene], actors: &[Actor]) -> TokenStream {
     let actor_ids = actors.iter()
         .enumerate()
         .map(|(i, actor)| (actor.name.clone(), i))
@@ -53,14 +52,20 @@ pub(crate) fn generate_scenes_type(project_name: &str, scenes: &[Scene], actors:
     quote! {
         static SCENE_DATA: &[u8] = &[#(#scene_data),*];
         static SCENE_OFFSETS: &[usize] = &[#(#offsets),*];
+    }
+}
 
-        pub fn get_decoder_for_scene(id: u32) -> ::std::boxed::Box<dyn ::skylite_compress::Decoder> {
+pub(crate) fn generate_scene_decode_funs(project_name: &str) -> TokenStream {
+    let any_actor_type_name = any_actor_type_name(project_name);
+
+    quote! {
+        pub fn _private_get_decoder_for_scene(id: u32) -> ::std::boxed::Box<dyn ::skylite_compress::Decoder> {
             let mut out = ::skylite_compress::make_decoder(SCENE_DATA);
             for _ in 0..SCENE_OFFSETS[id as usize] { out.decode_u8(); }
             out
         }
 
-        pub fn decode_actor_list(decoder: &mut dyn ::skylite_compress::Decoder) -> Vec<#any_actor_type_name> {
+        pub fn _private_decode_actor_list(decoder: &mut dyn ::skylite_compress::Decoder) -> Vec<#any_actor_type_name> {
             use ::skylite_core::actors::ActorBase;
             let len = ::skylite_core::decode::read_varint(decoder);
             (0..len).map(|_| #any_actor_type_name::_private_decode(decoder)).collect()
@@ -73,8 +78,17 @@ pub(crate) fn generate_scenes_type(project_name: &str, scenes: &[Scene], actors:
 fn gen_named_actors_type(scene: &SceneStub) -> TokenStream {
     let typename = format_ident!("{}Actors", change_case(&scene.name, IdentCase::UpperCamelCase));
     let actor_names = scene.actor_names.iter().map(|name| format_ident!("{}", change_case(name, IdentCase::UpperCamelCase)));
+
+    // Only use repr(usize) when there are actually named actors in the scene,
+    // since it does not work on empty enums. The type should still be generated,
+    // even when it is empty.
+    let repr = if scene.actor_names.len() > 0 {
+        quote!(#[repr(usize)])
+    } else {
+        TokenStream::new()
+    };
     quote! {
-        #[repr(usize)]
+        #repr
         pub enum #typename {
             #(#actor_names),*
         }
@@ -92,7 +106,7 @@ fn gen_properties_type(scene: &SceneStub, items: &[Item]) -> Result<TokenStream,
 
     // The properties are copied directly from the `skylite_proc::properties!` function macro.
     let properties = match get_macro_item("skylite_proc::properties", items)? {
-        Some(mac) => mac.tokens.clone(),
+        Some(tokens) => tokens.clone(),
         None => TokenStream::new()
     };
 
@@ -125,7 +139,8 @@ fn gen_properties_type(scene: &SceneStub, items: &[Item]) -> Result<TokenStream,
 fn gen_scene_type(scene: &SceneStub, type_id: u32, project_name: &str, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     let type_name = scene_type_name(&scene.name);
     let properties_type_name = properties_type_name(&scene.name);
-    let any_actor_type = any_actor_type_name(project_name);
+    let project_type_name = project_type_name(project_name);
+    let any_actor_type = quote!(<#project_type_name as ::skylite_core::SkyliteProject>::Actors);
     let scene_param_list = generate_param_list(&scene.parameters);
     let scene_param_names: Vec<Ident> = scene.parameters.iter().map(get_parameter_name).collect();
     let init_call = match get_annotated_function(items, "skylite_proc::init") {
@@ -143,9 +158,9 @@ fn gen_scene_type(scene: &SceneStub, type_id: u32, project_name: &str, items: &[
 
         impl #type_name {
             pub fn new(#scene_param_list) -> #type_name {
-                let mut decoder = get_decoder_for_scene(#type_id);
-                let actors = decode_actor_list(decoder.as_mut());
-                let extras = decode_actor_list(decoder.as_mut());
+                let mut decoder = #project_type_name::_private_get_decoder_for_scene(#type_id);
+                let actors = #project_type_name::_private_decode_actor_list(decoder.as_mut());
+                let extras = #project_type_name::_private_decode_actor_list(decoder.as_mut());
                 let mut out = #type_name {
                     // Clone arguments here, because they are also used for init_call
                     properties: #properties_type_name::_private_create_properties(#(#scene_param_names.clone()),*),
@@ -170,7 +185,7 @@ fn gen_scene_decode_fn(scene_type_name: &Ident, params: &[Variable]) -> TokenStr
 
     quote! {
         fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> #scene_type_name {
-            use skylite_core::decode::Deserialize;
+            use ::skylite_core::decode::Deserialize;
             #(
                 let #scene_param_names = #scene_args_decoders;
             )*
@@ -179,7 +194,7 @@ fn gen_scene_decode_fn(scene_type_name: &Ident, params: &[Variable]) -> TokenStr
     }
 }
 
-fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &Ident, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
+fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
 
     let scene_type_name = scene_type_name(&scene.name);
@@ -216,7 +231,7 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &Ident, items: &[I
             fn _private_extras(&mut self) -> &mut Vec<<Self::P as ::skylite_core::SkyliteProject>::Actors> { &mut self.extras }
 
             fn _private_update(&mut self, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
-                use skylite_core::actors::ActorBase;
+                use ::skylite_core::actors::ActorBase;
 
                 #pre_update
 
@@ -363,13 +378,13 @@ mod tests {
         let scene = create_test_scene();
         let items = create_test_items();
 
-        let code = gen_scene_trait_impl(&scene, &format_ident!("TestProject"), &items).unwrap();
+        let code = gen_scene_trait_impl(&scene, &quote!(TestProject), &items).unwrap();
         let expected = quote! {
             impl ::skylite_core::scenes::Scene for TestScene {
                 type P = TestProject;
 
                 fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> TestScene {
-                    use skylite_core::decode::Deserialize;
+                    use ::skylite_core::decode::Deserialize;
                     let val1 = u8::deserialize(decoder);
                     let val2 = bool::deserialize(decoder);
                     TestScene::new(val1, val2)
@@ -379,7 +394,7 @@ mod tests {
                 fn _private_extras(&mut self) -> &mut Vec<<Self::P as ::skylite_core::SkyliteProject>::Actors> { &mut self.extras }
 
                 fn _private_update(&mut self, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
-                    use skylite_core::actors::ActorBase;
+                    use ::skylite_core::actors::ActorBase;
 
                     super::pre_update(self, controls);
 

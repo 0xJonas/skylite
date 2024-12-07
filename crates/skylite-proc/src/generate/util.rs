@@ -29,7 +29,7 @@ pub(crate) fn get_annotated_function<'a>(items: &'a [Item], attribute: &str) -> 
 ///
 /// If no invocation with the given `name` is found, `Ok(None)` is returned. If multiple
 /// invocations are found, an `Err` is returned.
-pub(crate) fn get_macro_item<'mac>(name: &str, items: &'mac [Item]) -> Result<Option<&'mac Macro>, SkyliteProcError> {
+pub(crate) fn get_macro_item<'tok>(name: &str, items: &'tok [Item]) -> Result<Option<&'tok TokenStream>, SkyliteProcError> {
     let name_parsed = parse_str::<syn::Path>(name).unwrap();
     let mut definitions_iter = items.iter()
         .filter_map(|item| if let Item::Macro(m) = item {
@@ -40,7 +40,7 @@ pub(crate) fn get_macro_item<'mac>(name: &str, items: &'mac [Item]) -> Result<Op
         .filter(|m| m.mac.path == name_parsed);
 
     let out = match definitions_iter.next() {
-        Some(def) => &def.mac,
+        Some(def) => &def.mac.tokens,
         None => return Ok(None)
     };
     match definitions_iter.next() {

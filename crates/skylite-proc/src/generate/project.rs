@@ -1,10 +1,10 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
-use syn::{Item, ItemFn, ItemMod};
+use syn::{Item, ItemFn};
 
-use crate::{generate::{scenes::scene_type_name, util::{get_annotated_function, typed_value_to_rust}}, parse::{project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
+use crate::{generate::{scenes::{generate_scene_decode_funs, scene_type_name}, util::{get_annotated_function, typed_value_to_rust}}, parse::{project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
 
-use super::{actors::{any_actor_type_name, generate_actors_type}, scenes::generate_scenes_type};
+use super::{actors::{any_actor_type_name, generate_actors_type}, scenes::generate_scene_data};
 
 fn tile_type_name(project_name: &str) -> Ident {
     format_ident!("{}Tiles", change_case(project_name, IdentCase::UpperCamelCase))
@@ -22,23 +22,30 @@ fn generate_tile_type_enum<S: AsRef<str>>(project_name: &str, tile_types: &[S]) 
     }
 }
 
-pub(crate) fn project_type_name(project_name: &str) -> Ident {
+pub(crate) fn project_ident(project_name: &str) -> Ident {
     format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase))
 }
 
+pub(crate) fn project_type_name(project_name: &str) -> TokenStream {
+    // let crate_name = format_ident!("{}", std::env::var("CARGO_CRATE_NAME").unwrap());
+    let project_ident = project_ident(project_name);
+    quote!(crate::#project_ident)
+}
+
 fn generate_project_type(project_name: &str, target_type: &TokenStream) -> TokenStream {
-    let project_name = project_type_name(project_name);
+    let project_ident = project_ident(project_name);
     quote! {
-        pub struct #project_name {
-            draw_context: ::skylite_core::DrawContext<#project_name>,
+        pub struct #project_ident {
+            draw_context: ::skylite_core::DrawContext<#project_ident>,
             scene: ::std::boxed::Box<dyn ::skylite_core::scenes::Scene<P=Self>>,
-            controls: ::skylite_core::ProjectControls<#project_name>
+            controls: ::skylite_core::ProjectControls<#project_ident>
             // TODO
         }
     }
 }
 
-fn generate_project_new_method(project_ident: &Ident, target_type: &TokenStream, init_call: &TokenStream, initial_scene: &SceneInstance) -> TokenStream {
+fn generate_project_new_method(project_name: &str, target_type: &TokenStream, init_call: &TokenStream, initial_scene: &SceneInstance) -> TokenStream {
+    let project_ident = project_ident(project_name);
     let initial_scene_name = scene_type_name(&initial_scene.name);
     let initial_scene_params = initial_scene.args.iter().map(typed_value_to_rust);
     quote! {
@@ -61,14 +68,23 @@ fn generate_project_new_method(project_ident: &Ident, target_type: &TokenStream,
     }
 }
 
-fn generate_project_implementation(project_name: &str, target_type: &TokenStream, initial_scene: &SceneInstance, body: &ItemMod) -> TokenStream {
+fn generate_project_impl(project_name: &str) -> TokenStream {
+    let scene_decode_funs = generate_scene_decode_funs(project_name);
+    let project_ident = project_ident(project_name);
+
+    quote! {
+        impl #project_ident {
+            #scene_decode_funs
+        }
+    }
+}
+
+fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, initial_scene: &SceneInstance, items: &[Item]) -> TokenStream {
     fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
 
-    let project_ident = project_type_name(project_name);
+    let project_ident = project_ident(project_name);
     let tile_type_name = tile_type_name(project_name);
     let actors_type_name = any_actor_type_name(project_name);
-
-    let items = &body.content.as_ref().unwrap().1;
 
     let init = get_annotated_function(items, "skylite_proc::init")
         .map(get_name)
@@ -95,7 +111,7 @@ fn generate_project_implementation(project_name: &str, target_type: &TokenStream
         .map(|name| quote!(#name(&mut self.draw_context);))
         .unwrap_or(TokenStream::new());
 
-    let new_method = generate_project_new_method(&project_ident, target_type, &init, initial_scene);
+    let new_method = generate_project_new_method(project_name, target_type, &init, initial_scene);
 
     quote! {
         impl skylite_core::SkyliteProject for #project_ident {
@@ -133,13 +149,14 @@ fn generate_project_implementation(project_name: &str, target_type: &TokenStream
 
 impl SkyliteProject {
 
-    pub(crate) fn generate(&self, target_type: &TokenStream, body: &ItemMod) -> Result<Vec<Item>, SkyliteProcError> {
+    pub(crate) fn generate(&self, target_type: &TokenStream, items: &[Item]) -> Result<Vec<Item>, SkyliteProcError> {
         Ok(vec![
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
             Item::Verbatim(generate_actors_type(&self.name, &self.actors)?),
-            Item::Verbatim(generate_scenes_type(&self.name, &self.scenes, &self.actors)),
+            Item::Verbatim(generate_scene_data(&self.scenes, &self.actors)),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
-            Item::Verbatim(generate_project_implementation(&self.name, &target_type, &self.initial_scene, body))
+            Item::Verbatim(generate_project_impl(&self.name)),
+            Item::Verbatim(generate_project_trait_impl(&self.name, &target_type, &self.initial_scene, items))
         ])
     }
 }
@@ -151,26 +168,26 @@ mod tests {
 
     use crate::parse::{scenes::SceneInstance, values::TypedValue};
 
-    use super::generate_project_implementation;
+    use super::generate_project_trait_impl;
 
     #[test]
     fn test_generate_project_implementation() {
-        let actual = generate_project_implementation(
+        let body_parsed: syn::File = parse_quote! {
+            #[skylite_proc::init]
+            fn init(project: &mut Test1) {}
+
+            #[skylite_proc::pre_update]
+            fn pre_update(project: &mut Test1) {}
+
+            #[skylite_proc::post_render]
+            fn post_render(project: &mut skylite_core::DrawContext<'static, Test1>) {}
+        };
+
+        let actual = generate_project_trait_impl(
             "Test1",
             &quote!(MockTarget),
             &SceneInstance { name: "TestScene".to_owned(), args: vec![TypedValue::Bool(false), TypedValue::U8(5)]},
-            &parse_quote! {
-                mod project {
-                    #[skylite_proc::init]
-                    fn init(project: &mut Test1) {}
-
-                    #[skylite_proc::pre_update]
-                    fn pre_update(project: &mut Test1) {}
-
-                    #[skylite_proc::post_render]
-                    fn post_render(project: &mut skylite_core::DrawContext<'static, Test1>) {}
-                }
-            }
+            &body_parsed.items
         );
         let expectation = quote! {
             impl skylite_core::SkyliteProject for Test1 {
@@ -187,7 +204,7 @@ mod tests {
                             focus_x: w as i32 / 2,
                             focus_y: h as i32 / 2
                         },
-                        scene: ::std::boxed::Box::new(TestScene::create_new(false, 5u8)),
+                        scene: ::std::boxed::Box::new(TestScene::new(false, 5u8)),
                         controls: ::skylite_core::ProjectControls { pending_scene: None }
                     };
                     init(&mut out);
@@ -205,7 +222,7 @@ mod tests {
                     }
 
                     pre_update(self);
-                    ::skylite_core::scenes::_private::update_scene(self.scene.as_mut(), &mut self.controls);
+                    self.scene._private_update(&mut self.controls);
                 }
             }
         };
