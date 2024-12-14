@@ -6,7 +6,7 @@ use crate::{scenes::Scene, DrawContext, ProjectControls, SkyliteProject};
 ///
 /// Used to assign an id to a specific type.
 pub trait TypeId {
-    fn get_id() -> u32 where Self: Sized;
+    fn get_id() -> usize where Self: Sized;
 }
 
 /// **For internal use only.**
@@ -14,11 +14,11 @@ pub trait TypeId {
 /// Implements the `get_id` function from the [`TypeId`]
 /// trait for instances of a type via a blanket implementation.
 pub trait InstanceId {
-    fn get_id(&self) -> u32;
+    fn get_id(&self) -> usize;
 }
 
 impl<T: TypeId> InstanceId for T {
-    fn get_id(&self) -> u32 {
+    fn get_id(&self) -> usize {
         <T as TypeId>::get_id()
     }
 }

@@ -179,7 +179,7 @@ fn actor_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skyli
     let (id, path) = project_stub.assets.actors.find_asset(&name)?;
     let actor = Actor::from_file(&path)?;
 
-    let out = generate_actor_definition(&actor, id as u32, &project_stub.name, &items, &body_raw)?;
+    let out = generate_actor_definition(&actor, id, &project_stub.name, &items, &body_raw)?;
 
     #[cfg(debug_assertions)]
     process_debug_output(&out, &items)?;

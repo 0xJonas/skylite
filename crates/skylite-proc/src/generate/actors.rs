@@ -29,7 +29,7 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
         }
 
         impl skylite_core::actors::InstanceId for #type_name {
-            fn get_id(&self) -> u32 where Self: Sized {
+            fn get_id(&self) -> usize where Self: Sized {
                 // The combination of `*self` and `ref a` is required for an empty `actors` list work,
                 // because there may or may not be a way to construct *something* using an empty actors enum.
                 // Realistically, this function and similar functions should never be called then,
@@ -72,13 +72,13 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
 
         impl skylite_core::actors::AnyActor for #type_name {
             unsafe fn _private_transmute_mut<A: skylite_core::actors::Actor>(&mut self) -> &mut A {
-                match <A as skylite_core::actors::TypeId>::get_id() {
+                use ::skylite_core::actors::InstanceId;
+                match self {
                     #(
-                        #actor_ids => if let #type_name::#actor_names(a) = self {
-                            // If everything worked correctly, `a` should already have the type in `A` and this is a no-op.
+                        #type_name::#actor_names(a) => {
+                            // _private_transmute_mut must only be called when it is known in
+                            // advance that the following will be a no-op.
                             ::std::mem::transmute::<&mut #actor_names, &mut A>(a)
-                        } else {
-                            ::std::unreachable!()
                         },
                     )*
                     _ => ::std::unreachable!()
@@ -86,13 +86,14 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
             }
 
             unsafe fn _private_transmute<A: skylite_core::actors::Actor>(&self) -> &A {
-                match <A as skylite_core::actors::TypeId>::get_id() {
+                use ::skylite_core::actors::InstanceId;
+                let id = <A as skylite_core::actors::TypeId>::get_id();
+                match self {
                     #(
-                        #actor_ids => if let #type_name::#actor_names(a) = self {
-                            // If everything worked correctly, `a` should already have the type in `A` and this is a no-op.
+                        #type_name::#actor_names(a) => {
+                            // _private_transmute must only be called when it is known in
+                            // advance that the following will be a no-op.
                             ::std::mem::transmute::<&#actor_names, &A>(a)
-                        } else {
-                            ::std::unreachable!()
                         },
                     )*
                     _ => ::std::unreachable!()
@@ -393,11 +394,11 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &
 
 // region: generate_actor_definition Entrypoint
 
-pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: u32, project_name: &str, items: &[Item], body_raw: &TokenStream) -> Result<TokenStream, SkyliteProcError> {
+pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_name: &str, items: &[Item], body_raw: &TokenStream) -> Result<TokenStream, SkyliteProcError> {
     let project_type_name = project_type_name(project_name);
     let actor_module_name = format_ident!("{}", change_case(&actor.name, IdentCase::LowerSnakeCase));
     let actor_type_name = actor_type_name(&actor.name);
-    let actor_id = Literal::u32_unsuffixed(actor_id);
+    let actor_id = Literal::usize_unsuffixed(actor_id);
 
     let imports = items.iter().filter_map(|item| if let Item::Use(import) = item {
             Some(import.to_owned())
@@ -427,7 +428,7 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: u32, project_na
             #actor_type
 
             impl ::skylite_core::actors::TypeId for #actor_type_name {
-                fn get_id() -> u32 {
+                fn get_id() -> usize {
                     #actor_id
                 }
             }
