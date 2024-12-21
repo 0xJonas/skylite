@@ -34,8 +34,8 @@ pub enum Call {
         config: u32,
         data: Vec<u8>
     },
-    SaveState {
-        location: String,
+    WriteStorage {
+        offset: usize,
         data: Vec<u8>
     }
 }
@@ -112,39 +112,23 @@ impl SkyliteTarget for MockTarget {
         self.draw_sub_impl(data, x, y, src_x, src_y, src_w, src_h, flip_h, flip_v, rotate);
     }
 
-    fn draw_tile(&mut self, data: &[u8], layer: u8, tile_x_idx: i16, tile_y_idx: i16, src_x: i16, src_y: i16, flip_h: bool, flip_v: bool, rotate: bool) {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(data);
-        self.call_history.push(Call::DrawTile { data: hasher.finish(), layer, tile_x_idx, tile_y_idx, src_x, src_y, flip_h, flip_v, rotate });
-
-        assert!(layer <= 3);
-        let cfg = &self.layer_cfg_data[layer as usize];
-        self.draw_sub_impl(data, tile_x_idx * (cfg.tile_size as i16) - (cfg.x_off as i16), tile_y_idx * (cfg.tile_size as i16) - (cfg.y_off as i16),
-                            src_x, src_y, cfg.tile_size as u16, cfg.tile_size as u16, flip_h, flip_v, rotate);
-    }
-
-    fn layer_cfg(&mut self, layer: u8, config: u32, data: &[u8]) {
-        self.call_history.push(Call::LayerCfg { layer, config, data: data.to_owned() });
-        assert!(layer <= 3);
-        match config {
-            0 => self.layer_cfg_data[layer as usize].tile_size = data[0],
-            1 => self.layer_cfg_data[layer as usize].x_off = data[0],
-            2 => self.layer_cfg_data[layer as usize].y_off = data[0],
-            _ => panic!("Unknown config {}", config)
-        }
-    }
-
     fn get_screen_size(&self) -> (u16, u16) {
         (128, 128)
     }
 
-    fn save_state(&mut self, location: &str, data: &[u8]) {
-        self.state = data.to_owned();
-        self.call_history.push(Call::SaveState { location: location.to_owned(), data: data.to_owned() });
+    fn write_storage(&mut self, offset: usize, data: &[u8]) {
+        if self.state.len() < offset + data.len() {
+            self.state.extend(std::iter::repeat(0).take(offset + data.len() - self.state.len()));
+        }
+        for i in 0..data.len() {
+            self.state[offset + i] = data[i];
+        }
+
+        self.call_history.push(Call::WriteStorage { offset, data: data.to_owned() });
     }
 
-    fn load_state(&self, _location: &str) -> Vec<u8> {
-        self.state.clone()
+    fn read_storage(&self, offset: usize, len: usize) -> Vec<u8> {
+        self.state[offset .. offset + len].to_owned()
     }
 }
 
