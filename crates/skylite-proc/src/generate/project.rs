@@ -27,7 +27,6 @@ pub(crate) fn project_ident(project_name: &str) -> Ident {
 }
 
 pub(crate) fn project_type_name(project_name: &str) -> TokenStream {
-    // let crate_name = format_ident!("{}", std::env::var("CARGO_CRATE_NAME").unwrap());
     let project_ident = project_ident(project_name);
     quote!(crate::#project_ident)
 }
@@ -36,10 +35,12 @@ fn generate_project_type(project_name: &str, target_type: &TokenStream) -> Token
     let project_ident = project_ident(project_name);
     quote! {
         pub struct #project_ident {
-            draw_context: ::skylite_core::DrawContext<#project_ident>,
+            target: #target_type,
             scene: ::std::boxed::Box<dyn ::skylite_core::scenes::Scene<P=Self>>,
-            controls: ::skylite_core::ProjectControls<#project_ident>
-            // TODO
+            controls: ::skylite_core::ProjectControls<#project_ident>,
+            graphics_cache: ::std::vec::Vec<::std::rc::Weak<u8>>,
+            focus_x: i32,
+            focus_y: i32
         }
     }
 }
@@ -52,14 +53,12 @@ fn generate_project_new_method(project_name: &str, target_type: &TokenStream, in
         fn new(target: #target_type) -> #project_ident {
             let (w, h) = target.get_screen_size();
             let mut out = #project_ident {
-                draw_context: skylite_core::DrawContext {
-                    target,
-                    graphics_cache: Vec::new(),
-                    focus_x: w as i32 / 2,
-                    focus_y: h as i32 / 2
-                },
+                target,
                 scene: ::std::boxed::Box::new(#initial_scene_name::new(#(#initial_scene_params),*)),
-                controls: ::skylite_core::ProjectControls { pending_scene: None }
+                controls: ::skylite_core::ProjectControls { pending_scene: None },
+                graphics_cache: ::std::vec::Vec::new(),
+                focus_x: w as i32 / 2,
+                focus_y: h as i32 / 2
             };
 
             #init_call
@@ -122,10 +121,16 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
             #new_method
 
             fn render(&mut self) {
+                let draw_context = ::skylite_core::DrawContext {
+                    target: &mut self.target,
+                    graphics_cache: &mut self.graphics_cache,
+                    focus_x: self.focus_x,
+                    focus_y: self.focus_y
+                };
                 #pre_render
 
                 // Main rendering
-                ::skylite_core::scenes::_private::render_scene(self.scene.as_ref(), &mut self.draw_context);
+                ::skylite_core::scenes::_private::render_scene(self.scene.as_ref(), &draw_context);
 
                 #post_render
             }

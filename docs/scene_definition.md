@@ -76,7 +76,7 @@ Within a `scene_definition!` there are multiple macros and attributes that have 
 
   Marks a function that is called at the beginning of rendering the scene. The marked function should take the following parameters.
   - An immutable reference to the scene's **main type**: `&MyScene`.
-  - A mutable reference to the project's `DrawContext`: `&mut DrawContext<MyProject>`.
+  - An immutable reference to a `DrawContext`: `&DrawContext<MyProject>`.
 
 - `#[skylite_proc::post_render]`
 
@@ -115,7 +115,7 @@ scene_definition! {
     }
 
     #[skylite_proc::post_render]
-    fn post_render(scene: &MyScene, ctx: &mut DrawContext<MyProject>) {
+    fn post_render(scene: &MyScene, ctx: &DrawContext<MyProject>) {
         // ...
     }
 }

@@ -264,7 +264,7 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
                 #post_update
             }
 
-            fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
+            fn _private_render(&self, ctx: &::skylite_core::DrawContext<Self::P>) {
                 #pre_render
                 ::skylite_core::scenes::_private::render_scene(self, ctx);
                 #post_render
@@ -318,7 +318,7 @@ pub(crate) fn generate_scene_definition(scene: &SceneStub, type_id: u32, items: 
 
 #[cfg(test)]
 mod tests {
-    use quote::{format_ident, quote};
+    use quote::quote;
     use syn::{parse2, File, Item};
 
     use crate::parse::{scenes::SceneStub, values::{Type, TypedValue}};
@@ -419,7 +419,7 @@ mod tests {
                     self.extras.append(&mut extras);
                 }
 
-                fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
+                fn _private_render(&self, ctx: & ::skylite_core::DrawContext<Self::P>) {
                     ::skylite_core::scenes::_private::render_scene(self, ctx);
                     super::post_render(self, ctx);
                 }

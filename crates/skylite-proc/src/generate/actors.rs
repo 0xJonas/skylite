@@ -61,7 +61,7 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
                     ),*
                 }
             }
-            fn _private_render(&self, ctx: &mut skylite_core::DrawContext<Self::P>) {
+            fn _private_render(&self, ctx: &skylite_core::DrawContext<Self::P>) {
                 match *self {
                     #(
                         #type_name::#actor_names(ref a) => a._private_render(ctx)
@@ -72,7 +72,6 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
 
         impl skylite_core::actors::AnyActor for #type_name {
             unsafe fn _private_transmute_mut<A: skylite_core::actors::Actor>(&mut self) -> &mut A {
-                use ::skylite_core::actors::InstanceId;
                 match self {
                     #(
                         #type_name::#actor_names(a) => {
@@ -86,8 +85,6 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
             }
 
             unsafe fn _private_transmute<A: skylite_core::actors::Actor>(&self) -> &A {
-                use ::skylite_core::actors::InstanceId;
-                let id = <A as skylite_core::actors::TypeId>::get_id();
                 match self {
                     #(
                         #type_name::#actor_names(a) => {
@@ -383,7 +380,7 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &
 
             #private_update
 
-            fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
+            fn _private_render(&self, ctx: &::skylite_core::DrawContext<Self::P>) {
                 #render
             }
         }
@@ -456,7 +453,7 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_
 
 #[cfg(test)]
 mod tests {
-    use quote::{format_ident, quote};
+    use quote::quote;
     use syn::{parse2, File, Item};
     use crate::parse::actors::{Actor, Action, ActionInstance};
     use crate::parse::values::{Type, TypedValue, Variable};

@@ -52,9 +52,9 @@ pub trait SkyliteProject {
 /// The `DrawContext` contains all information required for graphics
 /// rendering, such as a handle of the current [`SkyliteTarget`],
 /// the cache for the currently loaded graphics, or the current camera focus.
-pub struct DrawContext<P: SkyliteProject> {
-    #[doc(hidden)] pub target: P::Target,
-    #[doc(hidden)] pub graphics_cache: Vec<std::rc::Weak<u8>>,
+pub struct DrawContext<'project, P: SkyliteProject> {
+    #[doc(hidden)] pub target: &'project mut P::Target,
+    #[doc(hidden)] pub graphics_cache: &'project mut Vec<std::rc::Weak<u8>>,
     #[doc(hidden)] pub focus_x: i32,
     #[doc(hidden)] pub focus_y: i32
 }

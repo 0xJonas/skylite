@@ -68,12 +68,12 @@ Within the body of `actor_definition`, there are several items with special mean
 
   Marks a function that is called to draw the actor to the screen. The function marked by this attribute must take exactly the following parameters:
   - An immutable reference to the actor's **main type**.
-  - A mutable reference to the project's `DrawContext` type.
+  - An immutable reference to a `DrawContext`.
 
   Example:
   ```rust
   #[skylite_proc::render]
-  fn render(actor: &MyActor, ctx: &mut DrawContext<MyProject>) { ... }
+  fn render(actor: &MyActor, ctx: &DrawContext<MyProject>) { ... }
   ```
 
 - `#[skylite_proc::action("name")]`
@@ -141,7 +141,7 @@ skylite_proc::actor_definition! {
     }
 
     #[skylite_proc::render]
-    fn render(actor: &MyActor, ctx: &mut DrawContext<MyProject>) {
+    fn render(actor: &MyActor, ctx: &DrawContext<MyProject>) {
         // Draw something to the screen.
     }
 }

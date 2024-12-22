@@ -1,5 +1,3 @@
-use std::cell::RefMut;
-
 use skylite_compress::Decoder;
 
 use crate::{actors::{Actor, AnyActor, InstanceId, TypeId}, DrawContext, ProjectControls, SkyliteProject};
@@ -18,7 +16,7 @@ pub trait Scene {
 
     #[doc(hidden)] fn _private_decode(decode: &mut dyn Decoder) -> Self where Self: Sized;
     #[doc(hidden)] fn _private_update(&mut self, controls: &mut ProjectControls<Self::P>);
-    #[doc(hidden)] fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
+    #[doc(hidden)] fn _private_render(&self, ctx: &DrawContext<Self::P>);
     #[doc(hidden)] fn _private_actors(&mut self) -> &mut [<Self::P as SkyliteProject>::Actors];
     #[doc(hidden)] fn _private_extras(&mut self) -> &mut Vec<<Self::P as SkyliteProject>::Actors>;
 
@@ -94,7 +92,7 @@ pub mod _private {
 
     use super::Scene;
 
-    pub fn render_scene<'scene, P: SkyliteProject>(scene: &'scene dyn Scene<P=P>, ctx: &mut DrawContext<P>) {
+    pub fn render_scene<'scene, P: SkyliteProject>(scene: &'scene dyn Scene<P=P>, ctx: &DrawContext<P>) {
         let mut z_sorted: Vec<&P::Actors> = Vec::new();
         let mut insert_by_z_order = |actor: &'scene P::Actors| {
             for (i, a) in z_sorted.iter().enumerate() {

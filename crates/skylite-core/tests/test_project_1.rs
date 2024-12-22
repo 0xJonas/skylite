@@ -39,7 +39,7 @@ skylite_proc::actor_definition! {
     }
 
     #[skylite_proc::render]
-    fn render(_actor: &TestActor, _ctx: &mut DrawContext<TestProject1>) {
+    fn render(_actor: &TestActor, _ctx: &DrawContext<TestProject1>) {
         // Draw something to the screen.
     }
 }
