@@ -227,9 +227,6 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
 
             #decode_fn
 
-            fn _private_actors(&mut self) -> &mut [<Self::P as ::skylite_core::SkyliteProject>::Actors] { self.actors.as_mut_slice() }
-            fn _private_extras(&mut self) -> &mut Vec<<Self::P as ::skylite_core::SkyliteProject>::Actors> { &mut self.extras }
-
             fn _private_update(&mut self, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
                 use ::skylite_core::actors::ActorBase;
 
@@ -270,9 +267,27 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
                 #post_render
             }
 
-            fn get_actors(&self) -> &[<Self::P as ::skylite_core::SkyliteProject>::Actors] { &self.actors }
+            fn iter_actors(&self, which: ::skylite_core::scenes::IterActors) -> ::skylite_core::scenes::ActorIterator<<Self::P as ::skylite_core::SkyliteProject>::Actors> {
+                use ::skylite_core::scenes::IterActors;
+                match which {
+                    IterActors::Named => ::skylite_core::scenes::ActorIterator::_private_new(&self.actors, &[]),
+                    IterActors::Extra => ::skylite_core::scenes::ActorIterator::_private_new(&[], &self.extras),
+                    IterActors::All => ::skylite_core::scenes::ActorIterator::_private_new(&self.actors, &self.extras)
+                }
+            }
 
-            fn get_extras(&self) -> &[<Self::P as ::skylite_core::SkyliteProject>::Actors] { &self.extras }
+            fn iter_actors_mut(&mut self, which: ::skylite_core::scenes::IterActors) -> ::skylite_core::scenes::ActorIteratorMut<<Self::P as ::skylite_core::SkyliteProject>::Actors> {
+                use ::skylite_core::scenes::IterActors;
+                match which {
+                    IterActors::Named => ::skylite_core::scenes::ActorIteratorMut::_private_new(self.actors.as_mut_slice(), &mut []),
+                    IterActors::Extra => ::skylite_core::scenes::ActorIteratorMut::_private_new(&mut [], self.extras.as_mut_slice()),
+                    IterActors::All => ::skylite_core::scenes::ActorIteratorMut::_private_new(self.actors.as_mut_slice(), self.extras.as_mut_slice())
+                }
+            }
+
+            fn add_extra(&mut self, extra: <Self::P as ::skylite_core::SkyliteProject>::Actors) {
+                self.extras.push(extra);
+            }
 
             fn remove_current_extra(&mut self) { self.remove_extra = true; }
         }
