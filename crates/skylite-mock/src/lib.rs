@@ -2,7 +2,7 @@ use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
 use skylite_core::SkyliteTarget;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Call {
     DrawSub {
         // Hash of the actual data. Storing the actual data here
@@ -29,14 +29,12 @@ pub enum Call {
         flip_v: bool,
         rotate: bool
     },
-    LayerCfg {
-        layer: u8,
-        config: u32,
-        data: Vec<u8>
-    },
     WriteStorage {
         offset: usize,
         data: Vec<u8>
+    },
+    Log {
+        msg: String
     }
 }
 
@@ -60,31 +58,20 @@ fn apply_transform(pos: (i16, i16), w: u16, h: u16, flip_h: bool, flip_v: bool, 
     }
 }
 
-pub struct MockLayerCfg {
-    pub tile_size: u8,
-    pub x_off: u8,
-    pub y_off: u8
-}
-
 pub struct MockTarget {
-    pub call_history: Vec<Call>,
+    call_history: Vec<(Vec<String>, Call)>,
+    current_tags: Vec<String>,
     pub screen_buffer: [u8; 128 * 128],
-    pub layer_cfg_data: [MockLayerCfg; 4],
     pub state: Vec<u8>
 }
 
 impl MockTarget {
 
-    fn new() -> MockTarget {
+    pub fn new() -> MockTarget {
         MockTarget {
             call_history: Vec::new(),
+            current_tags: Vec::new(),
             screen_buffer: [0; 128 * 128],
-            layer_cfg_data: [
-                MockLayerCfg { tile_size: 16, x_off: 0, y_off: 0 },
-                MockLayerCfg { tile_size: 16, x_off: 0, y_off: 0 },
-                MockLayerCfg { tile_size: 16, x_off: 0, y_off: 0 },
-                MockLayerCfg { tile_size: 16, x_off: 0, y_off: 0 },
-            ],
             state: Vec::new()
         }
     }
@@ -100,6 +87,34 @@ impl MockTarget {
             }
         }
     }
+
+    pub fn log(&mut self, msg: &str) {
+        self.record_call(Call::Log { msg: msg.to_owned() });
+    }
+
+    fn record_call(&mut self, call: Call) {
+        self.call_history.push((self.current_tags.clone(), call));
+    }
+
+    pub fn clear_call_history(&mut self) {
+        self.call_history.clear();
+    }
+
+    pub fn get_calls_by_tag(&self, tag: &str) -> Vec<Call> {
+        let tag_owned = tag.to_owned();
+        self.call_history.iter()
+            .filter(|(tags, _)| tags.contains(&tag_owned))
+            .map(|(_, call)| call.clone())
+            .collect()
+    }
+
+    pub fn push_tag(&mut self, tag: &str) {
+        self.current_tags.push(tag.to_owned());
+    }
+
+    pub fn pop_tag(&mut self) {
+        self.current_tags.pop();
+    }
 }
 
 impl SkyliteTarget for MockTarget {
@@ -107,7 +122,7 @@ impl SkyliteTarget for MockTarget {
     fn draw_sub(&mut self, data: &[u8], x: i16, y: i16, src_x: i16, src_y: i16, src_w: u16, src_h: u16, flip_h: bool, flip_v: bool, rotate: bool) {
         let mut hasher = DefaultHasher::new();
         hasher.write(data);
-        self.call_history.push(Call::DrawSub { data: hasher.finish(), x, y, src_x, src_y, src_w, src_h, flip_h, flip_v, rotate });
+        self.record_call(Call::DrawSub { data: hasher.finish(), x, y, src_x, src_y, src_w, src_h, flip_h, flip_v, rotate });
 
         self.draw_sub_impl(data, x, y, src_x, src_y, src_w, src_h, flip_h, flip_v, rotate);
     }
@@ -124,7 +139,7 @@ impl SkyliteTarget for MockTarget {
             self.state[offset + i] = data[i];
         }
 
-        self.call_history.push(Call::WriteStorage { offset, data: data.to_owned() });
+        self.record_call(Call::WriteStorage { offset, data: data.to_owned() });
     }
 
     fn read_storage(&self, offset: usize, len: usize) -> Vec<u8> {
@@ -160,6 +175,7 @@ mod tests {
             hasher.finish()
         };
         let mut target = MockTarget::new();
+        target.push_tag("test");
         target.draw_sub(graphics_data, 0, 0, 0, 0, 8, 8, false, false, false);
         target.draw_sub(graphics_data, 8, 0, 0, 0, 8, 8, true, false, false);
         target.draw_sub(graphics_data, 16, 0, 0, 0, 8, 8, false, true, false);
@@ -169,9 +185,10 @@ mod tests {
         target.draw_sub(graphics_data, 16, 8, 0, 0, 8, 8, false, true, true);
         target.draw_sub(graphics_data, 24, 8, 0, 0, 8, 8, true, true, true);
 
-        assert_eq!(target.call_history.len(), 8);
-        assert_eq!(target.call_history[0], Call::DrawSub { data: graphics_data_hash, x: 0, y: 0, src_x: 0, src_y: 0, src_w: 8, src_h: 8, flip_h: false, flip_v: false, rotate: false });
-        assert_eq!(target.call_history[7], Call::DrawSub { data: graphics_data_hash, x: 24, y: 8, src_x: 0, src_y: 0, src_w: 8, src_h: 8, flip_h: true, flip_v: true, rotate: true });
+        let call_history = target.get_calls_by_tag("test");
+        assert_eq!(call_history.len(), 8);
+        assert_eq!(call_history[0], Call::DrawSub { data: graphics_data_hash, x: 0, y: 0, src_x: 0, src_y: 0, src_w: 8, src_h: 8, flip_h: false, flip_v: false, rotate: false });
+        assert_eq!(call_history[7], Call::DrawSub { data: graphics_data_hash, x: 24, y: 8, src_x: 0, src_y: 0, src_w: 8, src_h: 8, flip_h: true, flip_v: true, rotate: true });
 
         // Row 0
         assert_eq!(&target.screen_buffer[0..32], &[0, 1, 2, 3, 4, 5, 6, 7,  7, 6, 5, 4, 3, 2, 1, 0,  7, 8, 9, 10, 11, 12, 13, 14,  14, 13, 12, 11, 10, 9, 8, 7]);
