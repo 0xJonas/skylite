@@ -1,6 +1,6 @@
 use skylite_compress::Decoder;
 
-use crate::{scenes::Scene, DrawContext, ProjectControls, SkyliteProject};
+use crate::{ecs::Entity, scenes::Scene, DrawContext, ProjectControls, SkyliteProject};
 
 /// **For internal use only.**
 ///
@@ -33,6 +33,12 @@ pub trait ActorBase: InstanceId {
     #[doc(hidden)] fn _private_decode(decoder: &mut dyn Decoder) -> Self;
     #[doc(hidden)] fn _private_update(&mut self, scene: &mut dyn Scene<P=Self::P>, controls: &mut ProjectControls<Self::P>);
     #[doc(hidden)] fn _private_render(&self, ctx: &DrawContext<Self::P>);
+
+    /// Returns a reference to the underlying entity for this actor.
+    fn get_entity(&self) -> &Entity;
+
+    /// Returns a mutable reference to the underlying entity for this actor.
+    fn get_entity_mut(&mut self) -> &mut Entity;
 
     /// Returns the z-order of the actor.
     ///

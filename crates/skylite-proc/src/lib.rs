@@ -11,11 +11,13 @@ use parse::{guile::SCM, project::SkyliteProjectStub};
 use parse::scheme_util::form_to_string;
 use proc_macro2::{TokenStream, TokenTree};
 use parse::project::SkyliteProject;
-use syn::{File, LitStr};
-use syn::{parse::Parser, parse2, punctuated::Punctuated, Item, Token};
+use syn::{parse::Parser, parse2, punctuated::Punctuated, Item, Token, File, LitStr};
 
 mod parse;
 mod generate;
+mod ecs;
+
+use ecs::{derive_component_impl, system_impl};
 
 #[derive(Debug, Clone)]
 enum SkyliteProcError {
@@ -81,7 +83,7 @@ fn get_crate_root_check() -> TokenStream {
     }
 }
 
-fn skylite_project_imp_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
+fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
     let items = parse2::<File>(body_raw)
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
         .items;
@@ -207,8 +209,10 @@ fn scene_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skyli
     Ok(out)
 }
 
+
+
 fn skylite_project_impl(body_raw: TokenStream) -> TokenStream {
-    match skylite_project_imp_fallible(body_raw) {
+    match skylite_project_impl_fallible(body_raw) {
         Ok(t) => t,
         Err(err) => err.into()
     }
@@ -243,6 +247,16 @@ pub fn actor_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStrea
 #[proc_macro]
 pub fn scene_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     scene_definition_impl(body.into()).into()
+}
+
+#[proc_macro]
+pub fn system(args: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    system_impl(args.into()).into()
+}
+
+#[proc_macro_derive(Component)]
+pub fn derive_component(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    derive_component_impl(item.into()).into()
 }
 
 #[proc_macro]

@@ -61,10 +61,27 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
                     ),*
                 }
             }
+
             fn _private_render(&self, ctx: &skylite_core::DrawContext<Self::P>) {
                 match *self {
                     #(
                         #type_name::#actor_names(ref a) => a._private_render(ctx)
+                    ),*
+                }
+            }
+
+            fn get_entity(&self) -> &::skylite_core::ecs::Entity {
+                match *self {
+                    #(
+                        #type_name::#actor_names(ref a) => a.get_entity()
+                    ),*
+                }
+            }
+
+            fn get_entity_mut(&mut self) -> &mut ::skylite_core::ecs::Entity {
+                match *self {
+                    #(
+                        #type_name::#actor_names(ref mut a) => a.get_entity_mut()
                     ),*
                 }
             }
@@ -266,6 +283,7 @@ fn gen_actor_type(actor: &Actor) -> TokenStream {
     quote! {
         pub struct #actor_type_name {
             pub properties: #properties_type_name,
+            entity: ::skylite_core::ecs::Entity,
             current_action: #action_type_name,
             action_changed: bool,
             clear_action_changed: bool
@@ -276,6 +294,7 @@ fn gen_actor_type(actor: &Actor) -> TokenStream {
                 #actor_type_name {
                     // See `gen_actor_properties_type` for the definition of `create_properties`.
                     properties: #properties_type_name::_private_create_properties(#(#actor_param_names),*),
+                    entity: ::skylite_core::ecs::Entity::new(),
                     current_action: #action_type_name::#initial_action_name {
                         #(#initial_action_params: #initial_action_args),*
                     },
@@ -383,6 +402,10 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &
             fn _private_render(&self, ctx: &::skylite_core::DrawContext<Self::P>) {
                 #render
             }
+
+            fn get_entity(&self) -> &::skylite_core::ecs::Entity { &self.entity }
+
+            fn get_entity_mut(&mut self) -> &mut ::skylite_core::ecs::Entity { &mut self.entity }
         }
     })
 }

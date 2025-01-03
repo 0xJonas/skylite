@@ -4,6 +4,7 @@ use scenes::Scene;
 pub mod decode;
 pub mod scenes;
 pub mod actors;
+pub mod ecs;
 
 /// Defines which functions a backend must provide to work with Skylite.
 pub trait SkyliteTarget {
