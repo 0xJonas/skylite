@@ -64,6 +64,7 @@ pub struct DrawContext<'project, P: SkyliteProject> {
 ///
 /// This is the main type that scenes and actors have access to in their
 /// update/action methods.
-pub struct ProjectControls<P: SkyliteProject> {
+pub struct ProjectControls<'project, P: SkyliteProject> {
+    pub target: &'project mut P::Target,
     #[doc(hidden)] pub pending_scene: Option<Box<dyn Scene<P=P>>>
 }

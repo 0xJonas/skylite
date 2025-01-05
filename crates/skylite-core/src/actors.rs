@@ -32,7 +32,7 @@ pub trait ActorBase: InstanceId {
 
     #[doc(hidden)] fn _private_decode(decoder: &mut dyn Decoder) -> Self;
     #[doc(hidden)] fn _private_update(&mut self, scene: &mut dyn Scene<P=Self::P>, controls: &mut ProjectControls<Self::P>);
-    #[doc(hidden)] fn _private_render(&self, ctx: &DrawContext<Self::P>);
+    #[doc(hidden)] fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
 
     /// Returns a reference to the underlying entity for this actor.
     fn get_entity(&self) -> &Entity;

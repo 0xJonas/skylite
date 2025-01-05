@@ -1,3 +1,3 @@
 '((name . TestProject1)
   (tile-types . (solid non-solid semi-solid))
-  (initial-scene . (test_scene #f 5)))
+  (initial-scene . (basic_scene_1 "scene1")))

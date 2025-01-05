@@ -261,7 +261,7 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
                 #post_update
             }
 
-            fn _private_render(&self, ctx: &::skylite_core::DrawContext<Self::P>) {
+            fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
                 #pre_render
                 ::skylite_core::scenes::_private::render_scene(self, ctx);
                 #post_render
@@ -310,24 +310,30 @@ pub(crate) fn generate_scene_definition(scene: &SceneStub, type_id: u32, items: 
 
     Ok(quote! {
         mod #scene_module_name {
-            #[allow(unused_imports)]
-            #(
-                #imports
-            )
-            *
+            pub mod gen {
+                #[allow(unused_imports)]
+                #(
+                    #imports
+                )
+                *
+                use super::*;
 
-            #named_actors_type
+                #named_actors_type
 
-            #properties_type
+                #properties_type
 
-            #scene_type
+                #scene_type
 
-            #scene_trait_impl
+                #scene_trait_impl
+            }
+
+            use gen::*;
+
+            #body_raw
         }
 
-        pub use #scene_module_name::*;
+        pub use #scene_module_name::gen::*;
 
-        #body_raw
     })
 }
 
@@ -434,7 +440,7 @@ mod tests {
                     self.extras.append(&mut extras);
                 }
 
-                fn _private_render(&self, ctx: & ::skylite_core::DrawContext<Self::P>) {
+                fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
                     ::skylite_core::scenes::_private::render_scene(self, ctx);
                     super::post_render(self, ctx);
                 }

@@ -135,7 +135,7 @@ pub trait Scene {
 
     #[doc(hidden)] fn _private_decode(decode: &mut dyn Decoder) -> Self where Self: Sized;
     #[doc(hidden)] fn _private_update(&mut self, controls: &mut ProjectControls<Self::P>);
-    #[doc(hidden)] fn _private_render(&self, ctx: &DrawContext<Self::P>);
+    #[doc(hidden)] fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
 
     /// Returns an iterator over all the actors in the scene.
     fn iter_actors(&self, which: IterActors) -> ActorIterator<<Self::P as SkyliteProject>::Actors>;
@@ -158,7 +158,7 @@ pub mod _private {
 
     use super::{IterActors, Scene};
 
-    pub fn render_scene<'scene, P: SkyliteProject>(scene: &'scene dyn Scene<P=P>, ctx: &DrawContext<P>) {
+    pub fn render_scene<'scene, P: SkyliteProject>(scene: &'scene dyn Scene<P=P>, ctx: &mut DrawContext<P>) {
         let mut z_sorted: Vec<&P::Actors> = Vec::new();
         let mut insert_by_z_order = |actor: &'scene P::Actors| {
             for (i, a) in z_sorted.iter().enumerate() {
@@ -170,7 +170,6 @@ pub mod _private {
             z_sorted.push(actor);
         };
 
-        scene.iter_actors(IterActors::All).for_each(&mut insert_by_z_order);
         scene.iter_actors(IterActors::All).for_each(&mut insert_by_z_order);
 
         z_sorted.iter().for_each(|a| a._private_render(ctx));

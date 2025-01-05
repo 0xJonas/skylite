@@ -37,7 +37,6 @@ fn generate_project_type(project_name: &str, target_type: &TokenStream) -> Token
         pub struct #project_ident {
             target: #target_type,
             scene: ::std::boxed::Box<dyn ::skylite_core::scenes::Scene<P=Self>>,
-            controls: ::skylite_core::ProjectControls<#project_ident>,
             graphics_cache: ::std::vec::Vec<::std::rc::Weak<u8>>,
             focus_x: i32,
             focus_y: i32
@@ -55,7 +54,6 @@ fn generate_project_new_method(project_name: &str, target_type: &TokenStream, in
             let mut out = #project_ident {
                 target,
                 scene: ::std::boxed::Box::new(#initial_scene_name::new(#(#initial_scene_params),*)),
-                controls: ::skylite_core::ProjectControls { pending_scene: None },
                 graphics_cache: ::std::vec::Vec::new(),
                 focus_x: w as i32 / 2,
                 focus_y: h as i32 / 2
@@ -74,6 +72,11 @@ fn generate_project_impl(project_name: &str) -> TokenStream {
     quote! {
         impl #project_ident {
             #scene_decode_funs
+
+            #[cfg(debug_assertions)]
+            pub fn _private_target(&mut self) -> &mut <#project_ident as ::skylite_core::SkyliteProject>::Target {
+                &mut self.target
+            }
         }
     }
 }
@@ -92,22 +95,22 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
 
     let pre_update = get_annotated_function(items, "skylite_proc::pre_update")
         .map(get_name)
-        .map(|name| quote!(#name(self);))
+        .map(|name| quote!(#name(&mut controls);))
         .unwrap_or(TokenStream::new());
 
     let post_update = get_annotated_function(items, "skylite_proc::post_update")
         .map(get_name)
-        .map(|name| quote!(#name(self);))
+        .map(|name| quote!(#name(&mut controls);))
         .unwrap_or(TokenStream::new());
 
     let pre_render = get_annotated_function(items, "skylite_proc::pre_render")
         .map(get_name)
-        .map(|name| quote!(#name(&mut self.draw_context);))
+        .map(|name| quote!(#name(&mut draw_context);))
         .unwrap_or(TokenStream::new());
 
     let post_render = get_annotated_function(items, "skylite_proc::post_render")
         .map(get_name)
-        .map(|name| quote!(#name(&mut self.draw_context);))
+        .map(|name| quote!(#name(&mut draw_context);))
         .unwrap_or(TokenStream::new());
 
     let new_method = generate_project_new_method(project_name, target_type, &init, initial_scene);
@@ -121,7 +124,7 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
             #new_method
 
             fn render(&mut self) {
-                let draw_context = ::skylite_core::DrawContext {
+                let mut draw_context = ::skylite_core::DrawContext {
                     target: &mut self.target,
                     graphics_cache: &mut self.graphics_cache,
                     focus_x: self.focus_x,
@@ -130,22 +133,27 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
                 #pre_render
 
                 // Main rendering
-                ::skylite_core::scenes::_private::render_scene(self.scene.as_ref(), &draw_context);
+                self.scene._private_render(&mut draw_context);
 
                 #post_render
             }
 
             fn update(&mut self) {
-                if let Some(scene) = self.controls.pending_scene.take() {
-                    self.scene = scene;
-                }
+                let mut controls = ::skylite_core::ProjectControls {
+                    target: &mut self.target,
+                    pending_scene: None
+                };
 
                 #pre_update
 
                 // Main update
-                self.scene._private_update(&mut self.controls);
+                self.scene._private_update(&mut controls);
 
                 #post_update
+
+                if let Some(scene) = controls.pending_scene.take() {
+                    self.scene = scene;
+                }
             }
         }
     }

@@ -109,17 +109,22 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
     let out = quote! {
         #crate_root_check
 
-        #(#items)
-        *
-
         mod #module_name {
-            use super::*;
+            pub mod gen {
+                use super::*;
 
-            #(#project_items)
+
+                #(#project_items)
+                *
+            }
+
+            use gen::*;
+
+            #(#items)
             *
         }
 
-        pub use #module_name::*;
+        pub use #module_name::gen::*;
     };
 
     #[cfg(debug_assertions)]

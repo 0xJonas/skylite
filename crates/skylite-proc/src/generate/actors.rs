@@ -62,7 +62,7 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
                 }
             }
 
-            fn _private_render(&self, ctx: &skylite_core::DrawContext<Self::P>) {
+            fn _private_render(&self, ctx: &mut skylite_core::DrawContext<Self::P>) {
                 match *self {
                     #(
                         #type_name::#actor_names(ref a) => a._private_render(ctx)
@@ -399,7 +399,7 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &
 
             #private_update
 
-            fn _private_render(&self, ctx: &::skylite_core::DrawContext<Self::P>) {
+            fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
                 #render
             }
 
@@ -433,42 +433,51 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_
     let actor_type = gen_actor_type(actor);
     let actor_base_impl = gen_actor_base_impl(actor, &project_type_name, items)?;
 
+    // The idea here is that `actor_definition! { ... }` opens a separate scope, but the generated code
+    // is still accessible from the outside. This enables putting multiple actor_definitions into the same
+    // file, with each of the actor types being public at the root of the file.
     Ok(quote! {
         mod #actor_module_name {
-            #![allow(unused_imports)]
-            #(
-                #imports
-            )
-            *
+            pub mod gen {
+                #![allow(unused_imports)]
+                #(
+                    #imports
+                )
+                *
 
-            #action_type
+                use super::*;
 
-            #properties_type
+                #action_type
 
-            #actor_type
+                #properties_type
 
-            impl ::skylite_core::actors::TypeId for #actor_type_name {
-                fn get_id() -> usize {
-                    #actor_id
+                #actor_type
+
+                impl ::skylite_core::actors::TypeId for #actor_type_name {
+                    fn get_id() -> usize {
+                        #actor_id
+                    }
+                }
+
+                #actor_base_impl
+
+                impl ::skylite_core::actors::Actor for #actor_type_name {
+                    type Action = #action_type_name;
+
+                    fn set_action(&mut self, action: #action_type_name) {
+                        self.current_action = action;
+                        self.action_changed = true;
+                        self.clear_action_changed = false;
+                    }
                 }
             }
 
-            #actor_base_impl
+            use gen::*;
 
-            impl ::skylite_core::actors::Actor for #actor_type_name {
-                type Action = #action_type_name;
-
-                fn set_action(&mut self, action: #action_type_name) {
-                    self.current_action = action;
-                    self.action_changed = true;
-                    self.clear_action_changed = false;
-                }
-            }
+            #body_raw
         }
 
-        pub use #actor_module_name::*;
-
-        #body_raw
+        pub use #actor_module_name::gen::*;
     })
 }
 
@@ -616,6 +625,7 @@ mod tests {
         let expectation = quote! {
             pub struct TestActor {
                 pub properties: TestActorProperties,
+                entity: ::skylite_core::ecs::Entity,
                 current_action: TestActorActions,
                 action_changed: bool,
                 clear_action_changed: bool
@@ -625,6 +635,7 @@ mod tests {
                 pub fn new(x: u16, y: u16) -> TestActor {
                     TestActor {
                         properties: TestActorProperties::_private_create_properties(x, y),
+                        entity: ::skylite_core::ecs::Entity::new(),
                         current_action: TestActorActions::Action2 { val: 5u8 },
                         action_changed: true,
                         clear_action_changed: false
@@ -670,6 +681,10 @@ mod tests {
                 fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
                     super::render(self, ctx);
                 }
+
+                fn get_entity(&self) -> &::skylite_core::ecs::Entity { &self.entity }
+
+                fn get_entity_mut(&mut self) -> &mut ::skylite_core::ecs::Entity { &mut self.entity }
             }
         };
         assert_eq!(code.to_string(), expectation.to_string());
