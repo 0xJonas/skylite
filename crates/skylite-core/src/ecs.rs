@@ -63,7 +63,7 @@ impl Entity {
     }
 }
 
-pub mod __private {
+pub mod _private {
     use super::{Component, Entity};
 
     fn check_distinct(addresses: &[usize]) -> bool {
@@ -114,7 +114,7 @@ pub mod __private {
 #[cfg(test)]
 mod tests {
 
-    use crate::{actors::TypeId, ecs::__private::system1};
+    use crate::{actors::TypeId, ecs::_private::system1};
 
     use super::{Component, Entity};
 

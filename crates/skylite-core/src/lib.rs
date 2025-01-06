@@ -1,5 +1,5 @@
 use actors::AnyActor;
-use scenes::Scene;
+use scenes::SceneParams;
 
 pub mod decode;
 pub mod scenes;
@@ -42,10 +42,25 @@ pub trait SkyliteProject {
     type Target: SkyliteTarget;
     type TileType: Copy;
     type Actors: AnyActor<P = Self>;
+    type SceneParams: SceneParams<P=Self>;
 
+    /// Creates a new instance of the project with the given target.
     fn new(target: Self::Target) -> Self;
+
+    /// Performs a single render cycle.
+    ///
+    /// Rendering, if implemented correctly in user code, should not
+    /// change any state in the scenes or actors, so if `render` is called
+    /// multiple times without intermediate updates, the output should stay the same.
     fn render(&mut self);
+
+    /// Performs a single update cycle.
+    ///
+    /// This operation changes the state of scenes and actors.
     fn update(&mut self);
+
+    /// Loads a new scene and sets the current scene of the project to it.
+    fn set_scene(&mut self, params: Self::SceneParams);
 }
 
 /// Holds the rendering state.
@@ -66,5 +81,5 @@ pub struct DrawContext<'project, P: SkyliteProject> {
 /// update/action methods.
 pub struct ProjectControls<'project, P: SkyliteProject> {
     pub target: &'project mut P::Target,
-    #[doc(hidden)] pub pending_scene: Option<Box<dyn Scene<P=P>>>
+    #[doc(hidden)] pub pending_scene: Option<P::SceneParams>
 }

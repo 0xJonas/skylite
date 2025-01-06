@@ -8,9 +8,11 @@ use crate::{parse::{actors::Actor, scenes::{Scene, SceneStub}, util::{change_cas
 
 use super::{actors::any_actor_type_name, encode::{CompressionBuffer, Serialize}, project::project_type_name, util::{generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust}};
 
+fn get_parameter_name(var: &Variable) -> Ident { format_ident!("{}", change_case(&var.name, IdentCase::LowerSnakeCase)) }
+
 // region: skylite_project stuff
 
-pub(crate) fn scene_type_name(name: &str) -> Ident { format_ident!("{}", change_case(name, IdentCase::UpperCamelCase)) }
+pub(crate) fn scene_params_type_name(project_name: &str) -> Ident { format_ident!("{}SceneParams", change_case(project_name, IdentCase::UpperCamelCase)) }
 
 fn encode_scene(scene: &Scene, actor_ids: &HashMap<String, usize>, buffer: &mut CompressionBuffer) {
     buffer.write_varint(scene.actors.len());
@@ -73,7 +75,44 @@ pub(crate) fn generate_scene_decode_funs(project_name: &str) -> TokenStream {
     }
 }
 
+pub(crate) fn generate_scene_params_type(project_name: &str, scenes: &[Scene]) -> TokenStream {
+    let project_ident = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
+    let scenes_type_name = scene_params_type_name(project_name);
+    let scene_names = scenes.iter()
+        .map(|s| format_ident!("{}", change_case(&s.name, IdentCase::UpperCamelCase)))
+        .collect::<Vec<_>>();
+    let param_lists = scenes.iter().map(|s| generate_param_list(&s.parameters));
+    let param_names = scenes.iter().map(|s| {
+            let names = s.parameters.iter().map(get_parameter_name);
+            quote!(#(#names),*)
+        })
+        .collect::<Vec<_>>();
+
+    quote! {
+        pub enum #scenes_type_name {
+            #(
+                #scene_names { #param_lists },
+            )
+            *
+        }
+
+        impl ::skylite_core::scenes::SceneParams for #scenes_type_name {
+            type P = #project_ident;
+
+            fn load(self) -> Box<dyn ::skylite_core::scenes::Scene<P=Self::P>> {
+                match self {
+                    #(
+                        #scenes_type_name::#scene_names { #param_names } => Box::new(#scene_names::new(#param_names))
+                    ),*
+                }
+            }
+        }
+    }
+}
+
 // endregion
+
+pub(crate) fn scene_type_name(name: &str) -> Ident { format_ident!("{}", change_case(name, IdentCase::UpperCamelCase)) }
 
 fn gen_named_actors_type(scene: &SceneStub) -> TokenStream {
     let typename = format_ident!("{}Actors", change_case(&scene.name, IdentCase::UpperCamelCase));
@@ -94,8 +133,6 @@ fn gen_named_actors_type(scene: &SceneStub) -> TokenStream {
         }
     }
 }
-
-fn get_parameter_name(var: &Variable) -> Ident { format_ident!("{}", change_case(&var.name, IdentCase::LowerSnakeCase)) }
 
 fn properties_type_name(name: &str) -> Ident { format_ident!("{}Properties", change_case(name, IdentCase::UpperCamelCase)) }
 

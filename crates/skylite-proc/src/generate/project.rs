@@ -2,9 +2,9 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Item, ItemFn};
 
-use crate::{generate::{scenes::{generate_scene_decode_funs, scene_type_name}, util::{get_annotated_function, typed_value_to_rust}}, parse::{project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
+use crate::{generate::{scenes::{generate_scene_decode_funs, scene_params_type_name, scene_type_name}, util::{get_annotated_function, typed_value_to_rust}}, parse::{project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
 
-use super::{actors::{any_actor_type_name, generate_actors_type}, scenes::generate_scene_data};
+use super::{actors::{any_actor_type_name, generate_actors_type}, scenes::{generate_scene_data, generate_scene_params_type}};
 
 fn tile_type_name(project_name: &str) -> Ident {
     format_ident!("{}Tiles", change_case(project_name, IdentCase::UpperCamelCase))
@@ -87,6 +87,7 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
     let project_ident = project_ident(project_name);
     let tile_type_name = tile_type_name(project_name);
     let actors_type_name = any_actor_type_name(project_name);
+    let scene_params_type_name = scene_params_type_name(project_name);
 
     let init = get_annotated_function(items, "skylite_proc::init")
         .map(get_name)
@@ -120,6 +121,7 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
             type Target = #target_type;
             type TileType = #tile_type_name;
             type Actors = #actors_type_name;
+            type SceneParams = #scene_params_type_name;
 
             #new_method
 
@@ -151,9 +153,13 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
 
                 #post_update
 
-                if let Some(scene) = controls.pending_scene.take() {
-                    self.scene = scene;
+                if let Some(params) = controls.pending_scene.take() {
+                    self.set_scene(params);
                 }
+            }
+
+            fn set_scene(&mut self, params: Self::SceneParams) {
+                ::skylite_core::scenes::_private::replace_scene(params, &mut self.scene);
             }
         }
     }
@@ -167,6 +173,7 @@ impl SkyliteProject {
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
             Item::Verbatim(generate_actors_type(&self.name, &self.actors)?),
             Item::Verbatim(generate_scene_data(&self.scenes, &self.actors)),
+            Item::Verbatim(generate_scene_params_type(&self.name, &self.scenes)),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
             Item::Verbatim(generate_project_impl(&self.name)),
             Item::Verbatim(generate_project_trait_impl(&self.name, &target_type, &self.initial_scene, items))

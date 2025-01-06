@@ -152,11 +152,28 @@ pub trait Scene {
     fn remove_current_extra(&mut self);
 }
 
+/// Parameters for instantiating a scene.
+///
+/// This trait is implemented automatically for a type by `skylite_project!`. The
+/// type that implements this trait will be an enum with a variant for each scene in
+/// the project, with fields for each parameter for a scene.
+///
+/// ```
+/// let params = MyProjectSceneParams::MyScene { param1: 5, param2: 10 };
+/// ```
+pub trait SceneParams {
+    type P: SkyliteProject;
+
+    fn load(self) -> Box<dyn Scene<P=Self::P>>;
+}
+
 #[doc(hidden)]
 pub mod _private {
+    use std::marker::PhantomData;
+
     use crate::{actors::ActorBase, DrawContext, SkyliteProject};
 
-    use super::{IterActors, Scene};
+    use super::{IterActors, Scene, SceneParams};
 
     pub fn render_scene<'scene, P: SkyliteProject>(scene: &'scene dyn Scene<P=P>, ctx: &mut DrawContext<P>) {
         let mut z_sorted: Vec<&P::Actors> = Vec::new();
@@ -173,5 +190,28 @@ pub mod _private {
         scene.iter_actors(IterActors::All).for_each(&mut insert_by_z_order);
 
         z_sorted.iter().for_each(|a| a._private_render(ctx));
+    }
+
+    /// Dummy Scene to be used as a temporary value inside replace_scene.
+    struct DummyScene<P: SkyliteProject>(PhantomData<P>);
+
+    impl<P: SkyliteProject> Scene for DummyScene<P> {
+        type P = P;
+
+        fn _private_decode(_decode: &mut dyn skylite_compress::Decoder) -> Self where Self: Sized { unimplemented!() }
+        fn _private_update(&mut self, _controls: &mut crate::ProjectControls<Self::P>) { unimplemented!() }
+        fn _private_render(&self, _ctx: &mut DrawContext<Self::P>) { unimplemented!() }
+        fn iter_actors(&self, _which: IterActors) -> super::ActorIterator<<Self::P as SkyliteProject>::Actors> { unimplemented!() }
+        fn iter_actors_mut(&mut self, _which: IterActors) -> super::ActorIteratorMut<<Self::P as SkyliteProject>::Actors> { unimplemented!() }
+        fn add_extra(&mut self, _extra: <Self::P as SkyliteProject>::Actors) { unimplemented!() }
+        fn remove_current_extra(&mut self) { unimplemented!() }
+    }
+
+    /// This function ensures that the old Scene in `dst` is gone before
+    /// creating the new Scene. Having two Scenes in memory at the same time
+    /// should be avoided as Scenes are potentially very large.
+    pub fn replace_scene<P: SkyliteProject + 'static>(src: P::SceneParams, dst: &mut Box<dyn Scene<P=P>>) {
+        *dst = Box::new(DummyScene::<P>(PhantomData));
+        *dst = src.load();
     }
 }

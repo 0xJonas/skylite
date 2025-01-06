@@ -49,7 +49,7 @@ fn system_fallible(args: TokenStream) -> Result<TokenStream, SkyliteProcError> {
 
     let system_fn = format_ident!("system{}", closure.inputs.len());
 
-    Ok(quote!(::skylite_core::ecs::__private::#system_fn(#receiver, #closure)))
+    Ok(quote!(::skylite_core::ecs::_private::#system_fn(#receiver, #closure)))
 }
 
 pub(crate) fn system_impl(args: TokenStream) -> TokenStream {
