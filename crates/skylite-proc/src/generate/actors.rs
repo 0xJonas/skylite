@@ -114,6 +114,15 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
                 }
             }
         }
+
+        #(
+            impl ::std::convert::From<#actor_names> for #type_name {
+                fn from(a: #actor_names) -> #type_name {
+                    #type_name::#actor_names(::std::boxed::Box::new(a))
+                }
+            }
+        )
+        *
     })
 }
 

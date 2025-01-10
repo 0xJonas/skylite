@@ -56,6 +56,36 @@ skylite_proc::actor_definition! {
     use skylite_core::{scenes::Scene, ProjectControls};
     use super::TestProject1;
 
+    skylite_proc::asset_file!("./tests/test-project-1/project.scm", "spawn_test_actor");
+
+    skylite_proc::properties! {
+        pub tag: String,
+        pub is_spawner: bool
+    }
+
+    #[skylite_proc::create_properties]
+    fn create_properties(tag: String, is_spawner: bool) -> SpawnTestActorProperties {
+        SpawnTestActorProperties { tag, is_spawner }
+    }
+
+    #[skylite_proc::action("perform")]
+    fn perform(actor: &mut SpawnTestActor, scene: &mut dyn Scene<P=TestProject1>, controls: &mut ProjectControls<TestProject1>) {
+        controls.target.push_tag(&actor.properties.tag);
+        controls.target.log("spawn_test_actor::perform");
+        if actor.properties.is_spawner {
+            scene.add_extra(SpawnTestActor::new(format!("{}-sub", actor.properties.tag), false).into());
+            actor.properties.is_spawner = false;
+        } else {
+            scene.remove_current_extra();
+        }
+        controls.target.pop_tag();
+    }
+}
+
+skylite_proc::actor_definition! {
+    use skylite_core::{scenes::Scene, ProjectControls};
+    use super::TestProject1;
+
     skylite_proc::asset_file!("./tests/test-project-1/project.scm", "basic_actor_2");
 
     skylite_proc::properties! {
@@ -119,7 +149,7 @@ skylite_project! {
     use skylite_core::{SkyliteTarget, ProjectControls, DrawContext};
     use skylite_mock::MockTarget;
 
-    use super::{BasicActor1, BasicActor2, BasicScene1};
+    use super::{BasicActor1, SpawnTestActor, BasicActor2, BasicScene1};
 
     skylite_proc::project_file!("./tests/test-project-1/project.scm");
 
@@ -171,7 +201,7 @@ fn test_update_cycle() {
     assert!(match_call(&calls[2], "basic_actor_1::pre_update"));
     assert!(match_call(&calls[3], "basic_actor_1::action3"));
     assert!(match_call(&calls[4], "basic_actor_1::post_update"));
-    assert!(match_call(&calls[5], "basic_actor_2::idle"));
+    assert!(match_call(&calls[5], "spawn_test_actor::perform"));
     assert!(match_call(&calls[6], "basic_actor_2::idle"));
     assert!(match_call(&calls[7], "basic_scene_1::post_update"));
     assert!(match_call(&calls[8], "post_update"));
@@ -192,4 +222,27 @@ fn test_render_cycle() {
     assert!(match_call(&calls[3], "basic_scene_1::post_render"));
     assert!(match_call(&calls[4], "post_render"));
     assert_eq!(calls.len(), 5);
+}
+
+#[test]
+fn test_extras() {
+    let target = MockTarget::new();
+    let mut project = TestProject1::new(target);
+
+    // First update: Extra added, but not yet updated.
+    project.update();
+    let target = project._private_target();
+    assert_eq!(target.get_calls_by_tag("actor2-sub").len(), 0);
+    target.clear_call_history();
+
+    // Second update: Extra updated and removes itself.
+    project.update();
+    let target = project._private_target();
+    assert_eq!(target.get_calls_by_tag("actor2-sub").len(), 1);
+    target.clear_call_history();
+
+    // Thrid update: Extra no longer exists in the scene.
+    project.update();
+    let target = project._private_target();
+    assert_eq!(target.get_calls_by_tag("actor2-sub").len(), 0);
 }
