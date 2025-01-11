@@ -85,6 +85,14 @@ pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Resu
                     ),*
                 }
             }
+
+            fn z_order(&self) -> i16 {
+                match *self {
+                    #(
+                        #type_name::#actor_names(ref a) => a.z_order()
+                    ),*
+                }
+            }
         }
 
         impl skylite_core::actors::AnyActor for #type_name {
@@ -400,6 +408,11 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &
         .map(|name| quote!(super::#name(self, ctx);))
         .unwrap_or(TokenStream::new());
 
+    let z_order = get_annotated_function(items, "skylite_proc::z_order")
+        .map(get_name)
+        .map(|name| quote!(fn z_order(&self) -> i16 { super::#name(self) }))
+        .unwrap_or(TokenStream::new());
+
     Ok(quote! {
         impl ::skylite_core::actors::ActorBase for #actor_type_name {
             type P = #project_type_ident;
@@ -415,6 +428,8 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &
             fn get_entity(&self) -> &::skylite_core::ecs::Entity { &self.entity }
 
             fn get_entity_mut(&mut self) -> &mut ::skylite_core::ecs::Entity { &mut self.entity }
+
+            #z_order
         }
     })
 }
@@ -559,6 +574,9 @@ mod tests {
 
             #[skylite_proc::action("action3")]
             fn action3(actor: &mut TestActor, project: &mut TestProject) {}
+
+            #[skylite_proc::z_order]
+            fn z_order(actor: &mut TestActor) -> i16 { 5 }
         }).unwrap().items
     }
 
@@ -694,6 +712,8 @@ mod tests {
                 fn get_entity(&self) -> &::skylite_core::ecs::Entity { &self.entity }
 
                 fn get_entity_mut(&mut self) -> &mut ::skylite_core::ecs::Entity { &mut self.entity }
+
+                fn z_order(&self) -> i16 { super::z_order(self) }
             }
         };
         assert_eq!(code.to_string(), expectation.to_string());

@@ -83,25 +83,38 @@ skylite_proc::actor_definition! {
 }
 
 skylite_proc::actor_definition! {
-    use skylite_core::{scenes::Scene, ProjectControls};
+    use skylite_core::{scenes::Scene, DrawContext, ProjectControls};
     use super::TestProject1;
 
-    skylite_proc::asset_file!("./tests/test-project-1/project.scm", "basic_actor_2");
+    skylite_proc::asset_file!("./tests/test-project-1/project.scm", "z_order_test_actor");
 
     skylite_proc::properties! {
-        pub tag: String
+        pub tag: String,
+        pub z_order: i16
     }
 
     #[skylite_proc::create_properties]
-    fn create_properties(tag: String) -> BasicActor2Properties {
-        BasicActor2Properties { tag }
+    fn create_properties(tag: String, z_order: i16) -> ZOrderTestActorProperties {
+        ZOrderTestActorProperties { tag, z_order }
     }
 
     #[skylite_proc::action("idle")]
-    fn idle(actor: &mut BasicActor2, _scene: &mut dyn Scene<P=TestProject1>, controls: &mut ProjectControls<TestProject1>) {
+    fn idle(actor: &mut ZOrderTestActor, _scene: &mut dyn Scene<P=TestProject1>, controls: &mut ProjectControls<TestProject1>) {
         controls.target.push_tag(&actor.properties.tag);
-        controls.target.log("basic_actor_2::idle");
+        controls.target.log("z_order_test_actor::idle");
         controls.target.pop_tag();
+    }
+
+    #[skylite_proc::render]
+    fn render(actor: &ZOrderTestActor, ctx: &mut DrawContext<TestProject1>) {
+        ctx.target.push_tag(&actor.properties.tag);
+        ctx.target.log(&format!("{}::render@{}", actor.properties.tag, actor.properties.z_order));
+        ctx.target.pop_tag();
+    }
+
+    #[skylite_proc::z_order]
+    fn z_order(actor: &ZOrderTestActor) -> i16 {
+        actor.properties.z_order
     }
 }
 
@@ -149,7 +162,7 @@ skylite_project! {
     use skylite_core::{SkyliteTarget, ProjectControls, DrawContext};
     use skylite_mock::MockTarget;
 
-    use super::{BasicActor1, SpawnTestActor, BasicActor2, BasicScene1};
+    use super::{BasicActor1, SpawnTestActor, ZOrderTestActor, BasicScene1};
 
     skylite_proc::project_file!("./tests/test-project-1/project.scm");
 
@@ -202,10 +215,12 @@ fn test_update_cycle() {
     assert!(match_call(&calls[3], "basic_actor_1::action3"));
     assert!(match_call(&calls[4], "basic_actor_1::post_update"));
     assert!(match_call(&calls[5], "spawn_test_actor::perform"));
-    assert!(match_call(&calls[6], "basic_actor_2::idle"));
-    assert!(match_call(&calls[7], "basic_scene_1::post_update"));
-    assert!(match_call(&calls[8], "post_update"));
-    assert_eq!(calls.len(), 9);
+    assert!(match_call(&calls[6], "z_order_test_actor::idle"));
+    assert!(match_call(&calls[7], "z_order_test_actor::idle"));
+    assert!(match_call(&calls[8], "z_order_test_actor::idle"));
+    assert!(match_call(&calls[9], "basic_scene_1::post_update"));
+    assert!(match_call(&calls[10], "post_update"));
+    assert_eq!(calls.len(), 11);
 }
 
 #[test]
@@ -218,10 +233,13 @@ fn test_render_cycle() {
     let calls = target.get_calls_by_tag("root");
     assert!(match_call(&calls[0], "pre_render"));
     assert!(match_call(&calls[1], "basic_scene_1::pre_render"));
-    assert!(match_call(&calls[2], "basic_actor_1::render"));
-    assert!(match_call(&calls[3], "basic_scene_1::post_render"));
-    assert!(match_call(&calls[4], "post_render"));
-    assert_eq!(calls.len(), 5);
+    assert!(match_call(&calls[2], "extra2::render@-1"));
+    assert!(match_call(&calls[3], "extra3::render@0"));
+    assert!(match_call(&calls[4], "basic_actor_1::render"));
+    assert!(match_call(&calls[5], "extra1::render@2"));
+    assert!(match_call(&calls[6], "basic_scene_1::post_render"));
+    assert!(match_call(&calls[7], "post_render"));
+    assert_eq!(calls.len(), 8);
 }
 
 #[test]

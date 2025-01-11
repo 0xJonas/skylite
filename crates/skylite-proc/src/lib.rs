@@ -362,6 +362,13 @@ pub fn asset_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { p
 #[proc_macro]
 pub fn properties(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
 
+/// Marks a function that returns the z-order for an actor. The marked function must take an immutable
+/// reference to an actor type.
+///
+/// **This macro must always be used with an absolute path: `#[skylite_proc::z_order]`.**
+#[proc_macro_attribute]
+pub fn z_order(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+
 #[cfg(debug_assertions)]
 #[proc_macro]
 pub fn debug_output(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
