@@ -1,6 +1,6 @@
 use std::{fs::read_to_string, path::Path};
 
-use crate::{parse::{scheme_util::{eval_str, parse_symbol, with_guile}, util::{change_case, IdentCase}}, SkyliteProcError};
+use crate::{parse::scheme_util::{eval_str, parse_symbol, with_guile}, SkyliteProcError};
 
 use super::{guile::{scm_car, scm_cdr, scm_is_false, scm_is_null, scm_list_p, scm_pair_p, SCM}, scheme_util::{assq_str, form_to_string, iter_list, parse_string}, values::{parse_argument_list, parse_variable_definition, TypedValue, Variable}};
 

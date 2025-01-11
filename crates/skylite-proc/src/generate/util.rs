@@ -1,6 +1,6 @@
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote, ToTokens};
-use syn::{parse_str, Item, ItemFn, Macro, Meta, Path};
+use syn::{parse_str, Item, ItemFn, Meta, Path};
 
 use crate::{parse::{util::{change_case, IdentCase}, values::{Type, TypedValue, Variable}}, SkyliteProcError};
 

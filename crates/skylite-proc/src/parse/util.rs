@@ -1,7 +1,7 @@
 pub(crate) enum IdentCase {
     UpperCamelCase,
-    LowerCamelCase,
-    UpperSnakeCase,
+    _LowerCamelCase,
+    _UpperSnakeCase,
     LowerSnakeCase
 }
 
@@ -21,7 +21,7 @@ pub(crate) fn change_case(input: &str, case: IdentCase) -> String {
                 } else {
                     c.to_lowercase().to_string()
                 },
-                IdentCase::LowerCamelCase => if is_delimiter {
+                IdentCase::_LowerCamelCase => if is_delimiter {
                     *split_queued = true;
                     String::new()
                 } else if do_split {
@@ -29,7 +29,7 @@ pub(crate) fn change_case(input: &str, case: IdentCase) -> String {
                 } else {
                     c.to_lowercase().to_string()
                 },
-                IdentCase::UpperSnakeCase => if is_delimiter {
+                IdentCase::_UpperSnakeCase => if is_delimiter {
                     "_".to_owned()
                 } else if do_split {
                     "_".to_owned() + &c.to_uppercase().to_string()
@@ -59,18 +59,18 @@ mod tests {
     #[test]
     fn test_change_case() {
         assert_eq!(change_case("test", IdentCase::UpperCamelCase), "Test");
-        assert_eq!(change_case("test", IdentCase::LowerCamelCase), "test");
-        assert_eq!(change_case("test", IdentCase::UpperSnakeCase), "TEST");
+        assert_eq!(change_case("test", IdentCase::_LowerCamelCase), "test");
+        assert_eq!(change_case("test", IdentCase::_UpperSnakeCase), "TEST");
         assert_eq!(change_case("test", IdentCase::LowerSnakeCase), "test");
 
         assert_eq!(change_case("TestText", IdentCase::UpperCamelCase), "TestText");
-        assert_eq!(change_case("TestText", IdentCase::LowerCamelCase), "testText");
-        assert_eq!(change_case("TestText", IdentCase::UpperSnakeCase), "TEST_TEXT");
+        assert_eq!(change_case("TestText", IdentCase::_LowerCamelCase), "testText");
+        assert_eq!(change_case("TestText", IdentCase::_UpperSnakeCase), "TEST_TEXT");
         assert_eq!(change_case("TestText", IdentCase::LowerSnakeCase), "test_text");
 
         assert_eq!(change_case("test_text", IdentCase::UpperCamelCase), "TestText");
-        assert_eq!(change_case("test_text", IdentCase::LowerCamelCase), "testText");
-        assert_eq!(change_case("test_text", IdentCase::UpperSnakeCase), "TEST_TEXT");
+        assert_eq!(change_case("test_text", IdentCase::_LowerCamelCase), "testText");
+        assert_eq!(change_case("test_text", IdentCase::_UpperSnakeCase), "TEST_TEXT");
         assert_eq!(change_case("test_text", IdentCase::LowerSnakeCase), "test_text");
     }
 }

@@ -323,7 +323,7 @@ fn gen_actor_type(actor: &Actor, items: &[Item]) -> TokenStream {
                     },
                     action_changed: true,
                     clear_action_changed: false
-                }
+                };
 
                 #init_fn
                 out
@@ -679,7 +679,7 @@ mod tests {
                         current_action: TestActorActions::Action2 { val: 5u8 },
                         action_changed: true,
                         clear_action_changed: false
-                    }
+                    };
 
                     super::init(out, x, y);
                     out

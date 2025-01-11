@@ -2,7 +2,7 @@ use std::{fs::read_to_string, path::Path};
 
 use crate::{parse::{guile::scm_pair_p, scheme_util::{eval_str, iter_list, with_guile}, util::{change_case, IdentCase}, values::parse_variable_definition}, SkyliteProcError};
 
-use super::{actors::Actor, guile::{scm_car, scm_cdr, scm_is_false, scm_list_p, SCM}, project::AssetGroup, scheme_util::{assq_str, form_to_string, parse_string, parse_symbol}, values::{parse_argument_list, TypedValue, Variable}};
+use super::{actors::Actor, guile::{scm_car, scm_cdr, scm_is_false, scm_list_p, SCM}, project::AssetGroup, scheme_util::{assq_str, form_to_string, parse_symbol}, values::{parse_argument_list, TypedValue, Variable}};
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct ActorInstance {
@@ -132,7 +132,7 @@ impl SceneInstance {
         }
     }
 
-    pub(crate) fn from_scheme_with_scenes(def: SCM, scenes: &[Scene]) -> Result<SceneInstance, SkyliteProcError> {
+    pub(crate) fn _from_scheme_with_scenes(def: SCM, scenes: &[Scene]) -> Result<SceneInstance, SkyliteProcError> {
         unsafe {
             if scm_is_false(scm_list_p(def)) {
                 return Err(SkyliteProcError::DataError(format!("Expected list for scene instantiation, got {}", form_to_string(def))));

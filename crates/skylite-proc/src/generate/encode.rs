@@ -26,10 +26,6 @@ impl CompressionBuffer {
         self.buffer.push(byte);
     }
 
-    pub fn write<T: Serialize>(&mut self, val: T) {
-        val.serialize(self);
-    }
-
     pub fn write_varint(&mut self, val: usize) {
         if val == 0 {
             self.write_byte(0);

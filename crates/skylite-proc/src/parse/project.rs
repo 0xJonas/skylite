@@ -297,7 +297,7 @@ pub(crate) struct SkyliteProject {
     pub name: String,
     pub actors: Vec<Actor>,
     pub scenes: Vec<Scene>,
-    pub save_data: Vec<SaveItem>,
+    pub _save_data: Vec<SaveItem>,
     pub initial_scene: SceneInstance,
     pub tile_types: Vec<String>
 }
@@ -322,7 +322,7 @@ impl SkyliteProject {
             name: stub.name,
             actors,
             scenes,
-            save_data: stub.save_data,
+            _save_data: stub.save_data,
             initial_scene: stub.initial_scene,
             tile_types: stub.tile_types
         })
