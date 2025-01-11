@@ -147,14 +147,13 @@ fn gen_properties_type(scene: &SceneStub, items: &[Item]) -> Result<TokenStream,
         None => TokenStream::new()
     };
 
-    // For an actor that has neither parameters nor properties, the create_properties special function is optional.
-    let create_properties_call = if scene.parameters.len() > 0 || !properties.is_empty() {
+    let create_properties_call = if !properties.is_empty() {
         match get_annotated_function(items, "skylite_proc::create_properties") {
             Some(fun) => {
                 let ident = &fun.sig.ident;
                 quote! { super::#ident(#(#scene_param_names),*) }
             },
-            None => return Err(SkyliteProcError::DataError(format!("Missing required special function `create_properties`. Function is required because the actor has parameters or properties.")))
+            None => return Err(SkyliteProcError::DataError(format!("Missing required special function `create_properties`. Function is required because the actor has properties.")))
         }
     } else {
         quote!(#properties_type_name {})
@@ -180,10 +179,10 @@ fn gen_scene_type(scene: &SceneStub, type_id: u32, project_name: &str, items: &[
     let any_actor_type = quote!(<#project_type_name as ::skylite_core::SkyliteProject>::Actors);
     let scene_param_list = generate_param_list(&scene.parameters);
     let scene_param_names: Vec<Ident> = scene.parameters.iter().map(get_parameter_name).collect();
-    let init_call = match get_annotated_function(items, "skylite_proc::init") {
-        Some(ident) => quote!(#ident(&mut out, #(#scene_param_names),*);),
-        None => TokenStream::new()
-    };
+    let init_fn = get_annotated_function(items, "skylite_proc::init")
+        .map(|fun| fun.sig.ident.clone())
+        .map(|name| quote!(super::#name(out, #(#scene_param_names),*);))
+        .unwrap_or(TokenStream::new());
 
     Ok(quote! {
         pub struct #type_name {
@@ -205,7 +204,8 @@ fn gen_scene_type(scene: &SceneStub, type_id: u32, project_name: &str, items: &[
                     extras,
                     remove_extra: false
                 };
-                #init_call
+
+                #init_fn
                 out
             }
         }

@@ -251,14 +251,13 @@ fn gen_properties_type(actor: &Actor, items: &[Item]) -> Result<TokenStream, Sky
         None => TokenStream::new()
     };
 
-    // For an actor that has neither parameters nor properties, the create_properties special function is optional.
-    let create_properties_call = if actor.parameters.len() > 0 || !properties.is_empty() {
+    let create_properties_call = if !properties.is_empty() {
         match get_annotated_function(items, "skylite_proc::create_properties") {
             Some(fun) => {
                 let ident = &fun.sig.ident;
                 quote! { super::#ident(#(#actor_param_names),*) }
             },
-            None => return Err(SkyliteProcError::DataError(format!("Missing required special function `create_properties`. Function is required because the actor has parameters or properties.")))
+            None => return Err(SkyliteProcError::DataError(format!("Missing required special function `create_properties`. Function is required because the actor has properties.")))
         }
     } else {
         quote!(#properties_type_name {})
@@ -281,12 +280,14 @@ fn gen_properties_type(actor: &Actor, items: &[Item]) -> Result<TokenStream, Sky
 
 // region: Main Actor Type
 
-fn gen_actor_type(actor: &Actor) -> TokenStream {
+fn gen_actor_type(actor: &Actor, items: &[Item]) -> TokenStream {
     let actor_type_name = actor_type_name(&actor.name);
     let action_type_name = action_type_name(&actor.name);
     let properties_type_name = properties_type_name(&actor.name);
     let actor_param_list = get_actor_param_list(actor);
-    let actor_param_names = actor.parameters.iter().map(get_parameter_name);
+    let actor_param_names: Vec<Ident> = actor.parameters.iter()
+        .map(get_parameter_name)
+        .collect();
 
     let initial_action_name = format_ident!("{}", change_case(&actor.initial_action.name, IdentCase::UpperCamelCase));
     let initial_action_params = actor
@@ -296,6 +297,11 @@ fn gen_actor_type(actor: &Actor) -> TokenStream {
             .map(|p| format_ident!("{}", change_case(&p.name, IdentCase::LowerSnakeCase)));
     let initial_action_args = actor.initial_action.args.iter()
         .map(typed_value_to_rust);
+
+    let init_fn = get_annotated_function(items, "skylite_proc::init")
+        .map(|fun| fun.sig.ident.clone())
+        .map(|name| quote!(super::#name(out, #(#actor_param_names),*);))
+        .unwrap_or(TokenStream::new());
 
     quote! {
         pub struct #actor_type_name {
@@ -308,9 +314,9 @@ fn gen_actor_type(actor: &Actor) -> TokenStream {
 
         impl #actor_type_name {
             pub fn new(#actor_param_list) -> #actor_type_name {
-                #actor_type_name {
+                let mut out = #actor_type_name {
                     // See `gen_actor_properties_type` for the definition of `create_properties`.
-                    properties: #properties_type_name::_private_create_properties(#(#actor_param_names),*),
+                    properties: #properties_type_name::_private_create_properties(#(#actor_param_names.clone()),*),
                     entity: ::skylite_core::ecs::Entity::new(),
                     current_action: #action_type_name::#initial_action_name {
                         #(#initial_action_params: #initial_action_args),*
@@ -318,6 +324,9 @@ fn gen_actor_type(actor: &Actor) -> TokenStream {
                     action_changed: true,
                     clear_action_changed: false
                 }
+
+                #init_fn
+                out
             }
         }
     }
@@ -454,7 +463,7 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_
     let action_type = gen_actions_type(&action_type_name, &actor.actions);
 
     let properties_type = gen_properties_type(actor, items)?;
-    let actor_type = gen_actor_type(actor);
+    let actor_type = gen_actor_type(actor, items);
     let actor_base_impl = gen_actor_base_impl(actor, &project_type_name, items)?;
 
     // The idea here is that `actor_definition! { ... }` opens a separate scope, but the generated code
@@ -560,6 +569,9 @@ mod tests {
             #[skylite_proc::create_properties]
             fn create_properties(x: u8, y: u8) -> TestActorProperties { todo!() }
 
+            #[skylite_proc::init]
+            fn init(actor: &mut TestActor, x: u8, y: u8) {}
+
             #[skylite_proc::pre_update]
             fn pre_update(actor: &mut TestActor, project: &mut TestProject) {}
 
@@ -648,7 +660,8 @@ mod tests {
     #[test]
     fn test_gen_actor_type() {
         let actor = create_test_actor();
-        let code = gen_actor_type(&actor);
+        let items = create_test_items();
+        let code = gen_actor_type(&actor, &items);
         let expectation = quote! {
             pub struct TestActor {
                 pub properties: TestActorProperties,
@@ -660,13 +673,16 @@ mod tests {
 
             impl TestActor {
                 pub fn new(x: u16, y: u16) -> TestActor {
-                    TestActor {
-                        properties: TestActorProperties::_private_create_properties(x, y),
+                    let mut out = TestActor {
+                        properties: TestActorProperties::_private_create_properties(x.clone(), y.clone()),
                         entity: ::skylite_core::ecs::Entity::new(),
                         current_action: TestActorActions::Action2 { val: 5u8 },
                         action_changed: true,
                         clear_action_changed: false
                     }
+
+                    super::init(out, x, y);
+                    out
                 }
             }
         };
