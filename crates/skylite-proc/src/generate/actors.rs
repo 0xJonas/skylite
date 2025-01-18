@@ -264,12 +264,13 @@ fn gen_actor_update_fn(actions_type_name: &Ident, actions: &[Action], items: &[I
                     #actions_type_name::#action_names { #action_param_names } => super::#action_implementations(self, scene, controls, #action_args)
                 ),*
             };
+
+            #post_update
+
             if self.clear_action_changed {
                 self.action_changed = false;
                 self.clear_action_changed = false;
             }
-
-            #post_update
         }
     })
 }
@@ -316,6 +317,8 @@ fn gen_actor_impl(actor: &Actor, project_type_ident: &TokenStream, items: &[Item
                 self.action_changed = true;
                 self.clear_action_changed = false;
             }
+
+            fn action_changed(&self) -> bool { self.action_changed }
 
             #z_order
         }
@@ -605,6 +608,8 @@ mod tests {
                     self.action_changed = true;
                     self.clear_action_changed = false;
                 }
+
+                fn action_changed(&self) -> bool { self.action_changed }
 
                 fn z_order(&self) -> i16 { super::z_order(self) }
             }

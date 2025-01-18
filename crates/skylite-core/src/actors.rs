@@ -50,6 +50,10 @@ pub trait Actor: TypeId + InstanceId {
     fn set_action(&mut self, action: Self::Action)
         where Self: Sized;
 
+    /// Returns whether the actor's action was changed during or after
+    /// the previous update cycle.
+    fn action_changed(&self) -> bool;
+
     /// Returns a reference to the underlying entity for this actor.
     fn get_entity(&self) -> &Entity;
 
