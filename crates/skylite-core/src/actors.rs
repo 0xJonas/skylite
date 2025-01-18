@@ -23,16 +23,32 @@ impl<T: TypeId> InstanceId for T {
     }
 }
 
-/// **For internal use only.**
-///
-/// Defines the base interface for actors, which is shared
-/// among [`Actor`] and [`AnyActor`].
-pub trait ActorBase: InstanceId {
-    type P: SkyliteProject;
-
+pub trait ActorAction {
     #[doc(hidden)] fn _private_decode(decoder: &mut dyn Decoder) -> Self;
+}
+
+/// An `Actor` is any entity in a [`Scene`].
+///
+/// *This trait is implemented by generated code and should not
+/// be implemented manually.*
+///
+/// An actor can have properties and perform actions. Each action is defined
+/// by its own dedicated update method, which is called exactly once per `Scene`
+/// update (and, by extension, once per project update). An actor must perform
+/// exactly one action at a time.
+pub trait Actor: TypeId + InstanceId {
+    type P: SkyliteProject;
+    type Action: ActorAction
+        where Self: Sized;
+
+    #[doc(hidden)] fn _private_decode(decoder: &mut dyn Decoder) -> Self
+        where Self: Sized;
+
     #[doc(hidden)] fn _private_update(&mut self, scene: &mut dyn Scene<P=Self::P>, controls: &mut ProjectControls<Self::P>);
     #[doc(hidden)] fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
+
+    fn set_action(&mut self, action: Self::Action)
+        where Self: Sized;
 
     /// Returns a reference to the underlying entity for this actor.
     fn get_entity(&self) -> &Entity;
@@ -52,37 +68,4 @@ pub trait ActorBase: InstanceId {
     fn z_order(&self) -> i16 {
         1
     }
-}
-
-/// An [`Actor`] from the point of view of a [`Scene`].
-///
-/// *This trait is implemented by generated code and should not
-/// be implemented manually.*
-///
-/// There is exactly one implementation of this per project,
-/// which is a combined type over all actors in the project.
-/// This allows the `Scene` from storing `Actors` of different
-/// types in a single container.
-pub trait AnyActor: ActorBase {
-    #[doc(hidden)] unsafe fn _private_transmute_mut<A: Actor>(&mut self) -> &mut A;
-    #[doc(hidden)] unsafe fn _private_transmute<A: Actor>(&self) -> &A;
-}
-
-pub trait ActorAction {
-    #[doc(hidden)] fn _private_decode(decoder: &mut dyn Decoder) -> Self;
-}
-
-/// An `Actor` is any entity in a [`Scene`].
-///
-/// *This trait is implemented by generated code and should not
-/// be implemented manually.*
-///
-/// An actor can have properties and perform actions. Each action is defined
-/// by its own dedicated update method, which is called exactly once per `Scene`
-/// update (and, by extension, once per project update). An actor must perform
-/// exactly one action at a time.
-pub trait Actor: ActorBase + TypeId {
-    type Action: ActorAction;
-
-    fn set_action(&mut self, action: Self::Action);
 }

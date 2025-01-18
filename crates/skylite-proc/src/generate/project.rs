@@ -2,9 +2,9 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Item, ItemFn};
 
-use crate::{generate::{scenes::{generate_scene_decode_funs, scene_params_type_name, scene_type_name}, util::{get_annotated_function, typed_value_to_rust}}, parse::{project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
+use crate::{generate::{scenes::{generate_scene_decode_funs, scene_params_type_name, scene_type_name}, util::{get_annotated_function, typed_value_to_rust}}, parse::{actors::Actor, project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
 
-use super::{actors::{any_actor_type_name, generate_actors_type}, scenes::{generate_scene_data, generate_scene_params_type}};
+use super::scenes::{generate_scene_data, generate_scene_params_type};
 
 fn tile_type_name(project_name: &str) -> Ident {
     format_ident!("{}Tiles", change_case(project_name, IdentCase::UpperCamelCase))
@@ -65,8 +65,8 @@ fn generate_project_new_method(project_name: &str, target_type: &TokenStream, in
     }
 }
 
-fn generate_project_impl(project_name: &str) -> TokenStream {
-    let scene_decode_funs = generate_scene_decode_funs(project_name);
+fn generate_project_impl(project_name: &str, actors: &[Actor]) -> TokenStream {
+    let scene_decode_funs = generate_scene_decode_funs(project_name, actors);
     let project_ident = project_ident(project_name);
 
     quote! {
@@ -86,7 +86,6 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
 
     let project_ident = project_ident(project_name);
     let tile_type_name = tile_type_name(project_name);
-    let actors_type_name = any_actor_type_name(project_name);
     let scene_params_type_name = scene_params_type_name(project_name);
 
     let init = get_annotated_function(items, "skylite_proc::init")
@@ -120,7 +119,6 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
         impl skylite_core::SkyliteProject for #project_ident {
             type Target = #target_type;
             type TileType = #tile_type_name;
-            type Actors = #actors_type_name;
             type SceneParams = #scene_params_type_name;
 
             #new_method
@@ -171,11 +169,10 @@ impl SkyliteProject {
     pub(crate) fn generate(&self, target_type: &TokenStream, items: &[Item]) -> Result<Vec<Item>, SkyliteProcError> {
         Ok(vec![
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
-            Item::Verbatim(generate_actors_type(&self.name, &self.actors)?),
             Item::Verbatim(generate_scene_data(&self.scenes, &self.actors)),
             Item::Verbatim(generate_scene_params_type(&self.name, &self.scenes)),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
-            Item::Verbatim(generate_project_impl(&self.name)),
+            Item::Verbatim(generate_project_impl(&self.name, &self.actors)),
             Item::Verbatim(generate_project_trait_impl(&self.name, &target_type, &self.initial_scene, items))
         ])
     }
@@ -213,36 +210,52 @@ mod tests {
             impl skylite_core::SkyliteProject for Test1 {
                 type Target = MockTarget;
                 type TileType = Test1Tiles;
-                type Actors = Test1Actors;
+                type SceneParams = Test1SceneParams;
 
                 fn new(target: MockTarget) -> Test1 {
                     let (w, h) = target.get_screen_size();
                     let mut out = Test1 {
-                        draw_context: skylite_core::DrawContext {
-                            target,
-                            graphics_cache: Vec::new(),
-                            focus_x: w as i32 / 2,
-                            focus_y: h as i32 / 2
-                        },
+                        target,
                         scene: ::std::boxed::Box::new(TestScene::new(false, 5u8)),
-                        controls: ::skylite_core::ProjectControls { pending_scene: None }
+                        graphics_cache: ::std::vec::Vec::new(),
+                        focus_x: w as i32 / 2,
+                        focus_y: h as i32 / 2
                     };
+
                     init(&mut out);
                     out
                 }
 
                 fn render(&mut self) {
-                    ::skylite_core::scenes::_private::render_scene(self.scene.as_ref(), &mut self.draw_context);
-                    post_render(&mut self.draw_context);
+                    let mut draw_context = ::skylite_core::DrawContext {
+                        target: &mut self.target,
+                        graphics_cache: &mut self.graphics_cache,
+                        focus_x: self.focus_x,
+                        focus_y: self.focus_y
+                    };
+
+                    self.scene._private_render(&mut draw_context);
+                    post_render(&mut draw_context);
                 }
 
                 fn update(&mut self) {
-                    if let Some(scene) = self.controls.pending_scene.take() {
-                        self.scene = scene;
-                    }
+                    let mut controls = ::skylite_core::ProjectControls {
+                        target: &mut self.target,
+                        pending_scene: None
+                    };
 
-                    pre_update(self);
-                    self.scene._private_update(&mut self.controls);
+                    pre_update(&mut controls);
+
+                    // Main update
+                    self.scene._private_update(&mut controls);
+
+                    if let Some(params) = controls.pending_scene.take() {
+                        self.set_scene(params);
+                    }
+                }
+
+                fn set_scene(&mut self, params: Self::SceneParams) {
+                    ::skylite_core::scenes::_private::replace_scene(params, &mut self.scene);
                 }
             }
         };

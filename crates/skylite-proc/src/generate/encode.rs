@@ -143,31 +143,33 @@ impl Serialize for TypedValue {
 
 #[cfg(test)]
 mod tests {
+    use crate::generate::encode::Serialize;
+
     use super::CompressionBuffer;
 
     #[test]
     fn test_serialize() {
         let mut buffer = CompressionBuffer::new();
 
-        buffer.write(0x12_u8);
-        buffer.write(0x1234_u16);
-        buffer.write(0x12345678_u32);
+        0x12_u8.serialize(&mut buffer);
+        0x1234_u16.serialize(&mut buffer);
+        0x12345678_u32.serialize(&mut buffer);
 
-        buffer.write(-0x12_i8);
-        buffer.write(-0x1234_i16);
-        buffer.write(-0x12345678_i32);
+        (-0x12_i8).serialize(&mut buffer);
+        (-0x1234_i16).serialize(&mut buffer);
+        (-0x12345678_i32).serialize(&mut buffer);
 
-        buffer.write(0.5_f32);
-        buffer.write(0.5_f64);
+        0.5_f32.serialize(&mut buffer);
+        0.5_f64.serialize(&mut buffer);
 
-        buffer.write(true);
-        buffer.write(false);
+        true.serialize(&mut buffer);
+        false.serialize(&mut buffer);
 
-        buffer.write("A Test! 🎵");
-        buffer.write((true, 5));
+        "A Test! 🎵".serialize(&mut buffer);
+        (true, 5).serialize(&mut buffer);
 
         let data = [(5, 10), (15, 20), (25, 30)];
-        buffer.write(&data[..]);
+        (&data[..]).serialize(&mut buffer);
 
         let encoded = buffer.encode();
         let expected = vec![

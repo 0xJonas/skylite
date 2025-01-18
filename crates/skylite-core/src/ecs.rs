@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, mem::transmute};
+use std::cell::UnsafeCell;
 
 use crate::actors::{InstanceId, TypeId};
 
@@ -8,7 +8,7 @@ pub trait Component: TypeId + InstanceId {}
 
 /// An `Entity` is a list of components.
 pub struct Entity {
-    components: Vec<Box<UnsafeCell<dyn Component>>>
+    components: Vec<UnsafeCell<Box<dyn Component>>>
 }
 
 impl Entity {
@@ -23,9 +23,7 @@ impl Entity {
         if self.components.iter().any(|c| unsafe { &*c.get() }.get_id() == new_component.get_id()) {
             panic!("Component already exists in entity.");
         } else {
-            // SAFETY: UnsafeCell has repr(transparent) (i.e. the same
-            // memory layout as its contents) so this is ok:
-            self.components.push(unsafe { transmute(new_component) });
+            self.components.push(UnsafeCell::new(new_component));
         }
     }
 
@@ -45,14 +43,13 @@ impl Entity {
     pub fn get_component<C: Component>(&self) -> Option<&C> {
         self.components.iter()
             .find(|c| unsafe { &*c.get() }.get_id() == <C as TypeId>::get_id())
-            // Hopefully this pointer cast is defined behavior? It should just discard the vtable.
-            .map(|c| unsafe { &*(c.get() as *const C) })
+            .map(|c| unsafe { (*(c.get() as *const Box<C>)).as_ref() })
     }
 
     fn get_component_mut_unsafe<C: Component>(&self) -> Option<&mut C> {
         self.components.iter()
             .find(|c| unsafe { &*c.get() }.get_id() == <C as TypeId>::get_id())
-            .map(|c| unsafe { &mut *(c.get() as *mut C) })
+            .map(|c| unsafe { (*(c.get() as *mut Box<C>)).as_mut() })
     }
 
     /// Returns a mutable reference to the component with the given
@@ -66,6 +63,7 @@ impl Entity {
 pub mod _private {
     use super::{Component, Entity};
 
+    #[cfg(debug_assertions)]
     fn check_distinct(addresses: &[usize]) -> bool {
         for i in 0..addresses.len() {
             for j in i + 1 .. addresses.len() {

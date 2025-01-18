@@ -1,4 +1,3 @@
-use actors::AnyActor;
 use scenes::SceneParams;
 
 pub mod decode;
@@ -41,7 +40,6 @@ pub trait SkyliteTarget {
 pub trait SkyliteProject {
     type Target: SkyliteTarget;
     type TileType: Copy;
-    type Actors: AnyActor<P = Self>;
     type SceneParams: SceneParams<P=Self>;
 
     /// Creates a new instance of the project with the given target.

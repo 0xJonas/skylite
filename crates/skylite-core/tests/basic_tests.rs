@@ -73,7 +73,7 @@ skylite_proc::actor_definition! {
         controls.target.push_tag(&actor.properties.tag);
         controls.target.log("spawn_test_actor::perform");
         if actor.properties.is_spawner {
-            scene.add_extra(SpawnTestActor::new(format!("{}-sub", actor.properties.tag), false).into());
+            scene.add_extra(Box::new(SpawnTestActor::new(format!("{}-sub", actor.properties.tag), false)));
             actor.properties.is_spawner = false;
         } else {
             scene.remove_current_extra();

@@ -4,7 +4,7 @@ An `actor_definition` is the Rust counterpart to an [actor asset file](actor_ass
 
 The `actor_definition` macro defines all types needed for an actor to be used in a scene. This includes the following types:
 
-- The actor's **main type**, which has the same name as the asset file converted to *UpperCamelCase*. E.g. an asset file with name `my_actor` would have a **main type** called `MyActor`. This type also implements the `Actor` and `ActorBase` traits.
+- The actor's **main type**, which has the same name as the asset file converted to *UpperCamelCase*. E.g. an asset file with name `my_actor` would have a **main type** called `MyActor`. This is also the type that implements the `Actor` trait.
 - The actor's **action type**, which is an `enum` with a variant for each action defined in the asset file. Each variant is a struct containing the parameters for the respective action. The action type's name is the name of the **main type** with `Actions` appended to it, the names of the variants are the names of the actions converted to *UpperCamelCase*. E.g. an asset file with name `my_actor` would have a **action type** called `MyActorActions`.
 - The actors **property type**: This type is always generated, even when the actor does not define any properties. The name of this type is the name of the **main type** with `Properties` appended to it. E.g. an asset file with name `my_actor` would have a **property type** called `MyActorProperties`. Each instance of the actor's main type contains an instance of the actor's property type, which is accessible through the `.properties` member on the main type.
 

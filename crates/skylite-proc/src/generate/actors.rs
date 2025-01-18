@@ -4,137 +4,7 @@ use syn::{parse_str, Item, ItemFn, Meta};
 
 use crate::{parse::{actors::{Action, Actor}, util::{change_case, IdentCase}, values::Variable}, SkyliteProcError};
 
-use super::{project::{project_ident, project_type_name}, util::{generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust, typed_value_to_rust}};
-
-// region: AnyActor Type for skylite_project CodeGen
-
-pub(super) fn any_actor_type_name(project_name: &str) -> Ident {
-    format_ident!("{}Actors", change_case(project_name, IdentCase::UpperCamelCase))
-}
-
-pub(crate) fn generate_actors_type(project_name: &str, actors: &[Actor]) -> Result<TokenStream, SkyliteProcError> {
-    let project_ident = project_ident(project_name);
-    let type_name = any_actor_type_name(project_name);
-
-    let actor_names: Vec<Ident> = actors.iter()
-        .map(|a| format_ident!("{}", change_case(&a.name, IdentCase::UpperCamelCase)))
-        .collect();
-    let actor_ids: Vec<Literal> = (0..actors.len())
-        .map(|i| Literal::usize_unsuffixed(i))
-        .collect();
-
-    Ok(quote! {
-        pub enum #type_name {
-            #(#actor_names(::std::boxed::Box::<#actor_names>)),*
-        }
-
-        impl skylite_core::actors::InstanceId for #type_name {
-            fn get_id(&self) -> usize where Self: Sized {
-                // The combination of `*self` and `ref a` is required for an empty `actors` list work,
-                // because there may or may not be a way to construct *something* using an empty actors enum.
-                // Realistically, this function and similar functions should never be called then,
-                // because it would be impossible to do so from safe code.
-                match *self {
-                    #(
-                        #type_name::#actor_names(ref a) => a.get_id()
-                    ),*
-                }
-            }
-        }
-
-        impl skylite_core::actors::ActorBase for #type_name {
-            type P = #project_ident;
-
-            fn _private_decode(decoder: &mut dyn skylite_compress::Decoder) -> Self {
-                match skylite_core::decode::read_varint(decoder) {
-                    #(
-                        #actor_ids => #type_name::#actor_names(::std::boxed::Box::new(#actor_names::_private_decode(decoder))),
-                    )*
-                    _ => ::std::unreachable!()
-                }
-            }
-
-            fn _private_update(&mut self, scene: &mut dyn ::skylite_core::scenes::Scene<P=Self::P>, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
-                match *self {
-                    #(
-                        #type_name::#actor_names(ref mut a) => a._private_update(scene, controls)
-                    ),*
-                }
-            }
-
-            fn _private_render(&self, ctx: &mut skylite_core::DrawContext<Self::P>) {
-                match *self {
-                    #(
-                        #type_name::#actor_names(ref a) => a._private_render(ctx)
-                    ),*
-                }
-            }
-
-            fn get_entity(&self) -> &::skylite_core::ecs::Entity {
-                match *self {
-                    #(
-                        #type_name::#actor_names(ref a) => a.get_entity()
-                    ),*
-                }
-            }
-
-            fn get_entity_mut(&mut self) -> &mut ::skylite_core::ecs::Entity {
-                match *self {
-                    #(
-                        #type_name::#actor_names(ref mut a) => a.get_entity_mut()
-                    ),*
-                }
-            }
-
-            fn z_order(&self) -> i16 {
-                match *self {
-                    #(
-                        #type_name::#actor_names(ref a) => a.z_order()
-                    ),*
-                }
-            }
-        }
-
-        impl skylite_core::actors::AnyActor for #type_name {
-            unsafe fn _private_transmute_mut<A: skylite_core::actors::Actor>(&mut self) -> &mut A {
-                match self {
-                    #(
-                        #type_name::#actor_names(a) => {
-                            // _private_transmute_mut must only be called when it is known in
-                            // advance that the following will be a no-op.
-                            ::std::mem::transmute::<&mut #actor_names, &mut A>(a)
-                        },
-                    )*
-                    _ => ::std::unreachable!()
-                }
-            }
-
-            unsafe fn _private_transmute<A: skylite_core::actors::Actor>(&self) -> &A {
-                match self {
-                    #(
-                        #type_name::#actor_names(a) => {
-                            // _private_transmute must only be called when it is known in
-                            // advance that the following will be a no-op.
-                            ::std::mem::transmute::<&#actor_names, &A>(a)
-                        },
-                    )*
-                    _ => ::std::unreachable!()
-                }
-            }
-        }
-
-        #(
-            impl ::std::convert::From<#actor_names> for #type_name {
-                fn from(a: #actor_names) -> #type_name {
-                    #type_name::#actor_names(::std::boxed::Box::new(a))
-                }
-            }
-        )
-        *
-    })
-}
-
-// endregion
+use super::{project::project_type_name, util::{generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust, typed_value_to_rust}};
 
 fn actor_type_name(actor_name: &str) -> Ident { format_ident!("{}", change_case(actor_name, IdentCase::UpperCamelCase)) }
 fn action_type_name(actor_name: &str) -> Ident { format_ident!("{}Actions", change_case(actor_name, IdentCase::UpperCamelCase)) }
@@ -334,7 +204,7 @@ fn gen_actor_type(actor: &Actor, items: &[Item]) -> TokenStream {
 
 // endregion
 
-// region: ActorBase Trait Implementation
+// region: Actor Trait Implementation
 
 fn gen_actor_decode_fn(actor_type_name: &Ident, params: &[Variable]) -> TokenStream {
     let actor_param_names: Vec<Ident> = params.iter().map(get_parameter_name).collect();
@@ -345,7 +215,8 @@ fn gen_actor_decode_fn(actor_type_name: &Ident, params: &[Variable]) -> TokenStr
         });
 
     quote! {
-        fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> #actor_type_name {
+        fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> #actor_type_name
+        where Self: Sized {
             use skylite_core::decode::Deserialize;
             #(
                 let #actor_param_names = #actor_args_decoders;
@@ -403,14 +274,14 @@ fn gen_actor_update_fn(actions_type_name: &Ident, actions: &[Action], items: &[I
     })
 }
 
-fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
+fn gen_actor_impl(actor: &Actor, project_type_ident: &TokenStream, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
 
     let actor_type_name = actor_type_name(&actor.name);
-    let actions_type_name = action_type_name(&actor.name);
+    let action_type_name = action_type_name(&actor.name);
 
     let private_decode = gen_actor_decode_fn(&actor_type_name, &actor.parameters);
-    let private_update = gen_actor_update_fn(&actions_type_name, &actor.actions, items)?;
+    let private_update = gen_actor_update_fn(&action_type_name, &actor.actions, items)?;
 
     let render = get_annotated_function(items, "skylite_proc::render")
         .map(get_name)
@@ -423,8 +294,9 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &
         .unwrap_or(TokenStream::new());
 
     Ok(quote! {
-        impl ::skylite_core::actors::ActorBase for #actor_type_name {
+        impl ::skylite_core::actors::Actor for #actor_type_name {
             type P = #project_type_ident;
+            type Action = #action_type_name where Self: Sized;
 
             #private_decode
 
@@ -437,6 +309,13 @@ fn gen_actor_base_impl(actor: &Actor, project_type_ident: &TokenStream, items: &
             fn get_entity(&self) -> &::skylite_core::ecs::Entity { &self.entity }
 
             fn get_entity_mut(&mut self) -> &mut ::skylite_core::ecs::Entity { &mut self.entity }
+
+            fn set_action(&mut self, action: #action_type_name)
+            where Self: Sized {
+                self.current_action = action;
+                self.action_changed = true;
+                self.clear_action_changed = false;
+            }
 
             #z_order
         }
@@ -464,7 +343,7 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_
 
     let properties_type = gen_properties_type(actor, items)?;
     let actor_type = gen_actor_type(actor, items);
-    let actor_base_impl = gen_actor_base_impl(actor, &project_type_name, items)?;
+    let actor_impl = gen_actor_impl(actor, &project_type_name, items)?;
 
     // The idea here is that `actor_definition! { ... }` opens a separate scope, but the generated code
     // is still accessible from the outside. This enables putting multiple actor_definitions into the same
@@ -492,17 +371,7 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_
                     }
                 }
 
-                #actor_base_impl
-
-                impl ::skylite_core::actors::Actor for #actor_type_name {
-                    type Action = #action_type_name;
-
-                    fn set_action(&mut self, action: #action_type_name) {
-                        self.current_action = action;
-                        self.action_changed = true;
-                        self.clear_action_changed = false;
-                    }
-                }
+                #actor_impl
             }
 
             use gen::*;
@@ -523,7 +392,7 @@ mod tests {
     use crate::parse::actors::{Actor, Action, ActionInstance};
     use crate::parse::values::{Type, TypedValue, Variable};
 
-    use super::{action_type_name, gen_actions_type, gen_actor_base_impl, gen_actor_type, gen_properties_type};
+    use super::{action_type_name, gen_actions_type, gen_actor_impl, gen_actor_type, gen_properties_type};
 
     fn create_test_actor() -> Actor {
         Actor {
@@ -693,12 +562,13 @@ mod tests {
     fn test_gen_actor_base_impl() {
         let actor = create_test_actor();
         let items = create_test_items();
-        let code = gen_actor_base_impl(&actor, &quote!(crate::TestProject), &items).unwrap();
+        let code = gen_actor_impl(&actor, &quote!(crate::TestProject), &items).unwrap();
         let expectation = quote! {
-            impl ::skylite_core::actors::ActorBase for TestActor {
+            impl ::skylite_core::actors::Actor for TestActor {
                 type P = crate::TestProject;
+                type Action = TestActorActions where Self: Sized;
 
-                fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> TestActor {
+                fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> TestActor where Self: Sized{
                     use skylite_core::decode::Deserialize;
                     let x = u16::deserialize(decoder);
                     let y = u16::deserialize(decoder);
@@ -728,6 +598,13 @@ mod tests {
                 fn get_entity(&self) -> &::skylite_core::ecs::Entity { &self.entity }
 
                 fn get_entity_mut(&mut self) -> &mut ::skylite_core::ecs::Entity { &mut self.entity }
+
+                fn set_action(&mut self, action: TestActorActions)
+                where Self: Sized {
+                    self.current_action = action;
+                    self.action_changed = true;
+                    self.clear_action_changed = false;
+                }
 
                 fn z_order(&self) -> i16 { super::z_order(self) }
             }

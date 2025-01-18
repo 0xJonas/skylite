@@ -349,7 +349,7 @@ mod tests {
                       ((flag1 bool #f)
                       (val2 u8 5)))
 
-                    (initial-scene . (test_scene #t 5))
+                    (initial-scene . (basic_scene_1 "test"))
                     (tile-types . (solid semi-solid non-solid)))"#).unwrap();
 
             // Use a path to the test project to resolve the initial-scene
@@ -382,10 +382,9 @@ mod tests {
                     }
                 ],
                 initial_scene: SceneInstance {
-                    name: "TestScene".to_owned(),
+                    name: "BasicScene1".to_owned(),
                     args: vec![
-                        TypedValue::Bool(true),
-                        TypedValue::U8(5)
+                        TypedValue::String("test".to_owned()),
                     ]
                 },
                 tile_types: vec!["solid".to_owned(), "semi-solid".to_owned(), "non-solid".to_owned()]
