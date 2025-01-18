@@ -135,15 +135,17 @@ pub enum IterActors {
 /// is rendered itself.
 pub trait Scene {
     type P: SkyliteProject;
+    type ActorNames: Into<usize> where Self: Sized;
 
     #[doc(hidden)] fn _private_decode(decode: &mut dyn Decoder) -> Self where Self: Sized;
     #[doc(hidden)] fn _private_update(&mut self, controls: &mut ProjectControls<Self::P>);
     #[doc(hidden)] fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
+    #[doc(hidden)] fn _private_get_named_actor_mut_usize(&mut self, name: usize) -> &mut dyn Actor<P=Self::P>;
 
-    /// Returns an iterator over all the actors in the scene.
+    /// Returns an iterator over a set of actors in the `Scene`.
     fn iter_actors(&self, which: IterActors) -> ActorIterator<Self::P>;
 
-    /// Returns a mutable iterator over all the actors in the scene.
+    /// Returns a mutable iterator over a set of actors in the `Scene`.
     fn iter_actors_mut(&mut self, which: IterActors) -> ActorIteratorMut<Self::P>;
 
     /// Adds an `Actor` as an extra to the `Scene`.
@@ -153,6 +155,14 @@ pub trait Scene {
     /// Must be called from an `Actor` context, i.e. an action
     /// or one of the update hooks.
     fn remove_current_extra(&mut self);
+
+    /// Returns a shared reference to a named actor in the `Scene`, or `None`
+    /// if the name does not exist.
+    fn get_named_actor(&self, name: Self::ActorNames) -> &dyn Actor<P=Self::P> where Self: Sized;
+
+    /// Returns a mutable reference to a named actor in the `Scene`, or `None`
+    /// if the name does not exist.
+    fn get_named_actor_mut(&mut self, name: Self::ActorNames) -> &mut dyn Actor<P=Self::P> where Self: Sized;
 }
 
 /// Parameters for instantiating a scene.
@@ -200,14 +210,18 @@ pub mod _private {
 
     impl<P: SkyliteProject> Scene for DummyScene<P> {
         type P = P;
+        type ActorNames = usize;
 
         fn _private_decode(_decode: &mut dyn skylite_compress::Decoder) -> Self where Self: Sized { unimplemented!() }
         fn _private_update(&mut self, _controls: &mut crate::ProjectControls<Self::P>) { unimplemented!() }
         fn _private_render(&self, _ctx: &mut DrawContext<Self::P>) { unimplemented!() }
+        fn _private_get_named_actor_mut_usize(&mut self, _name: usize) -> &mut dyn Actor<P=Self::P> { unimplemented!() }
         fn iter_actors(&self, _which: IterActors) -> super::ActorIterator<Self::P> { unimplemented!() }
         fn iter_actors_mut(&mut self, _which: IterActors) -> super::ActorIteratorMut<Self::P> { unimplemented!() }
         fn add_extra(&mut self, _extra: Box<dyn Actor<P=P>>) { unimplemented!() }
         fn remove_current_extra(&mut self) { unimplemented!() }
+        fn get_named_actor(&self, _name: Self::ActorNames) -> &dyn Actor<P=Self::P> where Self: Sized { unimplemented!() }
+        fn get_named_actor_mut(&mut self, _name: Self::ActorNames) -> &mut dyn Actor<P=Self::P> where Self: Sized { unimplemented!() }
     }
 
     /// This function ensures that the old Scene in `dst` is gone before

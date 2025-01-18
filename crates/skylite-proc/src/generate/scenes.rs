@@ -123,9 +123,10 @@ pub(crate) fn generate_scene_params_type(project_name: &str, scenes: &[Scene]) -
 // endregion
 
 pub(crate) fn scene_type_name(name: &str) -> Ident { format_ident!("{}", change_case(name, IdentCase::UpperCamelCase)) }
+fn actor_names_type_name(name: &str) -> Ident { format_ident!("{}Actors", change_case(name, IdentCase::UpperCamelCase)) }
 
 fn gen_named_actors_type(scene: &SceneStub) -> TokenStream {
-    let typename = format_ident!("{}Actors", change_case(&scene.name, IdentCase::UpperCamelCase));
+    let typename = actor_names_type_name(&scene.name);
     let actor_names = scene.actor_names.iter().map(|name| format_ident!("{}", change_case(name, IdentCase::UpperCamelCase)));
 
     // Only use repr(usize) when there are actually named actors in the scene,
@@ -140,6 +141,10 @@ fn gen_named_actors_type(scene: &SceneStub) -> TokenStream {
         #repr
         pub enum #typename {
             #(#actor_names),*
+        }
+
+        impl ::std::convert::Into<usize> for #typename {
+            fn into(self) -> usize { self as usize }
         }
     }
 }
@@ -244,6 +249,7 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
     fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
 
     let scene_type_name = scene_type_name(&scene.name);
+    let actor_names_type_name = actor_names_type_name(&scene.name);
 
     let decode_fn = gen_scene_decode_fn(&scene.parameters);
 
@@ -270,6 +276,7 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
     Ok(quote! {
         impl ::skylite_core::scenes::Scene for #scene_type_name {
             type P = #project_type_name;
+            type ActorNames = #actor_names_type_name;
 
             #decode_fn
 
@@ -313,6 +320,10 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
                 #post_render
             }
 
+            fn _private_get_named_actor_mut_usize(&mut self, name: usize) -> &mut dyn ::skylite_core::actors::Actor<P=Self::P> {
+                self.actors[name].as_mut()
+            }
+
             fn iter_actors(&self, which: ::skylite_core::scenes::IterActors) -> ::skylite_core::scenes::ActorIterator<Self::P> {
                 use ::skylite_core::scenes::IterActors;
                 match which {
@@ -336,6 +347,16 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
             }
 
             fn remove_current_extra(&mut self) { self.remove_extra = true; }
+
+            fn get_named_actor(&self, name: Self::ActorNames) -> &dyn ::skylite_core::actors::Actor<P=Self::P>
+            where Self: Sized {
+                (&self.actors[Into::<usize>::into(name)]).as_ref()
+            }
+
+            fn get_named_actor_mut(&mut self, name: Self::ActorNames) -> &mut dyn ::skylite_core::actors::Actor<P=Self::P>
+            where Self: Sized {
+                (&mut self.actors[Into::<usize>::into(name)]).as_mut()
+            }
         }
     })
 }

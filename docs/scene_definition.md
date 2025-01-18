@@ -5,7 +5,7 @@ The `scene_definition!` macro is the counterpart to a [scene asset file](scene_a
 `scene_definition!` generates the following types:
 - **Main scene type**: This is the main type that represents the scene. It contains the data associated with the scene instance, such as actor lists and custom properties. This type also implements the `Scene` trait. This type has the same name as the scene asset converted to *UpperCamelCase*.
 - **Properties type**: Contains custom properties defined by the `skylite_proc::properties!` macro (see below). Each scene contains an instance of this type, which is accessible through the `.properties` member of the main scene type. The name of this type is the name of the main type with `Properties` appended to it.
-- `**Named actors type**`: This is an enum that lists the names of the named actors in order of definition. The enum has a `usize` representation, which allows it to be used to index into the scene's list of named actors, e.g. `scene.get_actors()[MySceneActors::Actor1]`. The name of the enum is the name of the main type with `Actors` appended to it, the name of each enum variant is name of the actor instance, converted to *UpperCamelCase*.
+- `**Named actors type**`: This is an enum that lists the names of the named actors in order of definition. This enum is used to retrieve the actor with a given name from the scene, e.g. via `scene.get_actor(MySceneActors::Actor1)`. The name of the enum is the name of the main type with `Actors` appended to it, the name of each enum variant is name of the actor instance, converted to *UpperCamelCase*.
 
 ## Special Functions and Macros
 

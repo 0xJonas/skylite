@@ -33,9 +33,17 @@ pub trait ActorAction {
 /// be implemented manually.*
 ///
 /// An actor can have properties and perform actions. Each action is defined
-/// by its own dedicated update method, which is called exactly once per `Scene`
-/// update (and, by extension, once per project update). An actor must perform
-/// exactly one action at a time.
+/// by its own dedicated update method, which is called exactly once per update cycle.
+/// An actor must perform exactly one action at a time.
+///
+/// An `Actor` also contains an `Entity`, which can be used for `system!` calls in combination
+/// with a `Scene`'s `iter_actors`:
+///
+/// ```ignore
+/// system!(scene.iter_actors(IterActors.ALL).map(|a| a.getEntity()), |c: MyComponent| { ... })
+/// ```
+///
+/// An `Actor's` entity starts out without any `Components`.
 pub trait Actor: TypeId + InstanceId {
     type P: SkyliteProject;
     type Action: ActorAction
@@ -50,17 +58,17 @@ pub trait Actor: TypeId + InstanceId {
     fn set_action(&mut self, action: Self::Action)
         where Self: Sized;
 
-    /// Returns whether the actor's action was changed during or after
+    /// Returns whether the `Actor`'s action was changed during or after
     /// the previous update cycle.
     fn action_changed(&self) -> bool;
 
-    /// Returns a reference to the underlying entity for this actor.
+    /// Returns a reference to the underlying `Entity` for this `Actor`.
     fn get_entity(&self) -> &Entity;
 
-    /// Returns a mutable reference to the underlying entity for this actor.
+    /// Returns a mutable reference to the underlying `Entity` for this `Actor`.
     fn get_entity_mut(&mut self) -> &mut Entity;
 
-    /// Returns the z-order of the actor.
+    /// Returns the z-order of the `Actor`.
     ///
     /// The z-order determines the order in which actors
     /// are rendered. Actors with higher z-orders are drawn
