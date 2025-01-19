@@ -13,8 +13,8 @@ skylite_proc::actor_definition! {
     }
 
     #[skylite_proc::create_properties]
-    fn create_properties(tag: String) -> BasicActor1Properties {
-        BasicActor1Properties { tag }
+    fn create_properties(tag: &str) -> BasicActor1Properties {
+        BasicActor1Properties { tag: tag.to_owned() }
     }
 
     #[skylite_proc::action("action1")]
@@ -64,8 +64,8 @@ skylite_proc::actor_definition! {
     }
 
     #[skylite_proc::create_properties]
-    fn create_properties(tag: String, is_spawner: bool) -> SpawnTestActorProperties {
-        SpawnTestActorProperties { tag, is_spawner }
+    fn create_properties(tag: &str, is_spawner: bool) -> SpawnTestActorProperties {
+        SpawnTestActorProperties { tag: tag.to_owned(), is_spawner }
     }
 
     #[skylite_proc::action("perform")]
@@ -73,7 +73,7 @@ skylite_proc::actor_definition! {
         controls.target.push_tag(&actor.properties.tag);
         controls.target.log("spawn_test_actor::perform");
         if actor.properties.is_spawner {
-            scene.add_extra(Box::new(SpawnTestActor::new(format!("{}-sub", actor.properties.tag), false)));
+            scene.add_extra(Box::new(SpawnTestActor::new(&format!("{}-sub", actor.properties.tag), false)));
             actor.properties.is_spawner = false;
         } else {
             scene.remove_current_extra();
@@ -94,8 +94,8 @@ skylite_proc::actor_definition! {
     }
 
     #[skylite_proc::create_properties]
-    fn create_properties(tag: String, z_order: i16) -> ZOrderTestActorProperties {
-        ZOrderTestActorProperties { tag, z_order }
+    fn create_properties(tag: &str, z_order: i16) -> ZOrderTestActorProperties {
+        ZOrderTestActorProperties { tag: tag.to_owned(), z_order }
     }
 
     #[skylite_proc::action("idle")]
@@ -129,8 +129,8 @@ skylite_proc::scene_definition! {
     }
 
     #[skylite_proc::create_properties]
-    fn create_properties(tag: String) -> BasicScene1Properties {
-        BasicScene1Properties { tag }
+    fn create_properties(tag: &str) -> BasicScene1Properties {
+        BasicScene1Properties { tag: tag.to_owned() }
     }
 
     #[skylite_proc::pre_update]

@@ -2,9 +2,9 @@ use proc_macro2::{Ident, Literal, TokenStream};
 use quote::{format_ident, quote};
 use syn::{parse_str, Item, ItemFn, Meta};
 
-use crate::{parse::{actors::{Action, Actor}, util::{change_case, IdentCase}, values::Variable}, SkyliteProcError};
+use crate::{generate::util::{generate_argument_list, generate_deserialize_statements}, parse::{actors::{Action, Actor}, util::{change_case, IdentCase}, values::Variable}, SkyliteProcError};
 
-use super::{project::project_type_name, util::{generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust, typed_value_to_rust}};
+use super::{project::project_type_name, util::{generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust_param, typed_value_to_rust}};
 
 fn actor_type_name(actor_name: &str) -> Ident { format_ident!("{}", change_case(actor_name, IdentCase::UpperCamelCase)) }
 fn action_type_name(actor_name: &str) -> Ident { format_ident!("{}Actions", change_case(actor_name, IdentCase::UpperCamelCase)) }
@@ -21,7 +21,7 @@ fn get_documentation(doc: &Option<String>) -> TokenStream {
 }
 
 fn get_parameter_name(var: &Variable) -> Ident { format_ident!("{}", change_case(&var.name, IdentCase::LowerSnakeCase)) }
-fn get_parameter_type(var: &Variable) -> TokenStream { skylite_type_to_rust(&var.typename) }
+fn get_parameter_type(var: &Variable) -> TokenStream { skylite_type_to_rust_param(&var.typename) }
 fn get_parameter_docs(var: &Variable) -> TokenStream { get_documentation(&var.documentation) }
 
 // region: Actor Actions
@@ -48,16 +48,6 @@ fn get_action_impl_name(action_name: &str, items: &[Item]) -> Result<Ident, Skyl
     Ok(out)
 }
 
-fn gen_action_deserialize_calls(action: &Action) -> TokenStream {
-    let names = action.params.iter().map(|a| format_ident!("{}", change_case(&a.name, IdentCase::LowerSnakeCase)));
-    let types = action.params.iter().map(|a| skylite_type_to_rust(&a.typename));
-    quote! {
-        #(
-            let #names = #types::deserialize(decoder);
-        )*
-    }
-}
-
 fn get_action_name(action: &Action) -> Ident { format_ident!("{}", change_case(&action.name, IdentCase::UpperCamelCase)) }
 
 fn get_action_param_names(action: &Action) -> TokenStream {
@@ -75,9 +65,9 @@ fn gen_actions_type(name: &Ident, actions: &[Action]) -> TokenStream {
             let param_types = action.params.iter().map(get_parameter_type);
             quote!(#(#param_docs #param_names: #param_types),*)
         }).collect();
-    let action_param_names: Vec<TokenStream> = actions.iter().map(get_action_param_names).collect();
+    let action_param_names = actions.iter().map(|a| generate_argument_list(&a.params));
     let action_ids = (0..actions.len()).map(|i| Literal::u8_unsuffixed(i as u8));
-    let action_decoders = actions.iter().map(gen_action_deserialize_calls);
+    let action_decoders = actions.iter().map(|a| generate_deserialize_statements(&a.params));
 
     quote! {
         pub enum #name {
@@ -89,7 +79,7 @@ fn gen_actions_type(name: &Ident, actions: &[Action]) -> TokenStream {
 
         impl ::skylite_core::actors::ActorAction for #name {
             fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> #name {
-                use skylite_core::decode::Deserialize;
+                use ::skylite_core::decode::Deserialize;
                 match u8::deserialize(decoder) {
                     #(
                         #action_ids => {
@@ -186,7 +176,7 @@ fn gen_actor_type(actor: &Actor, items: &[Item]) -> TokenStream {
             pub fn new(#actor_param_list) -> #actor_type_name {
                 let mut out = #actor_type_name {
                     // See `gen_actor_properties_type` for the definition of `create_properties`.
-                    properties: #properties_type_name::_private_create_properties(#(#actor_param_names.clone()),*),
+                    properties: #properties_type_name::_private_create_properties(#(#actor_param_names),*),
                     entity: ::skylite_core::ecs::Entity::new(),
                     current_action: #action_type_name::#initial_action_name {
                         #(#initial_action_params: #initial_action_args),*
@@ -207,22 +197,15 @@ fn gen_actor_type(actor: &Actor, items: &[Item]) -> TokenStream {
 // region: Actor Trait Implementation
 
 fn gen_actor_decode_fn(actor_type_name: &Ident, params: &[Variable]) -> TokenStream {
-    let actor_param_names: Vec<Ident> = params.iter().map(get_parameter_name).collect();
-    let actor_args_decoders = params.iter()
-        .map(|p| {
-            let t = skylite_type_to_rust(&p.typename);
-            quote!(#t::deserialize(decoder))
-        });
+    let decode_statements = generate_deserialize_statements(params);
+    let args = generate_argument_list(params);
 
     quote! {
         fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> #actor_type_name
         where Self: Sized {
-            use skylite_core::decode::Deserialize;
-            #(
-                let #actor_param_names = #actor_args_decoders;
-            )*
-            // See `gen_actor_type` for the definition of `new`
-            #actor_type_name::new(#(#actor_param_names),*)
+            use ::skylite_core::decode::Deserialize;
+            #decode_statements
+            #actor_type_name::new(#args)
         }
     }
 }
@@ -486,7 +469,7 @@ mod tests {
 
             impl ::skylite_core::actors::ActorAction for TestActorActions {
                 fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> TestActorActions {
-                    use skylite_core::decode::Deserialize;
+                    use ::skylite_core::decode::Deserialize;
                     match u8::deserialize(decoder) {
                         0 => {
                             let dx = u8::deserialize(decoder);
@@ -546,7 +529,7 @@ mod tests {
             impl TestActor {
                 pub fn new(x: u16, y: u16) -> TestActor {
                     let mut out = TestActor {
-                        properties: TestActorProperties::_private_create_properties(x.clone(), y.clone()),
+                        properties: TestActorProperties::_private_create_properties(x, y),
                         entity: ::skylite_core::ecs::Entity::new(),
                         current_action: TestActorActions::Action2 { val: 5u8 },
                         action_changed: true,
@@ -572,7 +555,7 @@ mod tests {
                 type Action = TestActorActions where Self: Sized;
 
                 fn _private_decode(decoder: &mut dyn ::skylite_compress::Decoder) -> TestActor where Self: Sized{
-                    use skylite_core::decode::Deserialize;
+                    use ::skylite_core::decode::Deserialize;
                     let x = u16::deserialize(decoder);
                     let y = u16::deserialize(decoder);
                     TestActor::new(x, y)

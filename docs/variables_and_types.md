@@ -24,7 +24,7 @@ An identifier can assume the following casings:
 | Lower camel-case | `colorRgb`  | N/A                                                       |
 | Upper camel-case | `ColorRgb`  | Type names and traits                                     |
 
-Since identifiers start in Scheme, which has very liberal rules for its symbols, a single identifier can use a mix of casings. This is not recommended however, since it can lead to surprises when the identifier is normalized in the generated Rust code.
+Since identifiers start in Scheme, which has very liberal rules for its symbols, a single identifier can use a mix of different casings. This is not recommended however, since it can lead to surprises when the identifier is normalized in the generated Rust code.
 
 ## Types
 
@@ -47,9 +47,9 @@ The following primitive types are supported:
 | 32-bit floating point number | `f32`         | `f32`     |
 | 64-bit floating point number | `f64`         | `f64`     |
 | Boolean value                | `bool`        | `bool`    |
-| String                       | `string`      | `String`  |
+| String                       | `string`      | `&str`    |
 
-In Scheme, the allowed values for each of these types is the same as it would be in Rust, even though Scheme (or Guile specifically) does not enforce this limit. Boolean values are must be written as `#t`/`#true` or `#f`/`#false`, other truthy values are not allowed in place of `#t`.
+In Scheme, the allowed values for each of these types is the same as it would be in Rust, even though Scheme (or Guile specifically) does not enforce this limit. Boolean values must be written as `#t`/`#true` or `#f`/`#false`, other truthy values are not allowed in place of `#t`.
 
 ### Aggregate types
 
@@ -58,7 +58,7 @@ The following aggregate types are supported:
 | Type   | Scheme                | Rust type               |
 | ------ | --------------------- | ----------------------- |
 | Tuple  | `(#type1 #type2 ...)` | `(#type1, #type2, ...)` |
-| Vector | `(vec #type)`         | `Vec<#type>`            |
+| Vector | `(vec #type)`         | `&[#type]`              |
 
 A tuple is a fixed-length sequence of up to eight elements of arbitrary types. When supplying a value to a variable with tuple type in Scheme, simply list the values for each element in order.
 
