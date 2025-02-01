@@ -3,6 +3,7 @@ reorder_imports = true
 
 # Nightly stuff. This is not checked by the CI, but should
 # also not interfere if it is applied locally.
+unstable_features = true
 imports_granularity = "Module"
 group_imports = "StdExternalCrate"
 wrap_comments = true

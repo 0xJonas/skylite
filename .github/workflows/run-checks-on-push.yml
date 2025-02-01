@@ -1,0 +1,37 @@
+name: Run Checks on Push
+
+on: push
+
+jobs:
+  run-checks:
+    name: Run Checks
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    # Rust is preinstalled on GitHub Runners
+    # - name: Install Rust
+    #   id: install-rust
+    #   uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Guile
+      run: apt install guile-3.0
+
+    - name: Attempt to restore dependencies from cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Run tests
+      run: cargo test --tests
+
+    - name: Run formatting check
+      run: |
+        cargo fmt --check
