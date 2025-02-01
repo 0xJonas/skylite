@@ -16,7 +16,7 @@ jobs:
     #   uses: dtolnay/rust-toolchain@stable
 
     - name: Install Guile
-      run: apt install guile-3.0
+      run: sudo apt-get install guile-3.0
 
     - name: Attempt to restore dependencies from cache
       uses: actions/cache@v4
