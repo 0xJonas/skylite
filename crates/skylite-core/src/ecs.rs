@@ -8,19 +8,25 @@ pub trait Component: TypeId + InstanceId {}
 
 /// An `Entity` is a list of components.
 pub struct Entity {
-    components: Vec<UnsafeCell<Box<dyn Component>>>
+    components: Vec<UnsafeCell<Box<dyn Component>>>,
 }
 
 impl Entity {
     pub fn new() -> Entity {
-        Entity { components: Vec::new() }
+        Entity {
+            components: Vec::new(),
+        }
     }
 
-    /// Adds a component to the `Entity`. An `Entity` can only contain a single instance
-    /// of any type of component, so if the same type is added multiple times, this
-    /// function will panic.
+    /// Adds a component to the `Entity`. An `Entity` can only contain a single
+    /// instance of any type of component, so if the same type is added
+    /// multiple times, this function will panic.
     pub fn add_component(&mut self, new_component: Box<dyn Component>) {
-        if self.components.iter().any(|c| unsafe { &*c.get() }.get_id() == new_component.get_id()) {
+        if self
+            .components
+            .iter()
+            .any(|c| unsafe { &*c.get() }.get_id() == new_component.get_id())
+        {
             panic!("Component already exists in entity.");
         } else {
             self.components.push(UnsafeCell::new(new_component));
@@ -28,7 +34,8 @@ impl Entity {
     }
 
     fn remove_component_by_type_id(&mut self, type_id: usize) {
-        self.components.retain(|c| unsafe { &*c.get() }.get_id() != type_id);
+        self.components
+            .retain(|c| unsafe { &*c.get() }.get_id() != type_id);
     }
 
     /// Removes a component of a particular type from the `Entity`.
@@ -41,13 +48,15 @@ impl Entity {
     /// type from the `Entity`, or None if the `Entity` does not have
     /// that type of component.
     pub fn get_component<C: Component>(&self) -> Option<&C> {
-        self.components.iter()
+        self.components
+            .iter()
             .find(|c| unsafe { &*c.get() }.get_id() == <C as TypeId>::get_id())
             .map(|c| unsafe { (*(c.get() as *const Box<C>)).as_ref() })
     }
 
     fn get_component_mut_unsafe<C: Component>(&self) -> Option<&mut C> {
-        self.components.iter()
+        self.components
+            .iter()
             .find(|c| unsafe { &*c.get() }.get_id() == <C as TypeId>::get_id())
             .map(|c| unsafe { (*(c.get() as *mut Box<C>)).as_mut() })
     }
@@ -66,7 +75,7 @@ pub mod _private {
     #[cfg(debug_assertions)]
     fn check_distinct(addresses: &[usize]) -> bool {
         for i in 0..addresses.len() {
-            for j in i + 1 .. addresses.len() {
+            for j in i + 1..addresses.len() {
                 if addresses[i] == addresses[j] {
                     return false;
                 }
@@ -112,9 +121,9 @@ pub mod _private {
 #[cfg(test)]
 mod tests {
 
-    use crate::{actors::TypeId, ecs::_private::system1};
-
     use super::{Component, Entity};
+    use crate::actors::TypeId;
+    use crate::ecs::_private::system1;
 
     struct Component1(usize);
 
@@ -135,10 +144,7 @@ mod tests {
     impl Component for Component2 {}
 
     fn get_test_entities() -> Vec<Entity> {
-        let mut entities = vec![
-            Entity { components: vec![] },
-            Entity { components: vec![] }
-        ];
+        let mut entities = vec![Entity { components: vec![] }, Entity { components: vec![] }];
         entities[0].add_component(Box::new(Component1(5)));
         entities[0].add_component(Box::new(Component2(10)));
         entities[1].add_component(Box::new(Component1(20)));

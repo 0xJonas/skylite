@@ -2,55 +2,68 @@ pub(crate) enum IdentCase {
     UpperCamelCase,
     _LowerCamelCase,
     _UpperSnakeCase,
-    LowerSnakeCase
+    LowerSnakeCase,
 }
 
 pub(crate) fn change_case(input: &str, case: IdentCase) -> String {
-    input.chars()
-        .scan((true, true, false), |(first, prev_lowercase, split_queued), c| {
-            let is_delimiter = c == ' ' || c == '-' || c == '_';
-            let do_split = is_delimiter || *split_queued || (!*first && *prev_lowercase && c.is_uppercase());
-            *split_queued = false;
+    input
+        .chars()
+        .scan(
+            (true, true, false),
+            |(first, prev_lowercase, split_queued), c| {
+                let is_delimiter = c == ' ' || c == '-' || c == '_';
+                let do_split = is_delimiter
+                    || *split_queued
+                    || (!*first && *prev_lowercase && c.is_uppercase());
+                *split_queued = false;
 
-            let out = match case {
-                IdentCase::UpperCamelCase => if is_delimiter {
-                    *split_queued = true;
-                    String::new()
-                } else if do_split || *first {
-                    c.to_uppercase().to_string()
-                } else {
-                    c.to_lowercase().to_string()
-                },
-                IdentCase::_LowerCamelCase => if is_delimiter {
-                    *split_queued = true;
-                    String::new()
-                } else if do_split {
-                    c.to_uppercase().to_string()
-                } else {
-                    c.to_lowercase().to_string()
-                },
-                IdentCase::_UpperSnakeCase => if is_delimiter {
-                    "_".to_owned()
-                } else if do_split {
-                    "_".to_owned() + &c.to_uppercase().to_string()
-                } else {
-                    c.to_uppercase().to_string()
-                }
-                IdentCase::LowerSnakeCase => if is_delimiter {
-                    "_".to_owned()
-                } else if do_split {
-                    "_".to_owned() + &c.to_lowercase().to_string()
-                } else {
-                    c.to_lowercase().to_string()
-                }
-            };
-            *first = false;
-            *prev_lowercase = c.is_lowercase();
-            Some(out)
-        })
+                let out = match case {
+                    IdentCase::UpperCamelCase => {
+                        if is_delimiter {
+                            *split_queued = true;
+                            String::new()
+                        } else if do_split || *first {
+                            c.to_uppercase().to_string()
+                        } else {
+                            c.to_lowercase().to_string()
+                        }
+                    }
+                    IdentCase::_LowerCamelCase => {
+                        if is_delimiter {
+                            *split_queued = true;
+                            String::new()
+                        } else if do_split {
+                            c.to_uppercase().to_string()
+                        } else {
+                            c.to_lowercase().to_string()
+                        }
+                    }
+                    IdentCase::_UpperSnakeCase => {
+                        if is_delimiter {
+                            "_".to_owned()
+                        } else if do_split {
+                            "_".to_owned() + &c.to_uppercase().to_string()
+                        } else {
+                            c.to_uppercase().to_string()
+                        }
+                    }
+                    IdentCase::LowerSnakeCase => {
+                        if is_delimiter {
+                            "_".to_owned()
+                        } else if do_split {
+                            "_".to_owned() + &c.to_lowercase().to_string()
+                        } else {
+                            c.to_lowercase().to_string()
+                        }
+                    }
+                };
+                *first = false;
+                *prev_lowercase = c.is_lowercase();
+                Some(out)
+            },
+        )
         .collect()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -63,14 +76,38 @@ mod tests {
         assert_eq!(change_case("test", IdentCase::_UpperSnakeCase), "TEST");
         assert_eq!(change_case("test", IdentCase::LowerSnakeCase), "test");
 
-        assert_eq!(change_case("TestText", IdentCase::UpperCamelCase), "TestText");
-        assert_eq!(change_case("TestText", IdentCase::_LowerCamelCase), "testText");
-        assert_eq!(change_case("TestText", IdentCase::_UpperSnakeCase), "TEST_TEXT");
-        assert_eq!(change_case("TestText", IdentCase::LowerSnakeCase), "test_text");
+        assert_eq!(
+            change_case("TestText", IdentCase::UpperCamelCase),
+            "TestText"
+        );
+        assert_eq!(
+            change_case("TestText", IdentCase::_LowerCamelCase),
+            "testText"
+        );
+        assert_eq!(
+            change_case("TestText", IdentCase::_UpperSnakeCase),
+            "TEST_TEXT"
+        );
+        assert_eq!(
+            change_case("TestText", IdentCase::LowerSnakeCase),
+            "test_text"
+        );
 
-        assert_eq!(change_case("test_text", IdentCase::UpperCamelCase), "TestText");
-        assert_eq!(change_case("test_text", IdentCase::_LowerCamelCase), "testText");
-        assert_eq!(change_case("test_text", IdentCase::_UpperSnakeCase), "TEST_TEXT");
-        assert_eq!(change_case("test_text", IdentCase::LowerSnakeCase), "test_text");
+        assert_eq!(
+            change_case("test_text", IdentCase::UpperCamelCase),
+            "TestText"
+        );
+        assert_eq!(
+            change_case("test_text", IdentCase::_LowerCamelCase),
+            "testText"
+        );
+        assert_eq!(
+            change_case("test_text", IdentCase::_UpperSnakeCase),
+            "TEST_TEXT"
+        );
+        assert_eq!(
+            change_case("test_text", IdentCase::LowerSnakeCase),
+            "test_text"
+        );
     }
 }

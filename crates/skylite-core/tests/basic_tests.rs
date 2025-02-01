@@ -1,5 +1,5 @@
-use skylite_mock::{Call, MockTarget};
 use skylite_core::SkyliteProject;
+use skylite_mock::{Call, MockTarget};
 use skylite_proc::skylite_project;
 
 skylite_proc::actor_definition! {

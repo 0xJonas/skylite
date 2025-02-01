@@ -11,15 +11,12 @@ pub trait Serialize {
 }
 
 pub struct CompressionBuffer {
-    buffer: Vec<u8>
+    buffer: Vec<u8>,
 }
 
 impl CompressionBuffer {
-
     pub fn new() -> CompressionBuffer {
-        CompressionBuffer {
-            buffer: Vec::new()
-        }
+        CompressionBuffer { buffer: Vec::new() }
     }
 
     fn write_byte(&mut self, byte: u8) {
@@ -41,7 +38,10 @@ impl CompressionBuffer {
     }
 
     pub fn encode(self) -> Vec<u8> {
-        let (out, _reports) = compress(&self.buffer, &[CompressionMethods::LZ77, CompressionMethods::RC]);
+        let (out, _reports) = compress(
+            &self.buffer,
+            &[CompressionMethods::LZ77, CompressionMethods::RC],
+        );
         // for r in reports {
         //     println!("{}", r);
         // }
@@ -83,7 +83,6 @@ impl Serialize for bool {
 }
 
 impl<T: Serialize> Serialize for &[T] {
-
     fn serialize(&self, buffer: &mut CompressionBuffer) {
         buffer.write_varint(self.len());
         for item in *self {
@@ -143,9 +142,8 @@ impl Serialize for TypedValue {
 
 #[cfg(test)]
 mod tests {
-    use crate::generate::encode::Serialize;
-
     use super::CompressionBuffer;
+    use crate::generate::encode::Serialize;
 
     #[test]
     fn test_serialize() {
@@ -173,23 +171,10 @@ mod tests {
 
         let encoded = buffer.encode();
         let expected = vec![
-            3,
-            0, 1, 6, 18,
-            64, 232, 140, 25,
-            133, 254, 148, 114,
-            121, 80, 150, 38,
-            203, 10, 145, 49,
-            75, 159, 24, 235,
-            88, 128, 173, 107,
-            26, 106, 176, 79,
-            150, 183, 6, 57,
-            242, 188, 94, 113,
-            15, 244, 245, 231,
-            182, 250, 51, 110,
-            98, 154, 5, 119,
-            126, 131, 176, 116,
-            178, 13, 45, 142,
-            113, 4, 128
+            3, 0, 1, 6, 18, 64, 232, 140, 25, 133, 254, 148, 114, 121, 80, 150, 38, 203, 10, 145,
+            49, 75, 159, 24, 235, 88, 128, 173, 107, 26, 106, 176, 79, 150, 183, 6, 57, 242, 188,
+            94, 113, 15, 244, 245, 231, 182, 250, 51, 110, 98, 154, 5, 119, 126, 131, 176, 116,
+            178, 13, 45, 142, 113, 4, 128,
         ];
         assert_eq!(encoded, expected);
     }

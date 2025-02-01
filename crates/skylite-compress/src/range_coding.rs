@@ -45,14 +45,15 @@ pub fn encode_rc<'a>(data: &[u8]) -> Vec<u8> {
     // the counts array (max is 255).
     // The ring buffer is initialized by repeating the four most common bytes in
     // the first 255 bytes of the data.
-    let ring_buffer_init = calc_ring_buffer_init(&data[0 .. 255.min(data.len())]);
+    let ring_buffer_init = calc_ring_buffer_init(&data[0..255.min(data.len())]);
     let mut ring_buffer: [u8; 255] = std::array::from_fn(|i| ring_buffer_init[i & 0x3]);
     let mut ring_buffer_idx = 0;
 
     // The number of occurances of each byte in the ring buffer at the current time.
-    // These counts are used directly as the probabilities for the current byte to be encoded.
-    // The sum of all counts will always be 255 (it should ideally be 256, but that is not
-    // possible without increasing the size of the array type).
+    // These counts are used directly as the probabilities for the current byte to
+    // be encoded. The sum of all counts will always be 255 (it should ideally
+    // be 256, but that is not possible without increasing the size of the array
+    // type).
     let mut counts = [0_u8; 256];
     counts[ring_buffer_init[0] as usize] = 64;
     counts[ring_buffer_init[1] as usize] = 64;
@@ -70,11 +71,13 @@ pub fn encode_rc<'a>(data: &[u8]) -> Vec<u8> {
     let mut width: u64 = 0x1_0000_0000;
 
     for byte in data {
-        let count_acc: u64 = counts[0 .. (*byte as usize)]
+        let count_acc: u64 = counts[0..(*byte as usize)]
             .iter()
             .map(|c| *c as u64 + 1)
-            .sum::<u64>() << 23;
-        // println!("start = {:x}, width = {:x}, byte = {:x}, p = {:x}, t = {:x}", start, width, byte, probability, total_scaled);
+            .sum::<u64>()
+            << 23;
+        // println!("start = {:x}, width = {:x}, byte = {:x}, p = {:x}, t = {:x}",
+        // start, width, byte, probability, total_scaled);
         start += width * count_acc / 0x1_0000_0000;
         width = width * ((counts[*byte as usize] as u64 + 1) << 23) / 0x1_0000_0000;
 
@@ -111,17 +114,16 @@ pub struct RCDecoder<'a> {
     ring_buffer_idx: usize,
     start: u64,
     width: u64,
-    x: u64
+    x: u64,
 }
 
 impl<'a> RCDecoder<'a> {
-
     pub fn new<'b>(mut source: Box<dyn Decoder + 'b>) -> RCDecoder<'b> {
         let ring_buffer_init = [
             source.decode_u8(),
             source.decode_u8(),
             source.decode_u8(),
-            source.decode_u8()
+            source.decode_u8(),
         ];
 
         let mut counts = [0; 256];
@@ -131,9 +133,9 @@ impl<'a> RCDecoder<'a> {
         counts[ring_buffer_init[3] as usize] = 63;
 
         let x = ((source.decode_u8() as u64) << 24)
-                + ((source.decode_u8() as u64) << 16)
-                + ((source.decode_u8() as u64) << 8)
-                + (source.decode_u8() as u64);
+            + ((source.decode_u8() as u64) << 16)
+            + ((source.decode_u8() as u64) << 8)
+            + (source.decode_u8() as u64);
 
         RCDecoder {
             source,
@@ -142,7 +144,7 @@ impl<'a> RCDecoder<'a> {
             ring_buffer_idx: 0,
             start: 0,
             width: 0x1_0000_0000,
-            x
+            x,
         }
     }
 
@@ -166,9 +168,9 @@ impl<'a> RCDecoder<'a> {
 }
 
 impl<'a> Decoder for RCDecoder<'a> {
-
     fn decode_u8(&mut self) -> u8 {
-        // print!("start = {:x}, width = {:x}, x = {:x}", self.start, self.width, self.x);
+        // print!("start = {:x}, width = {:x}, x = {:x}", self.start, self.width,
+        // self.x);
         let mut out = 0;
         let mut count_acc = 0;
         let mut count_inc = 0;
@@ -177,7 +179,8 @@ impl<'a> Decoder for RCDecoder<'a> {
             let threshold = self.start + self.width * (count_acc + count_inc) / 0x1_0000_0000;
             out = byte;
             if self.x < threshold {
-                // print!(", threshold = {:x}, acc = {:x}, inc = {:x}", threshold, count_acc, count_inc);
+                // print!(", threshold = {:x}, acc = {:x}, inc = {:x}", threshold, count_acc,
+                // count_inc);
                 break;
             }
             count_acc += count_inc;
@@ -188,7 +191,8 @@ impl<'a> Decoder for RCDecoder<'a> {
         self.width = self.width * count_inc / 0x1_0000_0000;
 
         while (self.start >> 24) == (self.start + self.width >> 24) || self.width <= 0xffff {
-            // println!("start = {:x}, width = {:x}, x = {:x} ... adjusting", self.start, self.width, self.x);
+            // println!("start = {:x}, width = {:x}, x = {:x} ... adjusting", self.start,
+            // self.width, self.x);
             self.adjust_range();
             assert_ne!(self.width, 0);
         }
@@ -210,11 +214,9 @@ extern crate quickcheck;
 mod tests {
     use std::iter::repeat_with;
 
-    use super::quickcheck::{
-        quickcheck, TestResult
-    };
-
-    use crate::{encode_rc, range_coding::RCDecoder, Decoder, RawSliceDecoder};
+    use super::quickcheck::{quickcheck, TestResult};
+    use crate::range_coding::RCDecoder;
+    use crate::{encode_rc, Decoder, RawSliceDecoder};
 
     #[test]
     fn test_compression() {
@@ -224,30 +226,22 @@ mod tests {
                 2 => 0x11,
                 3 => 0x11,
                 5 => 0x55,
-                _ => 0
+                _ => 0,
             })
             .collect();
 
         let encoded = encode_rc(&data);
         let expectation = &[
-            0, 17, 85, 1,
-            10, 115, 248, 183,
-            244, 208, 233, 246,
-            143, 246, 104, 202,
-            59, 38, 2, 131,
-            66, 90, 223, 250,
-            135, 18, 227, 13,
-            12, 164, 160, 175,
-            89, 143, 71, 255,
-            118, 5, 21, 65,
-            75, 88, 204, 114,
-            117, 15, 160, 88,
-            239, 207
+            0, 17, 85, 1, 10, 115, 248, 183, 244, 208, 233, 246, 143, 246, 104, 202, 59, 38, 2,
+            131, 66, 90, 223, 250, 135, 18, 227, 13, 12, 164, 160, 175, 89, 143, 71, 255, 118, 5,
+            21, 65, 75, 88, 204, 114, 117, 15, 160, 88, 239, 207,
         ];
         assert_eq!(&encoded[..], expectation);
 
         let mut decoder = RCDecoder::new(Box::new(RawSliceDecoder::new(&encoded)));
-        let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8()).take(data.len()).collect();
+        let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8())
+            .take(data.len())
+            .collect();
         assert_eq!(decoded[..], data);
     }
 

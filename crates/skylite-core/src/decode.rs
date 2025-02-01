@@ -43,7 +43,6 @@ pub fn read_varint(decoder: &mut dyn Decoder) -> usize {
 }
 
 impl<T: Deserialize> Deserialize for Vec<T> {
-
     fn deserialize(decoder: &mut dyn Decoder) -> Vec<T> {
         let len = read_varint(decoder);
         let mut out = Vec::with_capacity(len);
@@ -104,30 +103,17 @@ impl Deserialize for bool {
 #[cfg(test)]
 mod tests {
     use skylite_compress::make_decoder;
-    use super::Deserialize;
 
+    use super::Deserialize;
 
     #[test]
     fn test_deserialize() {
         // Should be the same as the result in the test from encode.rs
         let input = vec![
-            3,
-            0, 1, 6, 18,
-            64, 232, 140, 25,
-            133, 254, 148, 114,
-            121, 80, 150, 38,
-            203, 10, 145, 49,
-            75, 159, 24, 235,
-            88, 128, 173, 107,
-            26, 106, 176, 79,
-            150, 183, 6, 57,
-            242, 188, 94, 113,
-            15, 244, 245, 231,
-            182, 250, 51, 110,
-            98, 154, 5, 119,
-            126, 131, 176, 116,
-            178, 13, 45, 142,
-            113, 4, 128
+            3, 0, 1, 6, 18, 64, 232, 140, 25, 133, 254, 148, 114, 121, 80, 150, 38, 203, 10, 145,
+            49, 75, 159, 24, 235, 88, 128, 173, 107, 26, 106, 176, 79, 150, 183, 6, 57, 242, 188,
+            94, 113, 15, 244, 245, 231, 182, 250, 51, 110, 98, 154, 5, 119, 126, 131, 176, 116,
+            178, 13, 45, 142, 113, 4, 128,
         ];
         let mut decoder = make_decoder(&input);
 
@@ -148,6 +134,9 @@ mod tests {
         assert_eq!(String::deserialize(decoder.as_mut()), "A Test! 🎵");
         assert_eq!(<(bool, i32)>::deserialize(decoder.as_mut()), (true, 5));
 
-        assert_eq!(Vec::<(i32, i32)>::deserialize(decoder.as_mut()), vec![(5, 10), (15, 20), (25, 30)]);
+        assert_eq!(
+            Vec::<(i32, i32)>::deserialize(decoder.as_mut()),
+            vec![(5, 10), (15, 20), (25, 30)]
+        );
     }
 }

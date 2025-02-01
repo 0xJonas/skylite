@@ -1,18 +1,34 @@
-use quote::{format_ident, quote};
-use syn::{Item, ItemFn};
 use std::collections::HashMap;
 
-use proc_macro2::{Literal, TokenStream, Ident};
+use proc_macro2::{Ident, Literal, TokenStream};
+use quote::{format_ident, quote};
+use syn::{Item, ItemFn};
 
-use crate::{generate::{project::project_ident, util::{generate_argument_list, generate_deserialize_statements, generate_member_list}}, parse::{actors::Actor, scenes::{Scene, SceneStub}, util::{change_case, IdentCase}, values::Variable}, SkyliteProcError};
+use super::encode::{CompressionBuffer, Serialize};
+use super::project::project_type_name;
+use super::util::{generate_param_list, get_annotated_function, get_macro_item};
+use crate::generate::project::project_ident;
+use crate::generate::util::{
+    generate_argument_list, generate_deserialize_statements, generate_member_list,
+};
+use crate::parse::actors::Actor;
+use crate::parse::scenes::{Scene, SceneStub};
+use crate::parse::util::{change_case, IdentCase};
+use crate::parse::values::Variable;
+use crate::SkyliteProcError;
 
-use super::{encode::{CompressionBuffer, Serialize}, project::project_type_name, util::{generate_param_list, get_annotated_function, get_macro_item}};
-
-fn get_parameter_name(var: &Variable) -> Ident { format_ident!("{}", change_case(&var.name, IdentCase::LowerSnakeCase)) }
+fn get_parameter_name(var: &Variable) -> Ident {
+    format_ident!("{}", change_case(&var.name, IdentCase::LowerSnakeCase))
+}
 
 // region: skylite_project stuff
 
-pub(crate) fn scene_params_type_name(project_name: &str) -> Ident { format_ident!("{}SceneParams", change_case(project_name, IdentCase::UpperCamelCase)) }
+pub(crate) fn scene_params_type_name(project_name: &str) -> Ident {
+    format_ident!(
+        "{}SceneParams",
+        change_case(project_name, IdentCase::UpperCamelCase)
+    )
+}
 
 fn encode_scene(scene: &Scene, actor_ids: &HashMap<String, usize>, buffer: &mut CompressionBuffer) {
     buffer.write_varint(scene.actors.len());
@@ -33,12 +49,14 @@ fn encode_scene(scene: &Scene, actor_ids: &HashMap<String, usize>, buffer: &mut 
 }
 
 pub(crate) fn generate_scene_data(scenes: &[Scene], actors: &[Actor]) -> TokenStream {
-    let actor_ids = actors.iter()
+    let actor_ids = actors
+        .iter()
         .enumerate()
         .map(|(i, actor)| (actor.name.clone(), i))
         .collect::<HashMap<String, usize>>();
     let mut scene_buffer = CompressionBuffer::new();
-    let offsets = scenes.iter()
+    let offsets = scenes
+        .iter()
         .map(|s| {
             let out = scene_buffer.len();
             encode_scene(s, &actor_ids, &mut scene_buffer);
@@ -47,7 +65,8 @@ pub(crate) fn generate_scene_data(scenes: &[Scene], actors: &[Actor]) -> TokenSt
         .map(|offset| Literal::usize_unsuffixed(offset))
         .collect::<Vec<Literal>>();
 
-    let scene_data = scene_buffer.encode()
+    let scene_data = scene_buffer
+        .encode()
         .into_iter()
         .map(|b| Literal::u8_unsuffixed(b));
 
@@ -59,9 +78,10 @@ pub(crate) fn generate_scene_data(scenes: &[Scene], actors: &[Actor]) -> TokenSt
 
 pub(crate) fn generate_scene_decode_funs(project_name: &str, actors: &[Actor]) -> TokenStream {
     let project_ident = project_ident(project_name);
-    let actor_ids = (0..actors.len())
-        .map(|i| Literal::usize_unsuffixed(i));
-    let actor_names = actors.iter().map(|a| format_ident!("{}", change_case(&a.name, IdentCase::UpperCamelCase)));
+    let actor_ids = (0..actors.len()).map(|i| Literal::usize_unsuffixed(i));
+    let actor_names = actors
+        .iter()
+        .map(|a| format_ident!("{}", change_case(&a.name, IdentCase::UpperCamelCase)));
 
     quote! {
         pub fn _private_get_decoder_for_scene(id: u32) -> ::std::boxed::Box<dyn ::skylite_compress::Decoder> {
@@ -88,14 +108,15 @@ pub(crate) fn generate_scene_decode_funs(project_name: &str, actors: &[Actor]) -
 pub(crate) fn generate_scene_params_type(project_name: &str, scenes: &[Scene]) -> TokenStream {
     let project_ident = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
     let scenes_type_name = scene_params_type_name(project_name);
-    let scene_names = scenes.iter()
+    let scene_names = scenes
+        .iter()
         .map(|s| format_ident!("{}", change_case(&s.name, IdentCase::UpperCamelCase)))
         .collect::<Vec<_>>();
     let param_lists = scenes.iter().map(|s| generate_member_list(&s.parameters));
     let params = scenes.iter().map(|s| {
-            let names = s.parameters.iter().map(get_parameter_name);
-            quote!(#(#names),*)
-        });
+        let names = s.parameters.iter().map(get_parameter_name);
+        quote!(#(#names),*)
+    });
     let args = scenes.iter().map(|s| generate_argument_list(&s.parameters));
 
     quote! {
@@ -122,12 +143,19 @@ pub(crate) fn generate_scene_params_type(project_name: &str, scenes: &[Scene]) -
 
 // endregion
 
-pub(crate) fn scene_type_name(name: &str) -> Ident { format_ident!("{}", change_case(name, IdentCase::UpperCamelCase)) }
-fn actor_names_type_name(name: &str) -> Ident { format_ident!("{}Actors", change_case(name, IdentCase::UpperCamelCase)) }
+pub(crate) fn scene_type_name(name: &str) -> Ident {
+    format_ident!("{}", change_case(name, IdentCase::UpperCamelCase))
+}
+fn actor_names_type_name(name: &str) -> Ident {
+    format_ident!("{}Actors", change_case(name, IdentCase::UpperCamelCase))
+}
 
 fn gen_named_actors_type(scene: &SceneStub) -> TokenStream {
     let typename = actor_names_type_name(&scene.name);
-    let actor_names = scene.actor_names.iter().map(|name| format_ident!("{}", change_case(name, IdentCase::UpperCamelCase)));
+    let actor_names = scene
+        .actor_names
+        .iter()
+        .map(|name| format_ident!("{}", change_case(name, IdentCase::UpperCamelCase)));
 
     // Only use repr(usize) when there are actually named actors in the scene,
     // since it does not work on empty enums. The type should still be generated,
@@ -149,17 +177,20 @@ fn gen_named_actors_type(scene: &SceneStub) -> TokenStream {
     }
 }
 
-fn properties_type_name(name: &str) -> Ident { format_ident!("{}Properties", change_case(name, IdentCase::UpperCamelCase)) }
+fn properties_type_name(name: &str) -> Ident {
+    format_ident!("{}Properties", change_case(name, IdentCase::UpperCamelCase))
+}
 
 fn gen_properties_type(scene: &SceneStub, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     let scene_param_list = generate_param_list(&scene.parameters);
     let scene_param_names: Vec<Ident> = scene.parameters.iter().map(get_parameter_name).collect();
     let properties_type_name = properties_type_name(&scene.name);
 
-    // The properties are copied directly from the `skylite_proc::properties!` function macro.
+    // The properties are copied directly from the `skylite_proc::properties!`
+    // function macro.
     let properties = match get_macro_item("skylite_proc::properties", items)? {
         Some(tokens) => tokens.clone(),
-        None => TokenStream::new()
+        None => TokenStream::new(),
     };
 
     let create_properties_call = if !properties.is_empty() {
@@ -187,7 +218,12 @@ fn gen_properties_type(scene: &SceneStub, items: &[Item]) -> Result<TokenStream,
     })
 }
 
-fn gen_scene_type(scene: &SceneStub, type_id: u32, project_name: &str, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
+fn gen_scene_type(
+    scene: &SceneStub,
+    type_id: u32,
+    project_name: &str,
+    items: &[Item],
+) -> Result<TokenStream, SkyliteProcError> {
     let type_name = scene_type_name(&scene.name);
     let properties_type_name = properties_type_name(&scene.name);
     let project_type_name = project_type_name(project_name);
@@ -238,8 +274,14 @@ fn gen_scene_decode_fn(params: &[Variable]) -> TokenStream {
     }
 }
 
-fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
-    fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
+fn gen_scene_trait_impl(
+    scene: &SceneStub,
+    project_type_name: &TokenStream,
+    items: &[Item],
+) -> Result<TokenStream, SkyliteProcError> {
+    fn get_name(fun: &ItemFn) -> Ident {
+        fun.sig.ident.clone()
+    }
 
     let scene_type_name = scene_type_name(&scene.name);
     let actor_names_type_name = actor_names_type_name(&scene.name);
@@ -354,18 +396,27 @@ fn gen_scene_trait_impl(scene: &SceneStub, project_type_name: &TokenStream, item
     })
 }
 
-pub(crate) fn generate_scene_definition(scene: &SceneStub, type_id: u32, items: &[Item], project_name: &str, body_raw: &TokenStream) -> Result<TokenStream, SkyliteProcError> {
+pub(crate) fn generate_scene_definition(
+    scene: &SceneStub,
+    type_id: u32,
+    items: &[Item],
+    project_name: &str,
+    body_raw: &TokenStream,
+) -> Result<TokenStream, SkyliteProcError> {
     let project_type_name = project_type_name(project_name);
-    let scene_module_name = format_ident!("{}", change_case(&scene.name, IdentCase::LowerSnakeCase));
+    let scene_module_name =
+        format_ident!("{}", change_case(&scene.name, IdentCase::LowerSnakeCase));
     let named_actors_type = gen_named_actors_type(scene);
     let properties_type = gen_properties_type(scene, items)?;
     let scene_type = gen_scene_type(scene, type_id, project_name, items)?;
     let scene_trait_impl = gen_scene_trait_impl(scene, &project_type_name, items)?;
 
-    let imports = items.iter().filter_map(|item| if let Item::Use(import) = item {
-        Some(import.to_owned())
-    } else {
-        None
+    let imports = items.iter().filter_map(|item| {
+        if let Item::Use(import) = item {
+            Some(import.to_owned())
+        } else {
+            None
+        }
     });
 
     Ok(quote! {
@@ -402,9 +453,9 @@ mod tests {
     use quote::quote;
     use syn::{parse2, File, Item};
 
-    use crate::parse::{scenes::SceneStub, values::{Type, TypedValue}};
-
     use super::{gen_scene_trait_impl, Variable};
+    use crate::parse::scenes::SceneStub;
+    use crate::parse::values::{Type, TypedValue};
 
     fn create_test_scene() -> SceneStub {
         SceneStub {
@@ -414,20 +465,20 @@ mod tests {
                 "actor2".to_owned(),
                 "actor3".to_owned(),
             ],
-            parameters: vec! [
+            parameters: vec![
                 Variable {
                     name: "val1".to_owned(),
                     typename: Type::U8,
                     default: Some(TypedValue::U8(5)),
-                    documentation: None
+                    documentation: None,
                 },
                 Variable {
                     name: "val2".to_owned(),
                     typename: Type::Bool,
                     default: None,
-                    documentation: Some("Test description".to_owned())
-                }
-            ]
+                    documentation: Some("Test description".to_owned()),
+                },
+            ],
         }
     }
 
@@ -451,7 +502,9 @@ mod tests {
 
             #[skylite_proc::post_render]
             fn post_render(scene: &TestScene, control: &mut DrawContext<TestProject>) {}
-        }).unwrap().items
+        })
+        .unwrap()
+        .items
     }
 
     #[test]

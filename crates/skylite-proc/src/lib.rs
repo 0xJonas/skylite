@@ -1,21 +1,24 @@
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
+use std::str::FromStr;
 
 use generate::actors::generate_actor_definition;
 use generate::scenes::generate_scene_definition;
 use generate::util::get_macro_item;
 use parse::actors::Actor;
+use parse::guile::SCM;
+use parse::project::{SkyliteProject, SkyliteProjectStub};
 use parse::scenes::SceneStub;
-use parse::util::{change_case, IdentCase};
-use quote::{format_ident, quote};
-use parse::{guile::SCM, project::SkyliteProjectStub};
 use parse::scheme_util::form_to_string;
+use parse::util::{change_case, IdentCase};
 use proc_macro2::{TokenStream, TokenTree};
-use parse::project::SkyliteProject;
-use syn::{parse::Parser, parse2, punctuated::Punctuated, Item, Token, File, LitStr};
+use quote::{format_ident, quote};
+use syn::parse::Parser;
+use syn::punctuated::Punctuated;
+use syn::{parse2, File, Item, LitStr, Token};
 
-mod parse;
-mod generate;
 mod ecs;
+mod generate;
+mod parse;
 
 use ecs::{derive_component_impl, system_impl};
 
@@ -24,7 +27,7 @@ enum SkyliteProcError {
     GuileException(SCM),
     DataError(String),
     SyntaxError(String),
-    OtherError(String)
+    OtherError(String),
 }
 
 impl std::fmt::Display for SkyliteProcError {
@@ -33,7 +36,7 @@ impl std::fmt::Display for SkyliteProcError {
             Self::GuileException(scm) => write!(f, "Scheme Exception: {}", form_to_string(*scm)),
             Self::DataError(str) => write!(f, "Data Error: {}", str),
             Self::SyntaxError(str) => write!(f, "Syntax Error: {}", str),
-            Self::OtherError(str) => write!(f, "Error: {}", str)
+            Self::OtherError(str) => write!(f, "Error: {}", str),
         }
     }
 }
@@ -50,7 +53,9 @@ impl Into<TokenStream> for SkyliteProcError {
 fn parse_project_file(tokens: &TokenStream) -> Result<PathBuf, SkyliteProcError> {
     let path_raw = parse2::<LitStr>(tokens.clone())
         .map(|lit| lit.value())
-        .map_err(|err| SkyliteProcError::SyntaxError(format!("Illegal arguments to project_file!: {}", err)))?;
+        .map_err(|err| {
+            SkyliteProcError::SyntaxError(format!("Illegal arguments to project_file!: {}", err))
+        })?;
 
     let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
     let relative_path = PathBuf::from_str(&path_raw)
@@ -88,12 +93,16 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
         .items;
 
-    let project_file_mac = get_macro_item("skylite_proc::project_file", &items)?
-        .ok_or(SkyliteProcError::DataError(format!("Missing required macro skylite_proc::project_file!")))?;
+    let project_file_mac = get_macro_item("skylite_proc::project_file", &items)?.ok_or(
+        SkyliteProcError::DataError(format!(
+            "Missing required macro skylite_proc::project_file!"
+        )),
+    )?;
     let path = parse_project_file(project_file_mac)?;
 
-    let target_type_mac = get_macro_item("skylite_proc::target_type", &items)?
-        .ok_or(SkyliteProcError::DataError(format!("Missing required macro skylite_proc::target_type!")))?;
+    let target_type_mac = get_macro_item("skylite_proc::target_type", &items)?.ok_or(
+        SkyliteProcError::DataError(format!("Missing required macro skylite_proc::target_type!")),
+    )?;
     // Verify that the content of target_type is actually a valid path.
     parse2::<syn::Path>(target_type_mac.clone())
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
@@ -135,7 +144,9 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
     Ok(out)
 }
 
-fn extract_asset_file(definition_file: &TokenStream) -> Result<(SkyliteProjectStub, String), SkyliteProcError> {
+fn extract_asset_file(
+    definition_file: &TokenStream,
+) -> Result<(SkyliteProjectStub, String), SkyliteProcError> {
     let args = Parser::parse2(Punctuated::<LitStr, Token![,]>::parse_separated_nonempty, definition_file.clone())
         .map_err(|err| SkyliteProcError::SyntaxError(format!("Failed to parse definition_file! macro: {}. Expected (\"project-path\", \"asset-name\")", err.to_string())))?;
 
@@ -143,8 +154,9 @@ fn extract_asset_file(definition_file: &TokenStream) -> Result<(SkyliteProjectSt
         return Err(SkyliteProcError::SyntaxError(format!("Wrong number of arguments to definition_file!, expected (\"project-path\", \"asset-name\")")));
     }
 
-    let relative_path = PathBuf::try_from(args[0].value())
-        .map_err(|_| SkyliteProcError::DataError(format!("Not a valid project path: {}", args[0].value())))?;
+    let relative_path = PathBuf::try_from(args[0].value()).map_err(|_| {
+        SkyliteProcError::DataError(format!("Not a valid project path: {}", args[0].value()))
+    })?;
 
     let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
     let stub = SkyliteProjectStub::from_file(&base_dir.join(relative_path))?;
@@ -156,16 +168,20 @@ fn extract_asset_file(definition_file: &TokenStream) -> Result<(SkyliteProjectSt
 fn process_debug_output(out: &TokenStream, items: &[Item]) -> Result<(), SkyliteProcError> {
     let tokens = match get_macro_item("skylite_proc::debug_output", &items)? {
         Some(m) => m,
-        None => return Ok(())
+        None => return Ok(()),
     };
 
     let path = match tokens.clone().into_iter().next() {
         Some(TokenTree::Literal(lit)) => {
             let path_str = lit.to_string();
-            PathBuf::try_from(&path_str[1 .. path_str.len() - 1])
-                    .map_err(|e| SkyliteProcError::SyntaxError(format!("{}", e.to_string())))?
-        },
-        _ => return Err(SkyliteProcError::SyntaxError(format!("Wrong argument for debug_output!, expected string literal")))
+            PathBuf::try_from(&path_str[1..path_str.len() - 1])
+                .map_err(|e| SkyliteProcError::SyntaxError(format!("{}", e.to_string())))?
+        }
+        _ => {
+            return Err(SkyliteProcError::SyntaxError(format!(
+                "Wrong argument for debug_output!, expected string literal"
+            )))
+        }
     };
 
     let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
@@ -179,8 +195,9 @@ fn actor_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skyli
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
         .items;
 
-    let args = get_macro_item("skylite_proc::asset_file", &items)?
-        .ok_or(SkyliteProcError::DataError(format!("Missing required macro asset_file!")))?;
+    let args = get_macro_item("skylite_proc::asset_file", &items)?.ok_or(
+        SkyliteProcError::DataError(format!("Missing required macro asset_file!")),
+    )?;
     let (project_stub, name) = extract_asset_file(args)?;
 
     let (id, path) = project_stub.assets.actors.find_asset(&name)?;
@@ -199,8 +216,9 @@ fn scene_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skyli
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
         .items;
 
-    let mac = get_macro_item("skylite_proc::asset_file", &items)?
-        .ok_or(SkyliteProcError::DataError(format!("Missing required macro asset_file!")))?;
+    let mac = get_macro_item("skylite_proc::asset_file", &items)?.ok_or(
+        SkyliteProcError::DataError(format!("Missing required macro asset_file!")),
+    )?;
     let (project_stub, name) = extract_asset_file(mac)?;
 
     let (id, path) = project_stub.assets.scenes.find_asset(&name)?;
@@ -214,26 +232,24 @@ fn scene_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skyli
     Ok(out)
 }
 
-
-
 fn skylite_project_impl(body_raw: TokenStream) -> TokenStream {
     match skylite_project_impl_fallible(body_raw) {
         Ok(t) => t,
-        Err(err) => err.into()
+        Err(err) => err.into(),
     }
 }
 
 fn actor_definition_impl(body_raw: TokenStream) -> TokenStream {
     match actor_definition_fallible(body_raw) {
         Ok(stream) => stream,
-        Err(err) => err.into()
+        Err(err) => err.into(),
     }
 }
 
 fn scene_definition_impl(body_raw: TokenStream) -> TokenStream {
     match scene_definition_fallible(body_raw) {
         Ok(stream) => stream,
-        Err(err) => err.into()
+        Err(err) => err.into(),
     }
 }
 
@@ -265,73 +281,129 @@ pub fn derive_component(item: proc_macro::TokenStream) -> proc_macro::TokenStrea
 }
 
 #[proc_macro]
-pub fn project_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
+pub fn project_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    proc_macro::TokenStream::new()
+}
 
 #[proc_macro]
-pub fn target_type(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
+pub fn target_type(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    proc_macro::TokenStream::new()
+}
 
-/// Marks a function to be called to initialize an instance of `SkyliteProject` or `Scene.`
+/// Marks a function to be called to initialize an instance of `SkyliteProject`
+/// or `Scene.`
 ///
-/// **This macro must always be used with an absolute path: `#[skylite_proc::init]`.**
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::init]`.**
 #[proc_macro_attribute]
-pub fn init(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn init(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
 /// Marks a function to be called at the beginning of an update.
 ///
-/// **This macro must always be used with an absolute path: `#[skylite_proc::pre_update]`.**
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::pre_update]`.**
 #[proc_macro_attribute]
-pub fn pre_update(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn pre_update(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
 /// Marks a function to be called at the end of an update.
 ///
-/// **This macro must always be used with an absolute path: `#[skylite_proc::post_update]`.**
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::post_update]`.**
 #[proc_macro_attribute]
-pub fn post_update(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn post_update(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
 /// Marks a function to be called at the beginning of rendering.
 ///
-/// **This macro must always be used with an absolute path: `#[skylite_proc::pre_render]`.**
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::pre_render]`.**
 #[proc_macro_attribute]
-pub fn pre_render(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn pre_render(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
-/// Marks a function to be called for rendering something. Used for actors, because actors do not
-/// have any intrinsic properties that are rendered automatically.
+/// Marks a function to be called for rendering something. Used for actors,
+/// because actors do not have any intrinsic properties that are rendered
+/// automatically.
 ///
-/// **This macro must always be used with an absolute path: `#[skylite_proc::render]`.**
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::render]`.**
 #[proc_macro_attribute]
-pub fn render(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn render(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
 /// Marks a function to be called at the beginning of rendering.
 ///
-/// **This macro must always be used with an absolute path: `#[skylite_proc::post_render]`.**
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::post_render]`.**
 #[proc_macro_attribute]
-pub fn post_render(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn post_render(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
-/// Marks a function to be used to construct an actor's or scene's properties from the parameters defined in the asset file
-/// (see `properties!`).
+/// Marks a function to be used to construct an actor's or scene's properties
+/// from the parameters defined in the asset file (see `properties!`).
 ///
-/// **This macro must always be used with an absolute path: `#[skylite_proc::create_properties]`.**
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::create_properties]`.**
 #[proc_macro_attribute]
-pub fn create_properties(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn create_properties(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
 /// Marks an action for an actor.
 ///
-/// The name of the corresponding action in the actor asset file should be given like this:
+/// The name of the corresponding action in the actor asset file should be given
+/// like this:
 ///
 /// ```ignore
 /// #[skylite_proc::action("some_action")]
 /// fn some_action(actor: &mut Actor, project: &mut Project, args...) { ... }
 /// ```
 #[proc_macro_attribute]
-pub fn action(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn action(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
 /// Sets the backing asset file for an `actor_definition` or `scene_definition`.
 ///
-/// **This macro must always be used with an absolute path: `skylite_proc::asset_file!`.**
+/// **This macro must always be used with an absolute path:
+/// `skylite_proc::asset_file!`.**
 ///
-/// The definition file consists of the path to the project root file and the name of the asset.
-/// The name of the asset does *not* include the file extension. The specific file will be searched
-/// within the files for the respective asset defined in the project definition, i.e. actors files for
+/// The definition file consists of the path to the project root file and the
+/// name of the asset. The name of the asset does *not* include the file
+/// extension. The specific file will be searched within the files for the
+/// respective asset defined in the project definition, i.e. actors files for
 /// `actor_definition!`, scenes for `scene_definition!`, etc.
 ///
 /// ## Example
@@ -342,12 +414,16 @@ pub fn action(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> 
 /// }
 /// ```
 #[proc_macro]
-pub fn asset_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
+pub fn asset_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    proc_macro::TokenStream::new()
+}
 
-/// Defines properties for a scene or actor. These properties are converted into a separate type and can
-/// be accessed through the `properties`-member on actors or scenes.
+/// Defines properties for a scene or actor. These properties are converted into
+/// a separate type and can be accessed through the `properties`-member on
+/// actors or scenes.
 ///
-/// **This macro must always be used with an absolute path: `skylite_proc::properties!`.**
+/// **This macro must always be used with an absolute path:
+/// `skylite_proc::properties!`.**
 ///
 /// ## Example
 ///
@@ -360,15 +436,25 @@ pub fn asset_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { p
 /// }
 /// ```
 #[proc_macro]
-pub fn properties(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
+pub fn properties(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    proc_macro::TokenStream::new()
+}
 
-/// Marks a function that returns the z-order for an actor. The marked function must take an immutable
-/// reference to an actor type.
+/// Marks a function that returns the z-order for an actor. The marked function
+/// must take an immutable reference to an actor type.
 ///
-/// **This macro must always be used with an absolute path: `#[skylite_proc::z_order]`.**
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::z_order]`.**
 #[proc_macro_attribute]
-pub fn z_order(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> proc_macro::TokenStream { body }
+pub fn z_order(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
 
 #[cfg(debug_assertions)]
 #[proc_macro]
-pub fn debug_output(_body: proc_macro::TokenStream) -> proc_macro::TokenStream { proc_macro::TokenStream::new() }
+pub fn debug_output(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    proc_macro::TokenStream::new()
+}

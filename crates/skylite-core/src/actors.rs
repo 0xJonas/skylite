@@ -1,12 +1,16 @@
 use skylite_compress::Decoder;
 
-use crate::{ecs::Entity, scenes::Scene, DrawContext, ProjectControls, SkyliteProject};
+use crate::ecs::Entity;
+use crate::scenes::Scene;
+use crate::{DrawContext, ProjectControls, SkyliteProject};
 
 /// **For internal use only.**
 ///
 /// Used to assign an id to a specific type.
 pub trait TypeId {
-    fn get_id() -> usize where Self: Sized;
+    fn get_id() -> usize
+    where
+        Self: Sized;
 }
 
 /// **For internal use only.**
@@ -24,7 +28,8 @@ impl<T: TypeId> InstanceId for T {
 }
 
 pub trait ActorAction {
-    #[doc(hidden)] fn _private_decode(decoder: &mut dyn Decoder) -> Self;
+    #[doc(hidden)]
+    fn _private_decode(decoder: &mut dyn Decoder) -> Self;
 }
 
 /// An `Actor` is any entity in a [`Scene`].
@@ -33,11 +38,11 @@ pub trait ActorAction {
 /// be implemented manually.*
 ///
 /// An actor can have properties and perform actions. Each action is defined
-/// by its own dedicated update method, which is called exactly once per update cycle.
-/// An actor must perform exactly one action at a time.
+/// by its own dedicated update method, which is called exactly once per update
+/// cycle. An actor must perform exactly one action at a time.
 ///
-/// An `Actor` also contains an `Entity`, which can be used for `system!` calls in combination
-/// with a `Scene`'s `iter_actors`:
+/// An `Actor` also contains an `Entity`, which can be used for `system!` calls
+/// in combination with a `Scene`'s `iter_actors`:
 ///
 /// ```ignore
 /// system!(scene.iter_actors(IterActors.ALL).map(|a| a.getEntity()), |c: MyComponent| { ... })
@@ -47,16 +52,26 @@ pub trait ActorAction {
 pub trait Actor: TypeId + InstanceId {
     type P: SkyliteProject;
     type Action: ActorAction
-        where Self: Sized;
+    where
+        Self: Sized;
 
-    #[doc(hidden)] fn _private_decode(decoder: &mut dyn Decoder) -> Self
-        where Self: Sized;
+    #[doc(hidden)]
+    fn _private_decode(decoder: &mut dyn Decoder) -> Self
+    where
+        Self: Sized;
 
-    #[doc(hidden)] fn _private_update(&mut self, scene: &mut dyn Scene<P=Self::P>, controls: &mut ProjectControls<Self::P>);
-    #[doc(hidden)] fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
+    #[doc(hidden)]
+    fn _private_update(
+        &mut self,
+        scene: &mut dyn Scene<P = Self::P>,
+        controls: &mut ProjectControls<Self::P>,
+    );
+    #[doc(hidden)]
+    fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
 
     fn set_action(&mut self, action: Self::Action)
-        where Self: Sized;
+    where
+        Self: Sized;
 
     /// Returns whether the `Actor`'s action was changed during or after
     /// the previous update cycle.

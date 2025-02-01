@@ -1,19 +1,18 @@
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 
-use crate::parse::guile::{scm_is_false, scm_list_p, SCM};
-use crate::parse::scheme_util::{
-    CXROp::{CAR, CDR},
-    {assq_str, parse_string, parse_symbol, cxr, eval_str, iter_list, with_guile}
-};
-use crate::parse::util::{change_case, IdentCase};
-use crate::SkyliteProcError;
 use glob::{GlobError, Pattern};
 
 use super::actors::Actor;
 use super::scenes::{Scene, SceneInstance};
 use super::values::{parse_type, parse_typed_value, TypedValue};
-
+use crate::parse::guile::{scm_is_false, scm_list_p, SCM};
+use crate::parse::scheme_util::CXROp::{CAR, CDR};
+use crate::parse::scheme_util::{
+    assq_str, cxr, eval_str, iter_list, parse_string, parse_symbol, with_guile,
+};
+use crate::parse::util::{change_case, IdentCase};
+use crate::SkyliteProcError;
 
 fn normalize_glob(glob: &str, base_dir: &Path) -> String {
     if Path::new(&glob).is_relative() {
@@ -31,7 +30,7 @@ fn normalize_glob(glob: &str, base_dir: &Path) -> String {
 /// project definition file.
 #[derive(Debug, PartialEq)]
 pub(crate) struct AssetGroup {
-    globs: Vec<String>
+    globs: Vec<String>,
 }
 
 impl AssetGroup {
@@ -40,17 +39,20 @@ impl AssetGroup {
         unsafe {
             for g in iter_list(list)? {
                 let glob = normalize_glob(&parse_string(g)?, base_dir);
-                Pattern::new(&glob).map_err(|err| SkyliteProcError::DataError(format!("Error parsing glob: {}", err)))?;
+                Pattern::new(&glob).map_err(|err| {
+                    SkyliteProcError::DataError(format!("Error parsing glob: {}", err))
+                })?;
                 globs.push(glob);
             }
         }
         Ok(AssetGroup { globs })
     }
 
-    /// Returns a unique id and the file path for a given asset name. The name of an asset is the
-    /// last component of its filename without the file extension. The name is also
-    /// normalized to UpperCamelCase. For example, the name of the asset at
-    /// `./tilesets/town_1.scm` would be `Town1`.
+    /// Returns a unique id and the file path for a given asset name. The name
+    /// of an asset is the last component of its filename without the file
+    /// extension. The name is also normalized to UpperCamelCase. For
+    /// example, the name of the asset at `./tilesets/town_1.scm` would be
+    /// `Town1`.
     ///
     /// This method will return an error if the name does not exist, or
     /// is ambiguous among the assets matched by the `AssetGroup`.
@@ -64,15 +66,22 @@ impl AssetGroup {
         for (idx, entry_res) in self.into_iter().enumerate() {
             let entry = match entry_res {
                 Ok(e) => e,
-                Err(err) => return Err(SkyliteProcError::OtherError(format!("IO Error: {}", err)))
+                Err(err) => return Err(SkyliteProcError::OtherError(format!("IO Error: {}", err))),
             };
 
-            if change_case(entry.file_stem().unwrap().to_str().unwrap(), IdentCase::UpperCamelCase) != name_camel_case {
+            if change_case(
+                entry.file_stem().unwrap().to_str().unwrap(),
+                IdentCase::UpperCamelCase,
+            ) != name_camel_case
+            {
                 continue;
             }
 
             if let Some((_, prev_entry)) = out {
-                return Err(SkyliteProcError::DataError(format!("Name {} is ambiguous; both {:?} and {:?} match", name, prev_entry, entry)));
+                return Err(SkyliteProcError::DataError(format!(
+                    "Name {} is ambiguous; both {:?} and {:?} match",
+                    name, prev_entry, entry
+                )));
             }
 
             out = Some((idx, entry));
@@ -81,7 +90,10 @@ impl AssetGroup {
         if let Some(id_and_path) = out {
             Ok(id_and_path)
         } else {
-            Err(SkyliteProcError::DataError(format!("Name not found: {}", name)))
+            Err(SkyliteProcError::DataError(format!(
+                "Name not found: {}",
+                name
+            )))
         }
     }
 }
@@ -89,7 +101,7 @@ impl AssetGroup {
 pub(crate) struct AssetIterator<'base> {
     current_iter: glob::Paths,
     glob_idx: usize,
-    asset_group: &'base AssetGroup
+    asset_group: &'base AssetGroup,
 }
 
 impl<'base> Iterator for AssetIterator<'base> {
@@ -117,7 +129,7 @@ impl<'base> IntoIterator for &'base AssetGroup {
         AssetIterator {
             current_iter: glob::glob(&self.globs[0]).unwrap(),
             glob_idx: 0,
-            asset_group: self
+            asset_group: self,
         }
     }
 }
@@ -131,14 +143,16 @@ pub(crate) struct AssetGroups {
     pub graphics: AssetGroup,
     pub sprites: AssetGroup,
     pub tilesets: AssetGroup,
-    pub maps: AssetGroup
+    pub maps: AssetGroup,
 }
 
 impl AssetGroups {
     fn from_scheme(alist: SCM, base_dir: &Path) -> Result<AssetGroups, SkyliteProcError> {
         unsafe {
             if scm_is_false(scm_list_p(alist)) {
-                return Err(SkyliteProcError::DataError(format!("Asset directories must be defined as an associative list.")));
+                return Err(SkyliteProcError::DataError(format!(
+                    "Asset directories must be defined as an associative list."
+                )));
             }
             let mut out = create_default_asset_groups(base_dir);
 
@@ -171,7 +185,7 @@ impl AssetGroups {
 
 fn asset_group_from_single(pattern: &str, base_dir: &Path) -> AssetGroup {
     AssetGroup {
-        globs: vec![normalize_glob(pattern, base_dir)]
+        globs: vec![normalize_glob(pattern, base_dir)],
     }
 }
 
@@ -183,14 +197,14 @@ fn create_default_asset_groups(base_dir: &Path) -> AssetGroups {
         graphics: asset_group_from_single("./graphics/*.scm", base_dir),
         sprites: asset_group_from_single("./sprites/*.scm", base_dir),
         tilesets: asset_group_from_single("./tilesets/*.scm", base_dir),
-        maps: asset_group_from_single("./maps/*.scm", base_dir)
+        maps: asset_group_from_single("./maps/*.scm", base_dir),
     }
 }
 
 #[derive(PartialEq, Debug)]
 pub(crate) struct SaveItem {
     name: String,
-    data: TypedValue
+    data: TypedValue,
 }
 
 impl SaveItem {
@@ -199,10 +213,7 @@ impl SaveItem {
             let typename = parse_type(cxr(definition, &[CDR, CAR])?)?;
             Ok(SaveItem {
                 name: parse_symbol(cxr(definition, &[CAR])?)?,
-                data: parse_typed_value(
-                    &typename,
-                    cxr(definition, &[CDR, CDR, CAR])?
-                )?
+                data: parse_typed_value(&typename, cxr(definition, &[CDR, CDR, CAR])?)?,
             })
         }
     }
@@ -217,15 +228,18 @@ pub(crate) struct SkyliteProjectStub {
     pub assets: AssetGroups,
     pub save_data: Vec<SaveItem>,
     pub initial_scene: SceneInstance,
-    pub tile_types: Vec<String>
+    pub tile_types: Vec<String>,
 }
 
 impl SkyliteProjectStub {
-    fn from_scheme(definition: SCM, project_root: &Path) -> Result<SkyliteProjectStub, SkyliteProcError> {
+    fn from_scheme(
+        definition: SCM,
+        project_root: &Path,
+    ) -> Result<SkyliteProjectStub, SkyliteProcError> {
         unsafe {
-            let name = parse_symbol(
-                assq_str("name", definition)?.ok_or(SkyliteProcError::DataError("Missing required field 'name'".to_owned()))?
-            )?;
+            let name = parse_symbol(assq_str("name", definition)?.ok_or(
+                SkyliteProcError::DataError("Missing required field 'name'".to_owned()),
+            )?)?;
 
             let assets = if let Some(alist) = assq_str("assets", definition)? {
                 AssetGroups::from_scheme(alist, &project_root)?
@@ -242,10 +256,11 @@ impl SkyliteProjectStub {
             };
 
             let initial_scene = {
-                let instance_def = assq_str("initial-scene", definition)?.ok_or(SkyliteProcError::DataError(format!("Missing required field 'initial-scene'")))?;
+                let instance_def = assq_str("initial-scene", definition)?.ok_or(
+                    SkyliteProcError::DataError(format!("Missing required field 'initial-scene'")),
+                )?;
                 SceneInstance::from_scheme(instance_def, &assets.scenes)?
             };
-
 
             let tile_types = if let Some(list) = assq_str("tile-types", definition)? {
                 iter_list(list)?
@@ -256,7 +271,9 @@ impl SkyliteProjectStub {
             };
 
             if tile_types.len() == 0 {
-                return Err(SkyliteProcError::DataError("At least one tile-type must be defined.".to_owned()))
+                return Err(SkyliteProcError::DataError(
+                    "At least one tile-type must be defined.".to_owned(),
+                ));
             }
 
             Ok(SkyliteProjectStub {
@@ -264,7 +281,7 @@ impl SkyliteProjectStub {
                 assets,
                 save_data,
                 initial_scene,
-                tile_types
+                tile_types,
             })
         }
     }
@@ -278,11 +295,13 @@ impl SkyliteProjectStub {
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
         extern "C" fn from_file_guile(path: &Path) -> Result<SkyliteProjectStub, SkyliteProcError> {
-            let resolved_path = path.canonicalize().map_err(|e| SkyliteProcError::OtherError(format!("Error resolving project path: {}", e)))?;
-            let definition_raw = read_to_string(path).map_err(|e| SkyliteProcError::OtherError(format!("Error reading project definition: {}", e)))?;
-            let definition = unsafe {
-                eval_str(&definition_raw)?
-            };
+            let resolved_path = path.canonicalize().map_err(|e| {
+                SkyliteProcError::OtherError(format!("Error resolving project path: {}", e))
+            })?;
+            let definition_raw = read_to_string(path).map_err(|e| {
+                SkyliteProcError::OtherError(format!("Error reading project definition: {}", e))
+            })?;
+            let definition = unsafe { eval_str(&definition_raw)? };
 
             let project_root = resolved_path.parent().unwrap();
             SkyliteProjectStub::from_scheme(definition, project_root)
@@ -299,21 +318,31 @@ pub(crate) struct SkyliteProject {
     pub scenes: Vec<Scene>,
     pub _save_data: Vec<SaveItem>,
     pub initial_scene: SceneInstance,
-    pub tile_types: Vec<String>
+    pub tile_types: Vec<String>,
 }
 
 impl SkyliteProject {
     pub(crate) fn from_stub(stub: SkyliteProjectStub) -> Result<SkyliteProject, SkyliteProcError> {
-        let actors = stub.assets.actors.into_iter()
+        let actors = stub
+            .assets
+            .actors
+            .into_iter()
             .map(|path_res| {
-                let path = path_res.map_err(|err| SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string())))?;
+                let path = path_res.map_err(|err| {
+                    SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string()))
+                })?;
                 Actor::from_file(path.as_path())
             })
             .collect::<Result<Vec<Actor>, SkyliteProcError>>()?;
 
-        let scenes = stub.assets.scenes.into_iter()
+        let scenes = stub
+            .assets
+            .scenes
+            .into_iter()
             .map(|path_res| {
-                let path = path_res.map_err(|err| SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string())))?;
+                let path = path_res.map_err(|err| {
+                    SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string()))
+                })?;
                 Scene::from_file(path.as_path(), &actors)
             })
             .collect::<Result<Vec<Scene>, SkyliteProcError>>()?;
@@ -324,22 +353,29 @@ impl SkyliteProject {
             scenes,
             _save_data: stub.save_data,
             initial_scene: stub.initial_scene,
-            tile_types: stub.tile_types
+            tile_types: stub.tile_types,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::{create_dir, remove_dir_all, File}, path::PathBuf, str::FromStr};
-
-    use crate::parse::{project::{asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem}, scenes::SceneInstance, scheme_util::{eval_str, with_guile}, values::TypedValue};
+    use std::fs::{create_dir, remove_dir_all, File};
+    use std::path::PathBuf;
+    use std::str::FromStr;
 
     use super::SkyliteProjectStub;
+    use crate::parse::project::{
+        asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem,
+    };
+    use crate::parse::scenes::SceneInstance;
+    use crate::parse::scheme_util::{eval_str, with_guile};
+    use crate::parse::values::TypedValue;
 
     extern "C" fn test_project_parsing_impl(_: &()) {
         unsafe {
-            let definition = eval_str(r#"
+            let definition = eval_str(
+                r#"
                 '((name . TestProject)
                   (assets .
                     ((actors . ("./test1/*.scm" "./test2/*.scm"))
@@ -350,45 +386,52 @@ mod tests {
                       (val2 u8 5)))
 
                     (initial-scene . (basic_scene_1 "test"))
-                    (tile-types . (solid semi-solid non-solid)))"#).unwrap();
+                    (tile-types . (solid semi-solid non-solid)))"#,
+            )
+            .unwrap();
 
             // Use a path to the test project to resolve the initial-scene
             let project_root = PathBuf::from_str("../skylite-core/tests/test-project-1/").unwrap();
             let project = SkyliteProjectStub::from_scheme(definition, &project_root).unwrap();
-            assert_eq!(project, SkyliteProjectStub {
-                name: "TestProject".to_owned(),
-                assets: AssetGroups {
-                    actors: AssetGroup {
-                        globs: vec![
-                            normalize_glob("./test1/*.scm", &project_root),
-                            normalize_glob("./test2/*.scm", &project_root),
-                        ]
+            assert_eq!(
+                project,
+                SkyliteProjectStub {
+                    name: "TestProject".to_owned(),
+                    assets: AssetGroups {
+                        actors: AssetGroup {
+                            globs: vec![
+                                normalize_glob("./test1/*.scm", &project_root),
+                                normalize_glob("./test2/*.scm", &project_root),
+                            ]
+                        },
+                        scenes: asset_group_from_single("./scenes/*.scm", &project_root),
+                        plays: asset_group_from_single("./plays/*.scm", &project_root),
+                        graphics: asset_group_from_single("./graphics/*.scm", &project_root),
+                        sprites: asset_group_from_single("./sprites/*.scm", &project_root),
+                        tilesets: asset_group_from_single("./tilesets/*.scm", &project_root),
+                        maps: asset_group_from_single("./test3/*.scm", &project_root)
                     },
-                    scenes: asset_group_from_single("./scenes/*.scm", &project_root),
-                    plays: asset_group_from_single("./plays/*.scm", &project_root),
-                    graphics: asset_group_from_single("./graphics/*.scm", &project_root),
-                    sprites: asset_group_from_single("./sprites/*.scm", &project_root),
-                    tilesets: asset_group_from_single("./tilesets/*.scm", &project_root),
-                    maps: asset_group_from_single("./test3/*.scm", &project_root)
-                },
-                save_data: vec![
-                    SaveItem {
-                        name: "flag1".to_owned(),
-                        data: TypedValue::Bool(false)
+                    save_data: vec![
+                        SaveItem {
+                            name: "flag1".to_owned(),
+                            data: TypedValue::Bool(false)
+                        },
+                        SaveItem {
+                            name: "val2".to_owned(),
+                            data: TypedValue::U8(5)
+                        }
+                    ],
+                    initial_scene: SceneInstance {
+                        name: "BasicScene1".to_owned(),
+                        args: vec![TypedValue::String("test".to_owned()),]
                     },
-                    SaveItem {
-                        name: "val2".to_owned(),
-                        data: TypedValue::U8(5)
-                    }
-                ],
-                initial_scene: SceneInstance {
-                    name: "BasicScene1".to_owned(),
-                    args: vec![
-                        TypedValue::String("test".to_owned()),
+                    tile_types: vec![
+                        "solid".to_owned(),
+                        "semi-solid".to_owned(),
+                        "non-solid".to_owned()
                     ]
-                },
-                tile_types: vec!["solid".to_owned(), "semi-solid".to_owned(), "non-solid".to_owned()]
-            });
+                }
+            );
         }
     }
 
@@ -399,7 +442,13 @@ mod tests {
 
     #[test]
     fn test_calc_id_for_asset() {
-        let test_dir_name = format!("skylite_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+        let test_dir_name = format!(
+            "skylite_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
         let test_dir = std::env::temp_dir().join(test_dir_name);
         let sub_dir = test_dir.join("sub");
         create_dir(&test_dir).unwrap();

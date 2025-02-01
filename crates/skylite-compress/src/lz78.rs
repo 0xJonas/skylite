@@ -7,19 +7,23 @@ const MAX_NODES: usize = 1024;
 struct TrieNode {
     content: u8,
     prev_idx: u16,
-    next_list_idx: u16
+    next_list_idx: u16,
 }
 
 struct Trie {
     nodes: Vec<TrieNode>,
-    next_lists: Vec<Vec<u16>>
+    next_lists: Vec<Vec<u16>>,
 }
 
 impl Trie {
     fn new() -> Trie {
         Trie {
-            nodes: vec![TrieNode { prev_idx: NO_IDX, content: 0, next_list_idx: NO_IDX }],
-            next_lists: Vec::new()
+            nodes: vec![TrieNode {
+                prev_idx: NO_IDX,
+                content: 0,
+                next_list_idx: NO_IDX,
+            }],
+            next_lists: Vec::new(),
         }
     }
 
@@ -63,7 +67,6 @@ fn write_varint(mut val: usize, out: &mut Vec<u8>) {
         val >>= 7;
         out.insert(pos, (val & 0x7f | 0x80) as u8);
     }
-
 }
 
 pub fn encode_lz78(data: &[u8]) -> Vec<u8> {
@@ -75,17 +78,24 @@ pub fn encode_lz78(data: &[u8]) -> Vec<u8> {
         let current_node = &trie.nodes[current_idx];
         if current_node.next_list_idx != NO_IDX {
             let next_list = &trie.next_lists[current_node.next_list_idx as usize];
-            match next_list.iter().find(|&next_idx| trie.nodes[*next_idx as usize].content == *b) {
+            match next_list
+                .iter()
+                .find(|&next_idx| trie.nodes[*next_idx as usize].content == *b)
+            {
                 Some(idx) => {
                     current_idx = *idx as usize;
                     continue;
-                },
-                None => ()
+                }
+                None => (),
             }
         }
 
         if trie.nodes.len() < MAX_NODES {
-            trie.add_node(TrieNode { prev_idx: current_idx as u16, content: *b, next_list_idx: NO_IDX });
+            trie.add_node(TrieNode {
+                prev_idx: current_idx as u16,
+                content: *b,
+                next_list_idx: NO_IDX,
+            });
         }
 
         write_varint(current_idx, &mut out);
@@ -94,8 +104,8 @@ pub fn encode_lz78(data: &[u8]) -> Vec<u8> {
     }
 
     write_varint(current_idx, &mut out);
-    // Write a dummy 0 here because the decoder does not know when the data has ended
-    // and will always read one byte after the node index.
+    // Write a dummy 0 here because the decoder does not know when the data has
+    // ended and will always read one byte after the node index.
     out.push(0);
 
     out
@@ -105,7 +115,7 @@ pub struct LZ78Decoder<'source> {
     source: Box<dyn Decoder + 'source>,
     trie: Trie,
     current_phrase: Vec<u8>,
-    progress: u16
+    progress: u16,
 }
 
 impl<'source> LZ78Decoder<'source> {
@@ -114,7 +124,7 @@ impl<'source> LZ78Decoder<'source> {
             source,
             trie: Trie::new(),
             current_phrase: Vec::new(),
-            progress: 0
+            progress: 0,
         }
     }
 
@@ -126,7 +136,7 @@ impl<'source> LZ78Decoder<'source> {
             self.trie.add_node(TrieNode {
                 prev_idx: idx,
                 content: next_byte,
-                next_list_idx: NO_IDX
+                next_list_idx: NO_IDX,
             });
         }
 
@@ -166,13 +176,10 @@ mod tests {
     use std::cmp::Ordering;
     use std::iter::repeat_with;
 
-    use crate::{lz78::LZ78Decoder, Decoder, RawSliceDecoder};
-
     use super::encode_lz78;
-
-    use super::quickcheck::{
-        quickcheck, TestResult
-    };
+    use super::quickcheck::{quickcheck, TestResult};
+    use crate::lz78::LZ78Decoder;
+    use crate::{Decoder, RawSliceDecoder};
 
     #[test]
     fn test_compression() {
@@ -182,45 +189,24 @@ mod tests {
                 2 => 0x11,
                 3 => 0x11,
                 5 => 0x55,
-                _ => 0
+                _ => 0,
             })
             .collect();
 
         let expectation = vec![
-            0, 0, 0, 17,
-            2, 17, 1, 85,
-            1, 0, 5, 0, 3,
-            17, 4, 0, 6,
-            0, 7, 0, 0,
-            85, 9, 0, 10,
-            85, 12, 17, 3,
-            0, 11, 0, 9,
-            17, 15, 85, 14,
-            17, 2, 0, 16,
-            0, 6, 17, 18,
-            0, 17, 17, 20,
-            85, 19, 17, 8,
-            0, 22, 17, 25,
-            0, 24, 17, 27,
-            0, 5, 17, 23,
-            0, 28, 17, 31,
-            0, 1, 17, 33,
-            0, 32, 17, 29,
-            0, 34, 0, 21,
-            0, 38, 17, 35,
-            0, 13, 0, 30,
-            0, 41, 0, 36,
-            17, 39, 0, 42,
-            0, 46, 0, 44,
-            0, 40, 85, 26,
-            0, 50, 17, 18,
-            0
+            0, 0, 0, 17, 2, 17, 1, 85, 1, 0, 5, 0, 3, 17, 4, 0, 6, 0, 7, 0, 0, 85, 9, 0, 10, 85,
+            12, 17, 3, 0, 11, 0, 9, 17, 15, 85, 14, 17, 2, 0, 16, 0, 6, 17, 18, 0, 17, 17, 20, 85,
+            19, 17, 8, 0, 22, 17, 25, 0, 24, 17, 27, 0, 5, 17, 23, 0, 28, 17, 31, 0, 1, 17, 33, 0,
+            32, 17, 29, 0, 34, 0, 21, 0, 38, 17, 35, 0, 13, 0, 30, 0, 41, 0, 36, 17, 39, 0, 42, 0,
+            46, 0, 44, 0, 40, 85, 26, 0, 50, 17, 18, 0,
         ];
         let encoded = encode_lz78(&data);
         assert_eq!(encoded, expectation);
 
         let mut decoder = LZ78Decoder::new(Box::new(RawSliceDecoder::new(&encoded)));
-        let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8()).take(data.len()).collect();
+        let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8())
+            .take(data.len())
+            .collect();
         assert_eq!(decoded[..], data);
     }
 

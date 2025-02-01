@@ -5,14 +5,14 @@ const MAX_RECALL_DIST: usize = 256;
 
 struct RingBuffer {
     content: [u8; MAX_RECALL_DIST],
-    input_idx: usize
+    input_idx: usize,
 }
 
 impl RingBuffer {
     pub fn new() -> RingBuffer {
         RingBuffer {
             content: [0; MAX_RECALL_DIST],
-            input_idx: 0
+            input_idx: 0,
         }
     }
 
@@ -35,7 +35,11 @@ impl RingBuffer {
     }
 }
 
-fn map_output_bytes<C: FnMut(u8) -> u8, D: FnMut(u8) -> u8>(data: &mut [u8], mut control_code_fn: C, mut data_fn: D) {
+fn map_output_bytes<C: FnMut(u8) -> u8, D: FnMut(u8) -> u8>(
+    data: &mut [u8],
+    mut control_code_fn: C,
+    mut data_fn: D,
+) {
     let mut idx = 0;
 
     while idx < data.len() {
@@ -47,7 +51,7 @@ fn map_output_bytes<C: FnMut(u8) -> u8, D: FnMut(u8) -> u8>(data: &mut [u8], mut
             idx += 1;
         } else {
             let len = (opcode as usize >> 1) + 1;
-            for byte in data[idx .. idx + len].iter_mut() {
+            for byte in data[idx..idx + len].iter_mut() {
                 *byte = data_fn(*byte);
             }
             idx += len;
@@ -59,7 +63,8 @@ fn calc_max_correlation_offset(data_counts: &[u32; 256], control_code_counts: &[
     let mut max_correlation = 0;
     let mut max_correlation_offset = 0;
     for offset in 0..256 {
-        let correlation = data_counts.iter()
+        let correlation = data_counts
+            .iter()
             .enumerate()
             .map(|(i, c)| *c * control_code_counts[(i + offset) & 0xff])
             .sum();
@@ -76,18 +81,17 @@ struct LZ77Encoder {
     buffer: RingBuffer,
     recall_distances: Vec<usize>,
     recall_length: usize,
-    out: Vec<u8>
+    out: Vec<u8>,
 }
 
 impl LZ77Encoder {
-
     pub fn new() -> LZ77Encoder {
         LZ77Encoder {
             pending_symbols: 0,
             buffer: RingBuffer::new(),
             recall_distances: Vec::new(),
             recall_length: 0,
-            out: Vec::new()
+            out: Vec::new(),
         }
     }
 
@@ -98,15 +102,16 @@ impl LZ77Encoder {
 
         self.out.push(((len - 1) as u8) << 1);
 
-        for i in 0 .. len {
-            self.out.push(self.buffer.read(self.pending_symbols - i - 1));
+        for i in 0..len {
+            self.out
+                .push(self.buffer.read(self.pending_symbols - i - 1));
         }
         self.pending_symbols -= len;
     }
 
     fn emit_recall_code(&mut self, distance: usize, len: usize) {
         if len == 0 {
-            return
+            return;
         }
 
         self.out.push((((len - 1) as u8) << 1) | 1);
@@ -117,7 +122,8 @@ impl LZ77Encoder {
     pub fn push_symbol(&mut self, symbol: u8) {
         if !self.recall_distances.is_empty() {
             let current_max_recall_distance = *self.recall_distances.iter().max().unwrap();
-            self.recall_distances.retain(|dist| (self.buffer.read(*dist) == symbol));
+            self.recall_distances
+                .retain(|dist| (self.buffer.read(*dist) == symbol));
             if self.recall_distances.is_empty() {
                 if self.recall_length > 2 {
                     self.emit_direct_data_code(self.pending_symbols - self.recall_length);
@@ -130,7 +136,9 @@ impl LZ77Encoder {
         }
 
         if self.recall_distances.is_empty() {
-            self.recall_distances = (0 .. MAX_RECALL_DIST).filter(|dist| self.buffer.read(*dist) == symbol).collect();
+            self.recall_distances = (0..MAX_RECALL_DIST)
+                .filter(|dist| self.buffer.read(*dist) == symbol)
+                .collect();
             if !self.recall_distances.is_empty() {
                 self.recall_length = 1;
             }
@@ -139,7 +147,8 @@ impl LZ77Encoder {
         self.buffer.push(symbol);
         self.pending_symbols += 1;
 
-        // Check if an output needs to be forced, to prevent the ring buffer from overwriting unprocessed data
+        // Check if an output needs to be forced, to prevent the ring buffer from
+        // overwriting unprocessed data
         if self.pending_symbols >= MAX_LENGTH {
             self.emit_direct_data_code(self.pending_symbols - self.recall_length);
         }
@@ -155,19 +164,21 @@ impl LZ77Encoder {
     fn entropy_transform(&mut self) {
         let mut control_code_counts = [0; 256];
         let mut data_counts = [0; 256];
-        map_output_bytes(&mut self.out, |c| {
-            control_code_counts[c as usize] += 1;
-            c
-        }, |d| {
-            data_counts[d as usize] += 1;
-            d
-        });
+        map_output_bytes(
+            &mut self.out,
+            |c| {
+                control_code_counts[c as usize] += 1;
+                c
+            },
+            |d| {
+                data_counts[d as usize] += 1;
+                d
+            },
+        );
 
         let offset = calc_max_correlation_offset(&data_counts, &control_code_counts);
 
-        map_output_bytes(&mut self.out, |c| {
-            c.wrapping_sub(offset)
-        }, |d| d);
+        map_output_bytes(&mut self.out, |c| c.wrapping_sub(offset), |d| d);
 
         self.out.insert(0, offset);
     }
@@ -197,7 +208,7 @@ pub fn encode_lz77<'a>(data: &[u8]) -> Vec<u8> {
 
 enum LZ77Opcode {
     DirectData(usize),
-    Recall(usize, usize)
+    Recall(usize, usize),
 }
 
 pub struct LZ77Decoder<'a> {
@@ -205,7 +216,7 @@ pub struct LZ77Decoder<'a> {
     buffer: RingBuffer,
     control_code_offset: u8,
     opcode: LZ77Opcode,
-    progress: usize
+    progress: usize,
 }
 
 impl<'a> LZ77Decoder<'a> {
@@ -216,25 +227,30 @@ impl<'a> LZ77Decoder<'a> {
             buffer: RingBuffer::new(),
             control_code_offset,
             opcode: LZ77Opcode::DirectData(0),
-            progress: 0
+            progress: 0,
         }
     }
 }
 
 impl<'a> Decoder for LZ77Decoder<'a> {
-
     fn decode_u8(&mut self) -> u8 {
         let len = match self.opcode {
             LZ77Opcode::DirectData(len) => len,
-            LZ77Opcode::Recall(_, len) => len
+            LZ77Opcode::Recall(_, len) => len,
         };
 
         if self.progress >= len {
-            let opcode = self.source.decode_u8().wrapping_add(self.control_code_offset);
+            let opcode = self
+                .source
+                .decode_u8()
+                .wrapping_add(self.control_code_offset);
             let code_type = opcode & 1 != 0;
             let len = (opcode as usize >> 1) + 1;
             if code_type {
-                let distance = self.source.decode_u8().wrapping_add(self.control_code_offset) as usize;
+                let distance = self
+                    .source
+                    .decode_u8()
+                    .wrapping_add(self.control_code_offset) as usize;
                 self.opcode = LZ77Opcode::Recall(distance, len);
             } else {
                 self.opcode = LZ77Opcode::DirectData(len);
@@ -244,7 +260,7 @@ impl<'a> Decoder for LZ77Decoder<'a> {
 
         let out = match self.opcode {
             LZ77Opcode::DirectData(_) => self.source.decode_u8(),
-            LZ77Opcode::Recall(distance, _) => self.buffer.read(distance)
+            LZ77Opcode::Recall(distance, _) => self.buffer.read(distance),
         };
         self.buffer.push(out);
         self.progress += 1;
@@ -257,13 +273,12 @@ extern crate quickcheck;
 
 #[cfg(test)]
 mod tests {
-    use std::{cmp::Ordering, iter::repeat_with};
+    use std::cmp::Ordering;
+    use std::iter::repeat_with;
 
-    use super::quickcheck::{
-        quickcheck, TestResult
-    };
-
-    use crate::{encode_lz77, lz77::LZ77Decoder, Decoder, RawSliceDecoder};
+    use super::quickcheck::{quickcheck, TestResult};
+    use crate::lz77::LZ77Decoder;
+    use crate::{encode_lz77, Decoder, RawSliceDecoder};
 
     #[test]
     fn test_compression() {
@@ -273,17 +288,22 @@ mod tests {
                 2 => 0x11,
                 3 => 0x11,
                 5 => 0x55,
-                _ => 0
+                _ => 0,
             })
             .collect();
 
         let encoded = encode_lz77(&data);
 
-        let expectation = &[238, 28, 0, 17, 17, 17, 0, 85, 17, 27, 17, 147, 17, 11, 17, 11, 17, 11, 17, 11, 17, 11, 5, 11];
+        let expectation = &[
+            238, 28, 0, 17, 17, 17, 0, 85, 17, 27, 17, 147, 17, 11, 17, 11, 17, 11, 17, 11, 17, 11,
+            5, 11,
+        ];
         assert_eq!(&encoded[..], expectation);
 
         let mut decoder = LZ77Decoder::new(Box::new(RawSliceDecoder::new(&encoded)));
-        let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8()).take(data.len()).collect();
+        let decoded: Vec<u8> = repeat_with(|| decoder.decode_u8())
+            .take(data.len())
+            .collect();
         assert_eq!(decoded[..], data);
     }
 

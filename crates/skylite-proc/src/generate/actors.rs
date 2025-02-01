@@ -2,53 +2,94 @@ use proc_macro2::{Ident, Literal, TokenStream};
 use quote::{format_ident, quote};
 use syn::{parse_str, Item, ItemFn, Meta};
 
-use crate::{generate::util::{generate_argument_list, generate_deserialize_statements}, parse::{actors::{Action, Actor}, util::{change_case, IdentCase}, values::Variable}, SkyliteProcError};
+use super::project::project_type_name;
+use super::util::{
+    generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust_param,
+    typed_value_to_rust,
+};
+use crate::generate::util::{generate_argument_list, generate_deserialize_statements};
+use crate::parse::actors::{Action, Actor};
+use crate::parse::util::{change_case, IdentCase};
+use crate::parse::values::Variable;
+use crate::SkyliteProcError;
 
-use super::{project::project_type_name, util::{generate_param_list, get_annotated_function, get_macro_item, skylite_type_to_rust_param, typed_value_to_rust}};
-
-fn actor_type_name(actor_name: &str) -> Ident { format_ident!("{}", change_case(actor_name, IdentCase::UpperCamelCase)) }
-fn action_type_name(actor_name: &str) -> Ident { format_ident!("{}Actions", change_case(actor_name, IdentCase::UpperCamelCase)) }
-fn properties_type_name(actor_name: &str) -> Ident { format_ident!("{}Properties", change_case(actor_name, IdentCase::UpperCamelCase)) }
+fn actor_type_name(actor_name: &str) -> Ident {
+    format_ident!("{}", change_case(actor_name, IdentCase::UpperCamelCase))
+}
+fn action_type_name(actor_name: &str) -> Ident {
+    format_ident!(
+        "{}Actions",
+        change_case(actor_name, IdentCase::UpperCamelCase)
+    )
+}
+fn properties_type_name(actor_name: &str) -> Ident {
+    format_ident!(
+        "{}Properties",
+        change_case(actor_name, IdentCase::UpperCamelCase)
+    )
+}
 
 fn get_documentation(doc: &Option<String>) -> TokenStream {
     match &doc {
         Some(v) => {
             let content = Literal::string(&v);
             quote!(#[doc = #content])
-        },
+        }
         None => TokenStream::new(),
     }
 }
 
-fn get_parameter_name(var: &Variable) -> Ident { format_ident!("{}", change_case(&var.name, IdentCase::LowerSnakeCase)) }
-fn get_parameter_type(var: &Variable) -> TokenStream { skylite_type_to_rust_param(&var.typename) }
-fn get_parameter_docs(var: &Variable) -> TokenStream { get_documentation(&var.documentation) }
+fn get_parameter_name(var: &Variable) -> Ident {
+    format_ident!("{}", change_case(&var.name, IdentCase::LowerSnakeCase))
+}
+fn get_parameter_type(var: &Variable) -> TokenStream {
+    skylite_type_to_rust_param(&var.typename)
+}
+fn get_parameter_docs(var: &Variable) -> TokenStream {
+    get_documentation(&var.documentation)
+}
 
 // region: Actor Actions
 
 fn get_action_impl_name(action_name: &str, items: &[Item]) -> Result<Ident, SkyliteProcError> {
     let meta = parse_str::<Meta>(&format!("skylite_proc::action(\"{}\")", action_name)).unwrap();
-    let mut res = items.iter().filter_map(|item| if let Item::Fn(fun) = item {
-            Some(fun)
-        } else {
-            None
+    let mut res = items
+        .iter()
+        .filter_map(|item| {
+            if let Item::Fn(fun) = item {
+                Some(fun)
+            } else {
+                None
+            }
         })
         .filter(|fun| fun.attrs.iter().any(|attr| attr.meta == meta));
 
     let out = match res.next() {
         Some(fun) => fun.sig.ident.clone(),
-        None => return Err(SkyliteProcError::DataError(format!("Missing implementation for action {}", action_name)))
+        None => {
+            return Err(SkyliteProcError::DataError(format!(
+                "Missing implementation for action {}",
+                action_name
+            )))
+        }
     };
 
     match res.next() {
-        Some(_) => return Err(SkyliteProcError::DataError(format!("Multiple implementation for action {}", action_name))),
-        None => ()
+        Some(_) => {
+            return Err(SkyliteProcError::DataError(format!(
+                "Multiple implementation for action {}",
+                action_name
+            )))
+        }
+        None => (),
     };
 
     Ok(out)
 }
 
-fn get_action_name(action: &Action) -> Ident { format_ident!("{}", change_case(&action.name, IdentCase::UpperCamelCase)) }
+fn get_action_name(action: &Action) -> Ident {
+    format_ident!("{}", change_case(&action.name, IdentCase::UpperCamelCase))
+}
 
 fn get_action_param_names(action: &Action) -> TokenStream {
     let names = action.params.iter().map(get_parameter_name);
@@ -57,17 +98,23 @@ fn get_action_param_names(action: &Action) -> TokenStream {
 
 fn gen_actions_type(name: &Ident, actions: &[Action]) -> TokenStream {
     let action_names: Vec<Ident> = actions.iter().map(get_action_name).collect();
-    let action_documentation = actions.iter().map(|action| get_documentation(&action.description));
-    let action_param_lists: Vec<TokenStream> = actions.iter()
+    let action_documentation = actions
+        .iter()
+        .map(|action| get_documentation(&action.description));
+    let action_param_lists: Vec<TokenStream> = actions
+        .iter()
         .map(|action| {
             let param_docs = action.params.iter().map(get_parameter_docs);
             let param_names = action.params.iter().map(get_parameter_name);
             let param_types = action.params.iter().map(get_parameter_type);
             quote!(#(#param_docs #param_names: #param_types),*)
-        }).collect();
+        })
+        .collect();
     let action_param_names = actions.iter().map(|a| generate_argument_list(&a.params));
     let action_ids = (0..actions.len()).map(|i| Literal::u8_unsuffixed(i as u8));
-    let action_decoders = actions.iter().map(|a| generate_deserialize_statements(&a.params));
+    let action_decoders = actions
+        .iter()
+        .map(|a| generate_deserialize_statements(&a.params));
 
     quote! {
         pub enum #name {
@@ -98,17 +145,20 @@ fn gen_actions_type(name: &Ident, actions: &[Action]) -> TokenStream {
 
 // region: Actor Properties Type
 
-fn get_actor_param_list(actor: &Actor) -> TokenStream { generate_param_list(&actor.parameters) }
+fn get_actor_param_list(actor: &Actor) -> TokenStream {
+    generate_param_list(&actor.parameters)
+}
 
 fn gen_properties_type(actor: &Actor, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     let actor_param_list = get_actor_param_list(actor);
     let actor_param_names: Vec<Ident> = actor.parameters.iter().map(get_parameter_name).collect();
     let properties_type_name = properties_type_name(&actor.name);
 
-    // The properties are copied directly from the `skylite_proc::properties!` function macro.
+    // The properties are copied directly from the `skylite_proc::properties!`
+    // function macro.
     let properties = match get_macro_item("skylite_proc::properties", items)? {
         Some(tokens) => tokens.clone(),
-        None => TokenStream::new()
+        None => TokenStream::new(),
     };
 
     let create_properties_call = if !properties.is_empty() {
@@ -145,18 +195,21 @@ fn gen_actor_type(actor: &Actor, items: &[Item]) -> TokenStream {
     let action_type_name = action_type_name(&actor.name);
     let properties_type_name = properties_type_name(&actor.name);
     let actor_param_list = get_actor_param_list(actor);
-    let actor_param_names: Vec<Ident> = actor.parameters.iter()
-        .map(get_parameter_name)
-        .collect();
+    let actor_param_names: Vec<Ident> = actor.parameters.iter().map(get_parameter_name).collect();
 
-    let initial_action_name = format_ident!("{}", change_case(&actor.initial_action.name, IdentCase::UpperCamelCase));
+    let initial_action_name = format_ident!(
+        "{}",
+        change_case(&actor.initial_action.name, IdentCase::UpperCamelCase)
+    );
     let initial_action_params = actor
-        .actions.iter()
-            .find(|action| action.name == actor.initial_action.name).unwrap()
-        .params.iter()
-            .map(|p| format_ident!("{}", change_case(&p.name, IdentCase::LowerSnakeCase)));
-    let initial_action_args = actor.initial_action.args.iter()
-        .map(typed_value_to_rust);
+        .actions
+        .iter()
+        .find(|action| action.name == actor.initial_action.name)
+        .unwrap()
+        .params
+        .iter()
+        .map(|p| format_ident!("{}", change_case(&p.name, IdentCase::LowerSnakeCase)));
+    let initial_action_args = actor.initial_action.args.iter().map(typed_value_to_rust);
 
     let init_fn = get_annotated_function(items, "skylite_proc::init")
         .map(|fun| fun.sig.ident.clone())
@@ -210,20 +263,26 @@ fn gen_actor_decode_fn(actor_type_name: &Ident, params: &[Variable]) -> TokenStr
     }
 }
 
-fn gen_actor_update_fn(actions_type_name: &Ident, actions: &[Action], items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
-    fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
+fn gen_actor_update_fn(
+    actions_type_name: &Ident,
+    actions: &[Action],
+    items: &[Item],
+) -> Result<TokenStream, SkyliteProcError> {
+    fn get_name(fun: &ItemFn) -> Ident {
+        fun.sig.ident.clone()
+    }
 
     let action_names: Vec<Ident> = actions.iter().map(get_action_name).collect();
     let action_param_names = actions.iter().map(get_action_param_names);
-    let action_args = actions.iter()
-        .map(|action| {
-            let param_names = action.params.iter().map(get_parameter_name);
-            // The arguments to the action implementation must be cloned,
-            // because some of possible types (String, Vec) own memory on the heap.
-            quote!(#(#param_names.clone()),*)
-        });
+    let action_args = actions.iter().map(|action| {
+        let param_names = action.params.iter().map(get_parameter_name);
+        // The arguments to the action implementation must be cloned,
+        // because some of possible types (String, Vec) own memory on the heap.
+        quote!(#(#param_names.clone()),*)
+    });
 
-    let action_implementations = actions.iter()
+    let action_implementations = actions
+        .iter()
         .map(|action| get_action_impl_name(&action.name, items))
         .collect::<Result<Vec<Ident>, SkyliteProcError>>()?;
 
@@ -258,8 +317,14 @@ fn gen_actor_update_fn(actions_type_name: &Ident, actions: &[Action], items: &[I
     })
 }
 
-fn gen_actor_impl(actor: &Actor, project_type_ident: &TokenStream, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
-    fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
+fn gen_actor_impl(
+    actor: &Actor,
+    project_type_ident: &TokenStream,
+    items: &[Item],
+) -> Result<TokenStream, SkyliteProcError> {
+    fn get_name(fun: &ItemFn) -> Ident {
+        fun.sig.ident.clone()
+    }
 
     let actor_type_name = actor_type_name(&actor.name);
     let action_type_name = action_type_name(&actor.name);
@@ -312,17 +377,26 @@ fn gen_actor_impl(actor: &Actor, project_type_ident: &TokenStream, items: &[Item
 
 // region: generate_actor_definition Entrypoint
 
-pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_name: &str, items: &[Item], body_raw: &TokenStream) -> Result<TokenStream, SkyliteProcError> {
+pub(crate) fn generate_actor_definition(
+    actor: &Actor,
+    actor_id: usize,
+    project_name: &str,
+    items: &[Item],
+    body_raw: &TokenStream,
+) -> Result<TokenStream, SkyliteProcError> {
     let project_type_name = project_type_name(project_name);
-    let actor_module_name = format_ident!("{}", change_case(&actor.name, IdentCase::LowerSnakeCase));
+    let actor_module_name =
+        format_ident!("{}", change_case(&actor.name, IdentCase::LowerSnakeCase));
     let actor_type_name = actor_type_name(&actor.name);
     let actor_id = Literal::usize_unsuffixed(actor_id);
 
-    let imports = items.iter().filter_map(|item| if let Item::Use(import) = item {
+    let imports = items.iter().filter_map(|item| {
+        if let Item::Use(import) = item {
             Some(import.to_owned())
         } else {
             None
-        });
+        }
+    });
 
     let action_type_name = action_type_name(&actor.name);
     let action_type = gen_actions_type(&action_type_name, &actor.actions);
@@ -331,9 +405,10 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_
     let actor_type = gen_actor_type(actor, items);
     let actor_impl = gen_actor_impl(actor, &project_type_name, items)?;
 
-    // The idea here is that `actor_definition! { ... }` opens a separate scope, but the generated code
-    // is still accessible from the outside. This enables putting multiple actor_definitions into the same
-    // file, with each of the actor types being public at the root of the file.
+    // The idea here is that `actor_definition! { ... }` opens a separate scope, but
+    // the generated code is still accessible from the outside. This enables
+    // putting multiple actor_definitions into the same file, with each of the
+    // actor types being public at the root of the file.
     Ok(quote! {
         mod #actor_module_name {
             pub mod gen {
@@ -375,41 +450,69 @@ pub(crate) fn generate_actor_definition(actor: &Actor, actor_id: usize, project_
 mod tests {
     use quote::quote;
     use syn::{parse2, File, Item};
-    use crate::parse::actors::{Actor, Action, ActionInstance};
-    use crate::parse::values::{Type, TypedValue, Variable};
 
-    use super::{action_type_name, gen_actions_type, gen_actor_impl, gen_actor_type, gen_properties_type};
+    use super::{
+        action_type_name, gen_actions_type, gen_actor_impl, gen_actor_type, gen_properties_type,
+    };
+    use crate::parse::actors::{Action, ActionInstance, Actor};
+    use crate::parse::values::{Type, TypedValue, Variable};
 
     fn create_test_actor() -> Actor {
         Actor {
             name: "TestActor".to_owned(),
             parameters: vec![
-                Variable { name: "x".to_owned(), typename: Type::U16, documentation: Some("x-coordinate".to_owned()), default: None },
-                Variable { name: "y".to_owned(), typename: Type::U16, documentation: Some("y-coordinate".to_owned()), default: None },
+                Variable {
+                    name: "x".to_owned(),
+                    typename: Type::U16,
+                    documentation: Some("x-coordinate".to_owned()),
+                    default: None,
+                },
+                Variable {
+                    name: "y".to_owned(),
+                    typename: Type::U16,
+                    documentation: Some("y-coordinate".to_owned()),
+                    default: None,
+                },
             ],
             actions: vec![
                 Action {
                     name: "action1".to_owned(),
                     params: vec![
-                        Variable { name: "dx".to_owned(), typename: Type::U8, documentation: None, default: None },
-                        Variable { name: "dy".to_owned(), typename: Type::U8, documentation: None, default: None }
+                        Variable {
+                            name: "dx".to_owned(),
+                            typename: Type::U8,
+                            documentation: None,
+                            default: None,
+                        },
+                        Variable {
+                            name: "dy".to_owned(),
+                            typename: Type::U8,
+                            documentation: None,
+                            default: None,
+                        },
                     ],
-                    description: Some("action 1".to_owned())
+                    description: Some("action 1".to_owned()),
                 },
                 Action {
                     name: "action2".to_owned(),
-                    params: vec![
-                        Variable { name: "val".to_owned(), typename: Type::U8, documentation: Some("test2 doc".to_owned()), default: None }
-                    ],
-                    description: Some("test".to_owned())
+                    params: vec![Variable {
+                        name: "val".to_owned(),
+                        typename: Type::U8,
+                        documentation: Some("test2 doc".to_owned()),
+                        default: None,
+                    }],
+                    description: Some("test".to_owned()),
                 },
                 Action {
                     name: "action3".to_owned(),
                     params: vec![],
-                    description: None
-                }
+                    description: None,
+                },
             ],
-            initial_action: ActionInstance { name: "action2".to_owned(), args: vec![TypedValue::U8(5)] }
+            initial_action: ActionInstance {
+                name: "action2".to_owned(),
+                args: vec![TypedValue::U8(5)],
+            },
         }
     }
 
@@ -444,7 +547,9 @@ mod tests {
 
             #[skylite_proc::z_order]
             fn z_order(actor: &mut TestActor) -> i16 { 5 }
-        }).unwrap().items
+        })
+        .unwrap()
+        .items
     }
 
     #[test]

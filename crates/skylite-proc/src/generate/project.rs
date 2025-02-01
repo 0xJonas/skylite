@@ -2,18 +2,32 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Item, ItemFn};
 
-use crate::{generate::{scenes::{generate_scene_decode_funs, scene_params_type_name, scene_type_name}, util::{get_annotated_function, typed_value_to_rust}}, parse::{actors::Actor, project::SkyliteProject, scenes::SceneInstance, util::{change_case, IdentCase}}, SkyliteProcError};
-
 use super::scenes::{generate_scene_data, generate_scene_params_type};
+use crate::generate::scenes::{
+    generate_scene_decode_funs, scene_params_type_name, scene_type_name,
+};
+use crate::generate::util::{get_annotated_function, typed_value_to_rust};
+use crate::parse::actors::Actor;
+use crate::parse::project::SkyliteProject;
+use crate::parse::scenes::SceneInstance;
+use crate::parse::util::{change_case, IdentCase};
+use crate::SkyliteProcError;
 
 fn tile_type_name(project_name: &str) -> Ident {
-    format_ident!("{}Tiles", change_case(project_name, IdentCase::UpperCamelCase))
+    format_ident!(
+        "{}Tiles",
+        change_case(project_name, IdentCase::UpperCamelCase)
+    )
 }
 
 fn generate_tile_type_enum<S: AsRef<str>>(project_name: &str, tile_types: &[S]) -> TokenStream {
     let tile_type_name = tile_type_name(project_name);
-    let tile_types = tile_types.iter()
-        .map(|tt| Ident::new(&change_case(tt.as_ref(), IdentCase::UpperCamelCase), Span::call_site()));
+    let tile_types = tile_types.iter().map(|tt| {
+        Ident::new(
+            &change_case(tt.as_ref(), IdentCase::UpperCamelCase),
+            Span::call_site(),
+        )
+    });
     quote! {
         #[derive(Clone, Copy)]
         pub enum #tile_type_name {
@@ -44,7 +58,12 @@ fn generate_project_type(project_name: &str, target_type: &TokenStream) -> Token
     }
 }
 
-fn generate_project_new_method(project_name: &str, target_type: &TokenStream, init_call: &TokenStream, initial_scene: &SceneInstance) -> TokenStream {
+fn generate_project_new_method(
+    project_name: &str,
+    target_type: &TokenStream,
+    init_call: &TokenStream,
+    initial_scene: &SceneInstance,
+) -> TokenStream {
     let project_ident = project_ident(project_name);
     let initial_scene_name = scene_type_name(&initial_scene.name);
     let initial_scene_params = initial_scene.args.iter().map(typed_value_to_rust);
@@ -81,8 +100,15 @@ fn generate_project_impl(project_name: &str, actors: &[Actor]) -> TokenStream {
     }
 }
 
-fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, initial_scene: &SceneInstance, items: &[Item]) -> TokenStream {
-    fn get_name(fun: &ItemFn) -> Ident { fun.sig.ident.clone() }
+fn generate_project_trait_impl(
+    project_name: &str,
+    target_type: &TokenStream,
+    initial_scene: &SceneInstance,
+    items: &[Item],
+) -> TokenStream {
+    fn get_name(fun: &ItemFn) -> Ident {
+        fun.sig.ident.clone()
+    }
 
     let project_ident = project_ident(project_name);
     let tile_type_name = tile_type_name(project_name);
@@ -163,17 +189,24 @@ fn generate_project_trait_impl(project_name: &str, target_type: &TokenStream, in
     }
 }
 
-
 impl SkyliteProject {
-
-    pub(crate) fn generate(&self, target_type: &TokenStream, items: &[Item]) -> Result<Vec<Item>, SkyliteProcError> {
+    pub(crate) fn generate(
+        &self,
+        target_type: &TokenStream,
+        items: &[Item],
+    ) -> Result<Vec<Item>, SkyliteProcError> {
         Ok(vec![
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
             Item::Verbatim(generate_scene_data(&self.scenes, &self.actors)),
             Item::Verbatim(generate_scene_params_type(&self.name, &self.scenes)),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
             Item::Verbatim(generate_project_impl(&self.name, &self.actors)),
-            Item::Verbatim(generate_project_trait_impl(&self.name, &target_type, &self.initial_scene, items))
+            Item::Verbatim(generate_project_trait_impl(
+                &self.name,
+                &target_type,
+                &self.initial_scene,
+                items,
+            )),
         ])
     }
 }
@@ -183,9 +216,9 @@ mod tests {
     use quote::quote;
     use syn::parse_quote;
 
-    use crate::parse::{scenes::SceneInstance, values::TypedValue};
-
     use super::generate_project_trait_impl;
+    use crate::parse::scenes::SceneInstance;
+    use crate::parse::values::TypedValue;
 
     #[test]
     fn test_generate_project_implementation() {
@@ -203,8 +236,11 @@ mod tests {
         let actual = generate_project_trait_impl(
             "Test1",
             &quote!(MockTarget),
-            &SceneInstance { name: "TestScene".to_owned(), args: vec![TypedValue::Bool(false), TypedValue::U8(5)]},
-            &body_parsed.items
+            &SceneInstance {
+                name: "TestScene".to_owned(),
+                args: vec![TypedValue::Bool(false), TypedValue::U8(5)],
+            },
+            &body_parsed.items,
         );
         let expectation = quote! {
             impl skylite_core::SkyliteProject for Test1 {
