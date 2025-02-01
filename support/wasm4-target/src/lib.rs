@@ -4,11 +4,6 @@ pub mod w4alloc;
 use skylite_core::SkyliteTarget;
 use wasm4::{blit_sub, diskr, diskw, BLIT_FLIP_X, BLIT_FLIP_Y, BLIT_ROTATE, SCREEN_SIZE};
 
-pub const NUM_LAYERS: u8 = 8;
-pub const LAYER_CFG_TILE_SIZE: u32 = 0;
-pub const LAYER_CFG_X_OFFSET: u32 = 1;
-pub const LAYER_CFG_Y_OFFSET: u32 = 2;
-
 pub struct Wasm4Target {
     disk_used: u32
 }

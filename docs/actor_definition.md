@@ -45,7 +45,15 @@ Within the body of `actor_definition`, there are several items with special mean
 
   The function marked by this attribute must have a signature that matches the order and type of the actor's parameters, and must return an instance of the actor's **property type**.
 
-  This function is almost always **required**. The only case where this function can be omitted is if the actor does not have any properties (`skylite_proc::properties` is missing or empty) *and* the actor does not take any parameters. The **property type** will still be generated in this case, but it will not contain any members.
+  This function is **required** if `skylite_proc::properties` is used.
+
+  Example:
+  ```rust
+  #[skylite_proc::create_properties]
+  fn create_properties(x: i16, y: i16) -> MyActorProperties {
+      MyActorProperties { x, y }
+  }
+  ```
 
 - `#[skylite_proc::pre_update]`
 
@@ -57,7 +65,7 @@ Within the body of `actor_definition`, there are several items with special mean
   Example:
   ```rust
   #[skylite_proc::post_update]
-  fn pre_update(actor: &mut MyActor, project: &mut MyProject) { ... }
+  fn pre_update(actor: &mut MyActor, project: &mut MyProject) { /**/ }
   ```
 
 - `#[skylite_proc::post_update]`
@@ -73,7 +81,7 @@ Within the body of `actor_definition`, there are several items with special mean
   Example:
   ```rust
   #[skylite_proc::render]
-  fn render(actor: &MyActor, ctx: &DrawContext<MyProject>) { ... }
+  fn render(actor: &MyActor, ctx: &DrawContext<MyProject>) { /**/ }
   ```
 
 - `#[skylite_proc::action("name")]`
@@ -91,7 +99,7 @@ Within the body of `actor_definition`, there are several items with special mean
   Example:
   ```rust
   #[skylite_proc::action("move")]
-  fn move(actor: &mut MyActor, project. &mut MyProject, dx: i8, dy: i8)
+  fn move(actor: &mut MyActor, project. &mut MyProject, dx: i8, dy: i8) { /**/ }
   ```
 
 ## Complete Example

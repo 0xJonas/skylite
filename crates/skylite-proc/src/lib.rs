@@ -318,7 +318,7 @@ pub fn create_properties(_args: proc_macro::TokenStream, body: proc_macro::Token
 ///
 /// The name of the corresponding action in the actor asset file should be given like this:
 ///
-/// ```rust
+/// ```ignore
 /// #[skylite_proc::action("some_action")]
 /// fn some_action(actor: &mut Actor, project: &mut Project, args...) { ... }
 /// ```
@@ -335,7 +335,7 @@ pub fn action(_args: proc_macro::TokenStream, body: proc_macro::TokenStream) -> 
 /// `actor_definition!`, scenes for `scene_definition!`, etc.
 ///
 /// ## Example
-/// ```rust
+/// ```ignore
 /// actor_definition! {
 ///     // Uses the asset information from the actor asset 'some_actor'.
 ///     skylite_proc::asset_file!("./path/project.scm", "some_actor");

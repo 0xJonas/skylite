@@ -8,14 +8,3 @@ skylite-compress = { path = "./crates/skylite-compress", default-features = fals
 skylite-proc = { path = "./crates/skylite-proc" }
 skylite-core = { path = "./crates/skylite-core" }
 skylite-mock = { path = "./crates/skylite-mock" }
-
-[profile.release]
-lto = true
-opt-level = "z"
-strip = "symbols"
-
-[profile.profile-size]
-inherits = "release"
-debug = 2
-split-debuginfo = "packed"
-strip = "debuginfo"
