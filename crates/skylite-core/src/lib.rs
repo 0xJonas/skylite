@@ -3,6 +3,7 @@ use scenes::SceneParams;
 pub mod actors;
 pub mod decode;
 pub mod ecs;
+pub mod nodes;
 pub mod scenes;
 
 /// Defines which functions a backend must provide to work with Skylite.
