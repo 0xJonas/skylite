@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 use glob::{GlobError, Pattern};
 
 use super::actors::Actor;
-use super::nodes::NodeStub;
+use super::nodes::Node;
 use super::scenes::{Scene, SceneInstance};
 use super::values::{parse_type, parse_typed_value, TypedValue};
 use crate::parse::guile::{scm_is_false, scm_list_p, SCM};
@@ -320,7 +320,7 @@ impl SkyliteProjectStub {
 /// of a Skylite project.
 pub(crate) struct SkyliteProject {
     pub name: String,
-    pub nodes: Vec<NodeStub>,
+    pub nodes: Vec<Node>,
     pub actors: Vec<Actor>,
     pub scenes: Vec<Scene>,
     pub _save_data: Vec<SaveItem>,
@@ -330,17 +330,7 @@ pub(crate) struct SkyliteProject {
 
 impl SkyliteProject {
     pub(crate) fn from_stub(stub: SkyliteProjectStub) -> Result<SkyliteProject, SkyliteProcError> {
-        let nodes = stub
-            .assets
-            .nodes
-            .into_iter()
-            .map(|path_res| {
-                let path = path_res.map_err(|err| {
-                    SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string()))
-                })?;
-                NodeStub::from_file(path.as_path())
-            })
-            .collect::<Result<Vec<NodeStub>, SkyliteProcError>>()?;
+        let nodes = Node::from_asset_group_all(&stub.assets.nodes)?;
 
         let actors = stub
             .assets
