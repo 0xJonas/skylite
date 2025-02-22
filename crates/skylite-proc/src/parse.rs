@@ -1,5 +1,6 @@
 pub(crate) mod actors;
 pub(crate) mod guile;
+pub(crate) mod nodes;
 pub(crate) mod project;
 pub(crate) mod scenes;
 pub(crate) mod scheme_util;

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 use glob::{GlobError, Pattern};
 
 use super::actors::Actor;
+use super::nodes::NodeStub;
 use super::scenes::{Scene, SceneInstance};
 use super::values::{parse_type, parse_typed_value, TypedValue};
 use crate::parse::guile::{scm_is_false, scm_list_p, SCM};
@@ -137,6 +138,7 @@ impl<'base> IntoIterator for &'base AssetGroup {
 /// Container for `AssetGroups` for all asset types used by Skylite.
 #[derive(PartialEq, Debug)]
 pub(crate) struct AssetGroups {
+    pub nodes: AssetGroup,
     pub actors: AssetGroup,
     pub scenes: AssetGroup,
     pub plays: AssetGroup,
@@ -156,6 +158,9 @@ impl AssetGroups {
             }
             let mut out = create_default_asset_groups(base_dir);
 
+            if let Some(expr) = assq_str("nodes", alist)? {
+                out.nodes = AssetGroup::from_scheme(expr, base_dir)?;
+            }
             if let Some(expr) = assq_str("actors", alist)? {
                 out.actors = AssetGroup::from_scheme(expr, base_dir)?;
             }
@@ -191,6 +196,7 @@ fn asset_group_from_single(pattern: &str, base_dir: &Path) -> AssetGroup {
 
 fn create_default_asset_groups(base_dir: &Path) -> AssetGroups {
     AssetGroups {
+        nodes: asset_group_from_single("./nodes/*.scm", base_dir),
         actors: asset_group_from_single("./actors/*.scm", base_dir),
         scenes: asset_group_from_single("./scenes/*.scm", base_dir),
         plays: asset_group_from_single("./plays/*.scm", base_dir),
@@ -221,7 +227,7 @@ impl SaveItem {
 
 // Early form of `SkyliteProject`, where the assets are not yet
 // resolved and parsed. Used for contexts where the full representation
-// of the project is not required, e.g. actor_definition and `scene_definition`.
+// of the project is not required, e.g. node_definition`.
 #[derive(PartialEq, Debug)]
 pub(crate) struct SkyliteProjectStub {
     pub name: String,
@@ -314,6 +320,7 @@ impl SkyliteProjectStub {
 /// of a Skylite project.
 pub(crate) struct SkyliteProject {
     pub name: String,
+    pub nodes: Vec<NodeStub>,
     pub actors: Vec<Actor>,
     pub scenes: Vec<Scene>,
     pub _save_data: Vec<SaveItem>,
@@ -323,6 +330,18 @@ pub(crate) struct SkyliteProject {
 
 impl SkyliteProject {
     pub(crate) fn from_stub(stub: SkyliteProjectStub) -> Result<SkyliteProject, SkyliteProcError> {
+        let nodes = stub
+            .assets
+            .nodes
+            .into_iter()
+            .map(|path_res| {
+                let path = path_res.map_err(|err| {
+                    SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string()))
+                })?;
+                NodeStub::from_file(path.as_path())
+            })
+            .collect::<Result<Vec<NodeStub>, SkyliteProcError>>()?;
+
         let actors = stub
             .assets
             .actors
@@ -349,6 +368,7 @@ impl SkyliteProject {
 
         Ok(SkyliteProject {
             name: stub.name,
+            nodes,
             actors,
             scenes,
             _save_data: stub.save_data,
@@ -378,7 +398,7 @@ mod tests {
                 r#"
                 '((name . TestProject)
                   (assets .
-                    ((actors . ("./test1/*.scm" "./test2/*.scm"))
+                    ((nodes . ("./test1/*.scm" "./test2/*.scm"))
                      (maps . ("./test3/*.scm"))))
 
                     (save-data .
@@ -398,12 +418,13 @@ mod tests {
                 SkyliteProjectStub {
                     name: "TestProject".to_owned(),
                     assets: AssetGroups {
-                        actors: AssetGroup {
+                        nodes: AssetGroup {
                             globs: vec![
                                 normalize_glob("./test1/*.scm", &project_root),
                                 normalize_glob("./test2/*.scm", &project_root),
                             ]
                         },
+                        actors: asset_group_from_single("./actors/*.scm", &project_root),
                         scenes: asset_group_from_single("./scenes/*.scm", &project_root),
                         plays: asset_group_from_single("./plays/*.scm", &project_root),
                         graphics: asset_group_from_single("./graphics/*.scm", &project_root),

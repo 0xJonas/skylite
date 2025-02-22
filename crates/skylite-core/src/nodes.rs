@@ -28,11 +28,11 @@ impl<T: TypeId> InstanceId for T {
 /// Nodes are the primary elements from which a Skylite project is constructed.
 ///
 /// Each node contains two sets of children:
-/// - The set of static child nodes is the one which is declared in the asset file and never changes
-///   throughout the livetime of the node. This means that properties of static child nodes can
-///   be animated by Sequences.
-/// - The set of dynamic child nodes can be changed during a Node's livetime, but properties of
-///   dynamic nodes cannot be animated by sequences.
+/// - The set of static child nodes is the one which is declared in the asset
+///   file and never changes throughout the livetime of the node. This means
+///   that properties of static child nodes can be animated by Sequences.
+/// - The set of dynamic child nodes can be changed during a Node's livetime,
+///   but properties of dynamic nodes cannot be animated by sequences.
 pub trait Node: TypeId + InstanceId {
     type P: SkyliteProject;
 
@@ -57,8 +57,9 @@ pub trait Node: TypeId + InstanceId {
     /// Returns a mutable references to the list of this node's static children.
     fn get_static_nodes_mut(&mut self) -> &mut [&mut dyn Node<P = Self::P>];
 
-    /// Returns a mutable references to the list of this node's dynamic children.
-    /// This result of this method can be used to add or remove dynamic nodes.
+    /// Returns a mutable references to the list of this node's dynamic
+    /// children. This result of this method can be used to add or remove
+    /// dynamic nodes.
     fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>>;
 }
 
