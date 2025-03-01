@@ -40,13 +40,13 @@ pub trait Node: TypeId + InstanceId {
     where
         Self: Sized;
 
-    fn _private_update(
-        &mut self,
-        parent: &mut dyn Node<P = Self::P>,
-        controls: &mut ProjectControls<Self::P>,
-    );
+    fn _private_update(&mut self, controls: &mut ProjectControls<Self::P>);
 
     fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
+
+    fn z_order(&self) -> i32;
+
+    fn is_visible(&self, ctx: &DrawContext<Self::P>) -> bool;
 
     /// Returns a shared references to the list of this node's static children.
     fn get_static_nodes(&self) -> &[&dyn Node<P = Self::P>];
@@ -110,3 +110,20 @@ system_fn!(system5, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5);
 system_fn!(system6, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6);
 system_fn!(system7, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6, n7:N7);
 system_fn!(system8, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6, n7:N7, n8:N8);
+
+mod _private {
+    use super::Node;
+    use crate::{ProjectControls, SkyliteProject};
+
+    pub fn update_node_rec<P: SkyliteProject>(
+        node: &mut dyn Node<P = P>,
+        controls: &mut ProjectControls<P>,
+    ) {
+        node.get_static_nodes_mut()
+            .iter_mut()
+            .for_each(|sub| sub._private_update(controls));
+        node.get_dynamic_nodes_mut()
+            .iter_mut()
+            .for_each(|sub| sub._private_update(controls));
+    }
+}

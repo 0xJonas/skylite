@@ -2,10 +2,12 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use generate::actors::generate_actor_definition;
+use generate::nodes::generate_node_definition;
 use generate::scenes::generate_scene_definition;
 use generate::util::get_macro_item;
 use parse::actors::Actor;
 use parse::guile::SCM;
+use parse::nodes::Node;
 use parse::project::{SkyliteProject, SkyliteProjectStub};
 use parse::scenes::SceneStub;
 use parse::scheme_util::form_to_string;
@@ -164,6 +166,9 @@ fn extract_asset_file(
     return Ok((stub, args[1].value()));
 }
 
+/// Implements the `skylite_proc::debug_output!` macro. This macro takes a
+/// string literal representing a file as an argument and writes the generated
+/// code to that file.
 #[cfg(debug_assertions)]
 fn process_debug_output(out: &TokenStream, items: &[Item]) -> Result<(), SkyliteProcError> {
     let tokens = match get_macro_item("skylite_proc::debug_output", &items)? {
@@ -174,6 +179,7 @@ fn process_debug_output(out: &TokenStream, items: &[Item]) -> Result<(), Skylite
     let path = match tokens.clone().into_iter().next() {
         Some(TokenTree::Literal(lit)) => {
             let path_str = lit.to_string();
+            // Strip quotes from string literal
             PathBuf::try_from(&path_str[1..path_str.len() - 1])
                 .map_err(|e| SkyliteProcError::SyntaxError(format!("{}", e.to_string())))?
         }
@@ -188,6 +194,27 @@ fn process_debug_output(out: &TokenStream, items: &[Item]) -> Result<(), Skylite
     std::fs::write(base_dir.join(path), out.to_string()).unwrap();
 
     Ok(())
+}
+
+fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
+    let items = parse2::<File>(body_raw.clone())
+        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
+        .items;
+
+    let args = get_macro_item("skylite_proc::asset_file", &items)?.ok_or(
+        SkyliteProcError::DataError(format!("Missing required macro asset_file!")),
+    )?;
+    let (project_stub, name) = extract_asset_file(args)?;
+
+    let (id, path) = project_stub.assets.actors.find_asset(&name)?;
+    let node = Node::from_file_single(&path, &project_stub.assets.nodes)?;
+
+    let out = generate_node_definition(&node, id, &project_stub.name, &items, &body_raw)?;
+
+    #[cfg(debug_assertions)]
+    process_debug_output(&out, &items)?;
+
+    Ok(out)
 }
 
 fn actor_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
@@ -239,6 +266,13 @@ fn skylite_project_impl(body_raw: TokenStream) -> TokenStream {
     }
 }
 
+fn node_definition_impl(body_raw: TokenStream) -> TokenStream {
+    match node_definition_fallible(body_raw) {
+        Ok(stream) => stream,
+        Err(err) => err.into(),
+    }
+}
+
 fn actor_definition_impl(body_raw: TokenStream) -> TokenStream {
     match actor_definition_fallible(body_raw) {
         Ok(stream) => stream,
@@ -256,6 +290,11 @@ fn scene_definition_impl(body_raw: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn skylite_project(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     skylite_project_impl(body.into()).into()
+}
+
+#[proc_macro]
+pub fn node_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    node_definition_impl(body.into()).into()
 }
 
 #[doc = include_str!("../../../docs/actor_definition.md")]
@@ -303,7 +342,8 @@ pub fn init(
     body
 }
 
-/// Marks a function to be called at the beginning of an update.
+/// Marks a function to be called at the beginning of updating a Node,
+/// before the child nodes are updated.
 ///
 /// **This macro must always be used with an absolute path:
 /// `#[skylite_proc::pre_update]`.**
@@ -315,7 +355,20 @@ pub fn pre_update(
     body
 }
 
-/// Marks a function to be called at the end of an update.
+/// Marks a function to be called to update a Node. This is called after
+/// the Node's children have been updated.
+///
+/// **This macro must always be used with an absolute path:
+/// `#[skylite_proc::update]`.**
+#[proc_macro_attribute]
+pub fn update(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
+
+/// Alias for `skylite_proc::update`.
 ///
 /// **This macro must always be used with an absolute path:
 /// `#[skylite_proc::post_update]`.**

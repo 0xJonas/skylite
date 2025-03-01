@@ -41,8 +41,8 @@ impl NodeInstanceStub {
 /// An instantiation of a Node, containing arguments for a Node's parameters.
 #[derive(PartialEq, Debug)]
 pub(crate) struct NodeInstance {
-    name: String,
-    args: Vec<TypedValue>,
+    pub name: String,
+    pub args: Vec<TypedValue>,
 }
 
 impl NodeInstance {
@@ -66,7 +66,7 @@ impl NodeInstance {
                     "Node {} not found.",
                     instance_stub.name
                 )))?;
-            let stub = NodeStub::from_file(file)?;
+            let stub = NodeStub::from_file_guile(file)?;
             stub_cache.entry(instance_stub.name.clone()).or_insert(stub)
         };
 
@@ -141,7 +141,7 @@ impl NodeStub {
         }
     }
 
-    fn from_file(path: &Path) -> Result<NodeStub, SkyliteProcError> {
+    fn from_file_guile(path: &Path) -> Result<NodeStub, SkyliteProcError> {
         // Since we are not actually accessing anything from this signature from C,
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
@@ -161,11 +161,11 @@ impl NodeStub {
 /// Fully parsed Node asset.
 #[derive(PartialEq, Debug)]
 pub(crate) struct Node {
-    name: String,
-    parameters: Vec<Variable>,
-    properties: Vec<Variable>,
-    static_nodes: HashMap<String, NodeInstance>,
-    dynamic_nodes: Vec<NodeInstance>,
+    pub name: String,
+    pub parameters: Vec<Variable>,
+    pub properties: Vec<Variable>,
+    pub static_nodes: HashMap<String, NodeInstance>,
+    pub dynamic_nodes: Vec<NodeInstance>,
 }
 
 impl Node {
@@ -231,16 +231,26 @@ impl Node {
         path: &Path,
         node_assets: &AssetGroup,
     ) -> Result<Node, SkyliteProcError> {
-        let stub = NodeStub::from_file(path)?;
-        let asset_files: Vec<PathBuf> = node_assets
-            .into_iter()
-            .collect::<Result<Vec<PathBuf>, GlobError>>()
-            .map_err(|err| SkyliteProcError::OtherError(format!("IO Error: {}", err)))?;
-        let mut stub_cache = HashMap::new();
+        // Since we are not actually accessing anything from this signature from C,
+        // we can get away with ignoring the missing C representations.
+        #[allow(improper_ctypes_definitions)]
+        extern "C" fn from_file_single_guile(
+            params: &(&Path, &AssetGroup),
+        ) -> Result<Node, SkyliteProcError> {
+            let (path, node_assets) = *params;
+            let stub = NodeStub::from_file_guile(path)?;
+            let asset_files: Vec<PathBuf> = node_assets
+                .into_iter()
+                .collect::<Result<Vec<PathBuf>, GlobError>>()
+                .map_err(|err| SkyliteProcError::OtherError(format!("IO Error: {}", err)))?;
+            let mut stub_cache = HashMap::new();
 
-        Node::from_stub(&stub, |instance_stub| {
-            NodeInstance::from_stub_cached(instance_stub, &asset_files, &mut stub_cache)
-        })
+            Node::from_stub(&stub, |instance_stub| {
+                NodeInstance::from_stub_cached(instance_stub, &asset_files, &mut stub_cache)
+            })
+        }
+
+        with_guile(from_file_single_guile, &(path, node_assets))
     }
 
     /// Creates Nodes for each asset file in the `AssetGroup`.
@@ -249,25 +259,35 @@ impl Node {
     pub(crate) fn from_asset_group_all(
         node_assets: &AssetGroup,
     ) -> Result<Vec<Node>, SkyliteProcError> {
-        let stubs = node_assets
-            .into_iter()
-            .map(|path_res| {
-                let path = path_res
-                    .map_err(|err| SkyliteProcError::OtherError(format!("IO Error: {}", err)))?;
-                let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
-                let stub = NodeStub::from_file(&path)?;
-                Ok((name, stub))
-            })
-            .collect::<Result<HashMap<String, NodeStub>, SkyliteProcError>>()?;
-
-        stubs
-            .values()
-            .map(|stub| {
-                Node::from_stub(stub, |instance_stub| {
-                    NodeInstance::from_stub(instance_stub, &stubs)
+        // Since we are not actually accessing anything from this signature from C,
+        // we can get away with ignoring the missing C representations.
+        #[allow(improper_ctypes_definitions)]
+        extern "C" fn from_asset_group_all_guile(
+            node_assets: &AssetGroup,
+        ) -> Result<Vec<Node>, SkyliteProcError> {
+            let stubs = node_assets
+                .into_iter()
+                .map(|path_res| {
+                    let path = path_res.map_err(|err| {
+                        SkyliteProcError::OtherError(format!("IO Error: {}", err))
+                    })?;
+                    let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
+                    let stub = NodeStub::from_file_guile(&path)?;
+                    Ok((name, stub))
                 })
-            })
-            .collect::<Result<Vec<Node>, SkyliteProcError>>()
+                .collect::<Result<HashMap<String, NodeStub>, SkyliteProcError>>()?;
+
+            stubs
+                .values()
+                .map(|stub| {
+                    Node::from_stub(stub, |instance_stub| {
+                        NodeInstance::from_stub(instance_stub, &stubs)
+                    })
+                })
+                .collect::<Result<Vec<Node>, SkyliteProcError>>()
+        }
+
+        with_guile(from_asset_group_all_guile, node_assets)
     }
 }
 
