@@ -97,7 +97,10 @@ impl NodeInstance {
         })
     }
 
-    pub fn from_scheme(definition: SCM, assets: &AssetGroup) -> Result<NodeInstance, SkyliteProcError> {
+    pub fn from_scheme(
+        definition: SCM,
+        assets: &AssetGroup,
+    ) -> Result<NodeInstance, SkyliteProcError> {
         let stub = NodeInstanceStub::from_scheme(definition)?;
         let (_, node_file) = assets.find_asset(&stub.name)?;
         let node = NodeStub::from_file_guile(&node_file)?;
@@ -294,13 +297,11 @@ impl Node {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::env;
     use std::path::PathBuf;
     use std::str::FromStr;
 
     use crate::parse::nodes::{Node, NodeInstance};
-    use crate::parse::project::AssetGroup;
     use crate::parse::values::{Type, TypedValue, Variable};
     use crate::SkyliteProjectStub;
 
@@ -345,15 +346,24 @@ mod tests {
                     (
                         "sub2".to_owned(),
                         NodeInstance {
-                            name: "basic-node-2".to_owned(),
-                            args: vec![TypedValue::String("sub2".to_owned())]
+                            name: "z-order-node".to_owned(),
+                            args: vec![TypedValue::String("sub2".to_owned()), TypedValue::I16(2)]
                         }
                     )
                 ],
-                dynamic_nodes: vec![NodeInstance {
-                    name: "basic-node-2".to_owned(),
-                    args: vec![TypedValue::String("dynamic1".to_owned())]
-                }]
+                dynamic_nodes: vec![
+                    NodeInstance {
+                        name: "basic-node-2".to_owned(),
+                        args: vec![TypedValue::String("dynamic1".to_owned())]
+                    },
+                    NodeInstance {
+                        name: "z-order-node".to_owned(),
+                        args: vec![
+                            TypedValue::String("dynamic2".to_owned()),
+                            TypedValue::I16(-1)
+                        ]
+                    }
+                ]
             }
         )
     }

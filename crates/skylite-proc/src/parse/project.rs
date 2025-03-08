@@ -367,9 +367,7 @@ mod tests {
 
     use super::SkyliteProjectStub;
     use crate::parse::nodes::NodeInstance;
-    use crate::parse::project::{
-        asset_group_from_single, normalize_glob, AssetGroup, AssetGroups, SaveItem,
-    };
+    use crate::parse::project::{asset_group_from_single, AssetGroups, SaveItem};
     use crate::parse::values::TypedValue;
 
     #[test]
@@ -405,7 +403,7 @@ mod tests {
                 ],
                 root_node: NodeInstance {
                     name: "basic-node-1".to_owned(),
-                    args: vec![TypedValue::String("node1".to_owned()),]
+                    args: vec![TypedValue::String("root-node".to_owned()),]
                 },
                 tile_types: vec![
                     "solid".to_owned(),
