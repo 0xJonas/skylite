@@ -49,13 +49,13 @@ pub trait Node: TypeId + InstanceId {
     fn is_visible(&self, ctx: &DrawContext<Self::P>) -> bool;
 
     /// Returns a shared references to the list of this node's static children.
-    fn get_static_nodes(&self) -> &[&dyn Node<P = Self::P>];
+    fn get_static_nodes(&self) -> Box<[&dyn Node<P = Self::P>]>;
 
     /// Returns a shared references to the list of this node's dynamic children.
     fn get_dynamic_nodes(&self) -> &Vec<Box<dyn Node<P = Self::P>>>;
 
     /// Returns a mutable references to the list of this node's static children.
-    fn get_static_nodes_mut(&mut self) -> &mut [&mut dyn Node<P = Self::P>];
+    fn get_static_nodes_mut(&mut self) -> Box<[&mut dyn Node<P = Self::P>]>;
 
     /// Returns a mutable references to the list of this node's dynamic
     /// children. This result of this method can be used to add or remove
@@ -73,7 +73,7 @@ macro_rules! system_fn {
 
             // Iterate over the static child nodes and fill the references as matching
             // nodes are found. Also invoke the system on each child node recursively.
-            for n in node.get_static_nodes_mut() {
+            for n in node.get_static_nodes_mut().iter_mut() {
                 $(
                     if n.get_id() == <$types as TypeId>::get_id() {
                         $vars = Some(unsafe {&mut *((*n) as *mut dyn Node<P=P> as *mut $types) })
@@ -111,9 +111,9 @@ system_fn!(system6, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6);
 system_fn!(system7, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6, n7:N7);
 system_fn!(system8, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6, n7:N7, n8:N8);
 
-mod _private {
+pub mod _private {
     use super::Node;
-    use crate::{ProjectControls, SkyliteProject};
+    use crate::{DrawContext, ProjectControls, SkyliteProject};
 
     pub fn update_node_rec<P: SkyliteProject>(
         node: &mut dyn Node<P = P>,
@@ -125,5 +125,46 @@ mod _private {
         node.get_dynamic_nodes_mut()
             .iter_mut()
             .for_each(|sub| sub._private_update(controls));
+    }
+
+    fn insert_by_z_order<'nodes, P: SkyliteProject>(
+        list: &mut Vec<&'nodes dyn Node<P = P>>,
+        node: &'nodes dyn Node<P = P>,
+    ) {
+        for (i, n) in list.iter().enumerate() {
+            if node.z_order() <= n.z_order() {
+                list.insert(i, node);
+                return;
+            }
+        }
+        list.push(node);
+    }
+
+    fn insert_nodes_by_z_order_rec<'nodes, P: SkyliteProject>(
+        list: &mut Vec<&'nodes dyn Node<P = P>>,
+        node: &'nodes dyn Node<P = P>,
+        ctx: &DrawContext<P>,
+    ) {
+        for n in node.get_static_nodes().iter() {
+            if n.is_visible(ctx) {
+                insert_by_z_order(list, *n);
+            }
+            insert_nodes_by_z_order_rec(list, *n, ctx);
+        }
+
+        for n in node.get_dynamic_nodes() {
+            if n.is_visible(ctx) {
+                insert_by_z_order(list, n.as_ref());
+            }
+            insert_nodes_by_z_order_rec(list, n.as_ref(), ctx);
+        }
+    }
+
+    pub fn render_node<P: SkyliteProject>(node: &dyn Node<P = P>, ctx: &mut DrawContext<P>) {
+        let mut z_sorted: Vec<&dyn Node<P = P>> = Vec::new();
+
+        insert_nodes_by_z_order_rec(&mut z_sorted, node, ctx);
+
+        z_sorted.iter().for_each(|a| a._private_render(ctx));
     }
 }

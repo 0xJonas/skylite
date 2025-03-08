@@ -8,8 +8,8 @@ use crate::generate::scenes::{
 };
 use crate::generate::util::{get_annotated_function, typed_value_to_rust};
 use crate::parse::actors::Actor;
+use crate::parse::nodes::NodeInstance;
 use crate::parse::project::SkyliteProject;
-use crate::parse::scenes::SceneInstance;
 use crate::parse::util::{change_case, IdentCase};
 use crate::SkyliteProcError;
 
@@ -50,7 +50,7 @@ fn generate_project_type(project_name: &str, target_type: &TokenStream) -> Token
     quote! {
         pub struct #project_ident {
             target: #target_type,
-            scene: ::std::boxed::Box<dyn ::skylite_core::scenes::Scene<P=Self>>,
+            root_node: ::std::boxed::Box<dyn ::skylite_core::nodes::Node<P=Self>>,
             graphics_cache: ::std::vec::Vec<::std::rc::Weak<u8>>,
             focus_x: i32,
             focus_y: i32
@@ -62,17 +62,17 @@ fn generate_project_new_method(
     project_name: &str,
     target_type: &TokenStream,
     init_call: &TokenStream,
-    initial_scene: &SceneInstance,
+    root_node: &NodeInstance,
 ) -> TokenStream {
     let project_ident = project_ident(project_name);
-    let initial_scene_name = scene_type_name(&initial_scene.name);
-    let initial_scene_params = initial_scene.args.iter().map(typed_value_to_rust);
+    let root_node_name = scene_type_name(&root_node.name);
+    let root_node_params = root_node.args.iter().map(typed_value_to_rust);
     quote! {
         fn new(target: #target_type) -> #project_ident {
             let (w, h) = target.get_screen_size();
             let mut out = #project_ident {
                 target,
-                scene: ::std::boxed::Box::new(#initial_scene_name::new(#(#initial_scene_params),*)),
+                root_node: ::std::boxed::Box::new(#root_node_name::new(#(#root_node_params),*)),
                 graphics_cache: ::std::vec::Vec::new(),
                 focus_x: w as i32 / 2,
                 focus_y: h as i32 / 2
@@ -103,7 +103,7 @@ fn generate_project_impl(project_name: &str, actors: &[Actor]) -> TokenStream {
 fn generate_project_trait_impl(
     project_name: &str,
     target_type: &TokenStream,
-    initial_scene: &SceneInstance,
+    root_node: &NodeInstance,
     items: &[Item],
 ) -> TokenStream {
     fn get_name(fun: &ItemFn) -> Ident {
@@ -139,7 +139,7 @@ fn generate_project_trait_impl(
         .map(|name| quote!(#name(&mut draw_context);))
         .unwrap_or(TokenStream::new());
 
-    let new_method = generate_project_new_method(project_name, target_type, &init, initial_scene);
+    let new_method = generate_project_new_method(project_name, target_type, &init, root_node);
 
     quote! {
         impl skylite_core::SkyliteProject for #project_ident {
@@ -159,7 +159,7 @@ fn generate_project_trait_impl(
                 #pre_render
 
                 // Main rendering
-                self.scene._private_render(&mut draw_context);
+                ::skylite_core::nodes::_private::render_node(self.root_node.as_ref(), &mut draw_context);
 
                 #post_render
             }
@@ -173,7 +173,7 @@ fn generate_project_trait_impl(
                 #pre_update
 
                 // Main update
-                self.scene._private_update(&mut controls);
+                self.root_node._private_update(&mut controls);
 
                 #post_update
 
@@ -183,7 +183,7 @@ fn generate_project_trait_impl(
             }
 
             fn set_scene(&mut self, params: Self::SceneParams) {
-                ::skylite_core::scenes::_private::replace_scene(params, &mut self.scene);
+                // ::skylite_core::scenes::_private::replace_scene(params, &mut self.scene);
             }
         }
     }
@@ -204,7 +204,7 @@ impl SkyliteProject {
             Item::Verbatim(generate_project_trait_impl(
                 &self.name,
                 &target_type,
-                &self.initial_scene,
+                &self.root_node,
                 items,
             )),
         ])
@@ -217,7 +217,7 @@ mod tests {
     use syn::parse_quote;
 
     use super::generate_project_trait_impl;
-    use crate::parse::scenes::SceneInstance;
+    use crate::parse::nodes::NodeInstance;
     use crate::parse::values::TypedValue;
 
     #[test]
@@ -236,8 +236,8 @@ mod tests {
         let actual = generate_project_trait_impl(
             "Test1",
             &quote!(MockTarget),
-            &SceneInstance {
-                name: "TestScene".to_owned(),
+            &NodeInstance {
+                name: "TestNode".to_owned(),
                 args: vec![TypedValue::Bool(false), TypedValue::U8(5)],
             },
             &body_parsed.items,
@@ -252,7 +252,7 @@ mod tests {
                     let (w, h) = target.get_screen_size();
                     let mut out = Test1 {
                         target,
-                        scene: ::std::boxed::Box::new(TestScene::new(false, 5u8)),
+                        root_node: ::std::boxed::Box::new(TestNode::new(false, 5u8)),
                         graphics_cache: ::std::vec::Vec::new(),
                         focus_x: w as i32 / 2,
                         focus_y: h as i32 / 2
@@ -270,7 +270,7 @@ mod tests {
                         focus_y: self.focus_y
                     };
 
-                    self.scene._private_render(&mut draw_context);
+                    ::skylite_core::nodes::_private::render_node(self.root_node.as_ref(), &mut draw_context);
                     post_render(&mut draw_context);
                 }
 
@@ -283,7 +283,7 @@ mod tests {
                     pre_update(&mut controls);
 
                     // Main update
-                    self.scene._private_update(&mut controls);
+                    self.root_node._private_update(&mut controls);
 
                     if let Some(params) = controls.pending_scene.take() {
                         self.set_scene(params);
@@ -291,7 +291,7 @@ mod tests {
                 }
 
                 fn set_scene(&mut self, params: Self::SceneParams) {
-                    ::skylite_core::scenes::_private::replace_scene(params, &mut self.scene);
+                    // ::skylite_core::scenes::_private::replace_scene(params, &mut self.scene);
                 }
             }
         };

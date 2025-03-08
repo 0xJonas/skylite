@@ -147,13 +147,23 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
 }
 
 fn extract_asset_file(
-    definition_file: &TokenStream,
+    asset_file: &TokenStream,
 ) -> Result<(SkyliteProjectStub, String), SkyliteProcError> {
-    let args = Parser::parse2(Punctuated::<LitStr, Token![,]>::parse_separated_nonempty, definition_file.clone())
-        .map_err(|err| SkyliteProcError::SyntaxError(format!("Failed to parse definition_file! macro: {}. Expected (\"project-path\", \"asset-name\")", err.to_string())))?;
+    let args = Parser::parse2(
+        Punctuated::<LitStr, Token![,]>::parse_separated_nonempty,
+        asset_file.clone(),
+    )
+    .map_err(|err| {
+        SkyliteProcError::SyntaxError(format!(
+            "Failed to parse asset_file! macro: {}. Expected (\"project-path\", \"asset-name\")",
+            err.to_string()
+        ))
+    })?;
 
     if args.len() != 2 {
-        return Err(SkyliteProcError::SyntaxError(format!("Wrong number of arguments to definition_file!, expected (\"project-path\", \"asset-name\")")));
+        return Err(SkyliteProcError::SyntaxError(format!(
+            "Wrong number of arguments to asset_file!, expected (\"project-path\", \"asset-name\")"
+        )));
     }
 
     let relative_path = PathBuf::try_from(args[0].value()).map_err(|_| {
@@ -206,7 +216,7 @@ fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skylit
     )?;
     let (project_stub, name) = extract_asset_file(args)?;
 
-    let (id, path) = project_stub.assets.actors.find_asset(&name)?;
+    let (id, path) = project_stub.assets.nodes.find_asset(&name)?;
     let node = Node::from_file_single(&path, &project_stub.assets.nodes)?;
 
     let out = generate_node_definition(&node, id, &project_stub.name, &items, &body_raw)?;

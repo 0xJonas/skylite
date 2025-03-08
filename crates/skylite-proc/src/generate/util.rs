@@ -114,7 +114,7 @@ pub(crate) fn generate_param_list(params: &[Variable]) -> TokenStream {
 
 /// Generates a `TokenStream` of the form `var1: type1, var2: type2:, ...` from
 /// a list of `Variables` using owned types Can be used for struct members.
-pub(crate) fn generate_member_list(params: &[Variable]) -> TokenStream {
+pub(crate) fn generate_member_list(params: &[Variable], visibility: TokenStream) -> TokenStream {
     let param_names = params
         .iter()
         .map(|p| format_ident!("{}", change_case(&p.name, IdentCase::LowerSnakeCase)));
@@ -122,7 +122,7 @@ pub(crate) fn generate_member_list(params: &[Variable]) -> TokenStream {
         .iter()
         .map(|p| skylite_type_to_rust_owned(&p.typename));
     quote! {
-        #(#param_names: #param_types),*
+        #(#visibility #param_names: #param_types),*
     }
 }
 

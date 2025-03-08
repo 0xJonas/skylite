@@ -112,7 +112,9 @@ pub(crate) fn generate_scene_params_type(project_name: &str, scenes: &[Scene]) -
         .iter()
         .map(|s| format_ident!("{}", change_case(&s.name, IdentCase::UpperCamelCase)))
         .collect::<Vec<_>>();
-    let param_lists = scenes.iter().map(|s| generate_member_list(&s.parameters));
+    let param_lists = scenes
+        .iter()
+        .map(|s| generate_member_list(&s.parameters, TokenStream::new()));
     let params = scenes.iter().map(|s| {
         let names = s.parameters.iter().map(get_parameter_name);
         quote!(#(#names),*)

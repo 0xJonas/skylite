@@ -96,6 +96,14 @@ impl NodeInstance {
             args: unsafe { parse_argument_list(instance_stub.args_raw, &node_stub.parameters)? },
         })
     }
+
+    pub fn from_scheme(definition: SCM, assets: &AssetGroup) -> Result<NodeInstance, SkyliteProcError> {
+        let stub = NodeInstanceStub::from_scheme(definition)?;
+        let (_, node_file) = assets.find_asset(&stub.name)?;
+        let node = NodeStub::from_file_guile(&node_file)?;
+        let cache: HashMap<String, NodeStub> = [(stub.name.clone(), node)].into_iter().collect();
+        NodeInstance::from_stub(stub, &cache)
+    }
 }
 
 /// A partially parsed Node asset.
@@ -142,19 +150,12 @@ impl NodeStub {
     }
 
     fn from_file_guile(path: &Path) -> Result<NodeStub, SkyliteProcError> {
-        // Since we are not actually accessing anything from this signature from C,
-        // we can get away with ignoring the missing C representations.
-        #[allow(improper_ctypes_definitions)]
-        extern "C" fn from_file_guile(path: &Path) -> Result<NodeStub, SkyliteProcError> {
-            let definition_raw = read_to_string(path).map_err(|e| {
-                SkyliteProcError::OtherError(format!("Error reading project definition: {}", e))
-            })?;
-            let definition = unsafe { eval_str(&definition_raw)? };
-            let name = &path.file_stem().unwrap().to_string_lossy();
-            NodeStub::from_scheme(definition, &name)
-        }
-
-        with_guile(from_file_guile, path)
+        let definition_raw = read_to_string(path).map_err(|e| {
+            SkyliteProcError::OtherError(format!("Error reading project definition: {}", e))
+        })?;
+        let definition = unsafe { eval_str(&definition_raw)? };
+        let name = &path.file_stem().unwrap().to_string_lossy();
+        NodeStub::from_scheme(definition, &name)
     }
 }
 
@@ -164,7 +165,7 @@ pub(crate) struct Node {
     pub name: String,
     pub parameters: Vec<Variable>,
     pub properties: Vec<Variable>,
-    pub static_nodes: HashMap<String, NodeInstance>,
+    pub static_nodes: Vec<(String, NodeInstance)>,
     pub dynamic_nodes: Vec<NodeInstance>,
 }
 
@@ -198,10 +199,10 @@ impl Node {
                         let stub = NodeInstanceStub::from_scheme(scm_cdr(item))?;
                         Ok((name, resolve_instance_fn(stub)?))
                     })
-                    .collect::<Result<HashMap<String, NodeInstance>, SkyliteProcError>>()?
+                    .collect::<Result<Vec<(String, NodeInstance)>, SkyliteProcError>>()?
             }
         } else {
-            HashMap::new()
+            Vec::new()
         };
 
         let dynamic_nodes = if let Some(dynamic_nodes_scm) = stub.dynamic_nodes {
@@ -333,7 +334,7 @@ mod tests {
                     documentation: None,
                     default: None
                 }],
-                static_nodes: HashMap::from([
+                static_nodes: vec![
                     (
                         "sub1".to_owned(),
                         NodeInstance {
@@ -348,7 +349,7 @@ mod tests {
                             args: vec![TypedValue::String("sub2".to_owned())]
                         }
                     )
-                ]),
+                ],
                 dynamic_nodes: vec![NodeInstance {
                     name: "basic-node-2".to_owned(),
                     args: vec![TypedValue::String("dynamic1".to_owned())]

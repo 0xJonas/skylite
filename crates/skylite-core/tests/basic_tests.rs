@@ -1,6 +1,6 @@
 use skylite_core::SkyliteProject;
 use skylite_mock::{Call, MockTarget};
-use skylite_proc::skylite_project;
+use skylite_proc::{node_definition, skylite_project};
 
 skylite_proc::actor_definition! {
     use skylite_core::{scenes::Scene, DrawContext, ProjectControls};
@@ -158,11 +158,87 @@ skylite_proc::scene_definition! {
     }
 }
 
+node_definition! {
+    use skylite_core::ProjectControls;
+    use super::TestProject1;
+    use super::BasicNode2;
+    use super::ZOrderNode;
+
+    skylite_proc::asset_file!("./tests/test-project-1/project.scm", "basic-node-1");
+
+    #[skylite_proc::create_properties]
+    fn create_properties(id: &str) -> BasicNode1Properties {
+        BasicNode1Properties { id: id.to_owned() }
+    }
+
+    #[skylite_proc::pre_update]
+    fn pre_update(node: &BasicNode1, controls: &mut ProjectControls<TestProject1>) {
+        controls.target.push_tag(&node.properties.id);
+        controls.target.log("basic-node-1::pre_update");
+    }
+
+    #[skylite_proc::post_update]
+    fn post_update(_node: &BasicNode1, controls: &mut ProjectControls<TestProject1>) {
+        controls.target.log("basic-node-1::post_update");
+        controls.target.pop_tag();
+    }
+}
+
+node_definition! {
+    use skylite_core::ProjectControls;
+    use super::TestProject1;
+
+    skylite_proc::asset_file!("./tests/test-project-1/project.scm", "basic-node-2");
+
+    #[skylite_proc::create_properties]
+    fn create_properties(id: &str) -> BasicNode2Properties {
+        BasicNode2Properties { id: id.to_owned() }
+    }
+
+    #[skylite_proc::update]
+    fn update(node: &BasicNode2, controls: &mut ProjectControls<TestProject1>) {
+        controls.target.push_tag(&node.properties.id);
+        controls.target.log("basic-node-2::update");
+        controls.target.pop_tag();
+    }
+}
+
+node_definition! {
+    use skylite_core::{DrawContext, ProjectControls};
+    use super::TestProject1;
+
+    skylite_proc::asset_file!("./tests/test-project-1/project.scm", "z-order-node");
+
+    #[skylite_proc::create_properties]
+    fn create_properties(id: &str, z_order: i16) -> ZOrderNodeProperties {
+        ZOrderNodeProperties { id: id.to_owned(), z_order }
+    }
+
+    #[skylite_proc::z_order]
+    fn z_order(node: &ZOrderNode) -> i32 {
+        node.properties.z_order as i32
+    }
+
+    #[skylite_proc::render]
+    fn render(node: &ZOrderNode, ctx: &mut DrawContext<TestProject1>) {
+        ctx.target.push_tag(&node.properties.id);
+        ctx.target.log(&format!("z-order-node::render@{}", node.properties.z_order));
+        ctx.target.pop_tag();
+    }
+
+    #[skylite_proc::update]
+    fn update(node: &ZOrderNode, controls: &mut ProjectControls<TestProject1>) {
+        controls.target.push_tag(&node.properties.id);
+        controls.target.log("z-order-node::update");
+        controls.target.pop_tag();
+    }
+}
+
 skylite_project! {
     use skylite_core::{SkyliteTarget, ProjectControls, DrawContext};
     use skylite_mock::MockTarget;
 
-    use super::{BasicActor1, SpawnTestActor, ZOrderTestActor, BasicScene1};
+    use super::{BasicActor1, BasicNode1, SpawnTestActor, ZOrderTestActor, BasicScene1};
 
     skylite_proc::project_file!("./tests/test-project-1/project.scm");
 
@@ -209,18 +285,15 @@ fn test_update_cycle() {
     project.update();
     let target = project._private_target();
     let calls = target.get_calls_by_tag("root");
+    assert_eq!(calls.len(), 8);
     assert!(match_call(&calls[0], "pre_update"));
-    assert!(match_call(&calls[1], "basic_scene_1::pre_update"));
-    assert!(match_call(&calls[2], "basic_actor_1::pre_update"));
-    assert!(match_call(&calls[3], "basic_actor_1::action3"));
-    assert!(match_call(&calls[4], "basic_actor_1::post_update"));
-    assert!(match_call(&calls[5], "spawn_test_actor::perform"));
-    assert!(match_call(&calls[6], "z_order_test_actor::idle"));
-    assert!(match_call(&calls[7], "z_order_test_actor::idle"));
-    assert!(match_call(&calls[8], "z_order_test_actor::idle"));
-    assert!(match_call(&calls[9], "basic_scene_1::post_update"));
-    assert!(match_call(&calls[10], "post_update"));
-    assert_eq!(calls.len(), 11);
+    assert!(match_call(&calls[1], "basic-node-1::pre_update"));
+    assert!(match_call(&calls[2], "basic-node-2::update"));
+    assert!(match_call(&calls[3], "z-order-node::update"));
+    assert!(match_call(&calls[4], "basic-node-2::update"));
+    assert!(match_call(&calls[5], "z-order-node::update"));
+    assert!(match_call(&calls[6], "basic-node-1::post_update"));
+    assert!(match_call(&calls[7], "post_update"));
 }
 
 #[test]
@@ -231,36 +304,9 @@ fn test_render_cycle() {
     project.render();
     let target = project._private_target();
     let calls = target.get_calls_by_tag("root");
+    assert_eq!(calls.len(), 4);
     assert!(match_call(&calls[0], "pre_render"));
-    assert!(match_call(&calls[1], "basic_scene_1::pre_render"));
-    assert!(match_call(&calls[2], "extra2::render@-1"));
-    assert!(match_call(&calls[3], "extra3::render@0"));
-    assert!(match_call(&calls[4], "basic_actor_1::render"));
-    assert!(match_call(&calls[5], "extra1::render@2"));
-    assert!(match_call(&calls[6], "basic_scene_1::post_render"));
-    assert!(match_call(&calls[7], "post_render"));
-    assert_eq!(calls.len(), 8);
-}
-
-#[test]
-fn test_extras() {
-    let target = MockTarget::new();
-    let mut project = TestProject1::new(target);
-
-    // First update: Extra added, but not yet updated.
-    project.update();
-    let target = project._private_target();
-    assert_eq!(target.get_calls_by_tag("actor2-sub").len(), 0);
-    target.clear_call_history();
-
-    // Second update: Extra updated and removes itself.
-    project.update();
-    let target = project._private_target();
-    assert_eq!(target.get_calls_by_tag("actor2-sub").len(), 1);
-    target.clear_call_history();
-
-    // Thrid update: Extra no longer exists in the scene.
-    project.update();
-    let target = project._private_target();
-    assert_eq!(target.get_calls_by_tag("actor2-sub").len(), 0);
+    assert!(match_call(&calls[1], "z-order-node::render@-1"));
+    assert!(match_call(&calls[2], "z-order-node::render@2"));
+    assert!(match_call(&calls[3], "post_render"));
 }
