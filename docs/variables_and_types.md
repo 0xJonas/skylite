@@ -34,20 +34,22 @@ A variable also has a type to specify what kind of data the variable holds and w
 
 The following primitive types are supported:
 
-| Type                         | Scheme Symbol | Rust type                                                    |
-| ---------------------------- | ------------- | ------------------------------------------------------------ |
-| 8-bit unsigned integer       | `u8`          | `u8`                                                         |
-| 16-bit unsigned integer      | `u16`         | `u16`                                                        |
-| 32-bit unsigned integer      | `u32`         | `u32`                                                        |
-| 64-bit unsigned integer      | `u64`         | `u64`                                                        |
-| 8-bit signed integer         | `i8`          | `i8`                                                         |
-| 16-bit signed integer        | `i16`         | `i16`                                                        |
-| 32-bit signed integer        | `i32`         | `i32`                                                        |
-| 64-bit signed integer        | `i64`         | `i64`                                                        |
-| 32-bit floating point number | `f32`         | `f32`                                                        |
-| 64-bit floating point number | `f64`         | `f64`                                                        |
-| Boolean value                | `bool`        | `bool`                                                       |
-| String                       | `string`      | `&str` when used inside a parameter type, `String` otherwise |
+| Type                         | Scheme Symbol | Rust type           |
+| ---------------------------- | ------------- | ------------------- |
+| 8-bit unsigned integer       | `u8`          | `u8`                |
+| 16-bit unsigned integer      | `u16`         | `u16`               |
+| 32-bit unsigned integer      | `u32`         | `u32`               |
+| 64-bit unsigned integer      | `u64`         | `u64`               |
+| 8-bit signed integer         | `i8`          | `i8`                |
+| 16-bit signed integer        | `i16`         | `i16`               |
+| 32-bit signed integer        | `i32`         | `i32`               |
+| 64-bit signed integer        | `i64`         | `i64`               |
+| 32-bit floating point number | `f32`         | `f32`               |
+| 64-bit floating point number | `f64`         | `f64`               |
+| Boolean value                | `bool`        | `bool`              |
+| String                       | `string`      | `&str`/`String` \*) |
+
+\*) *When a `string` is used as a parameter, the parameter type is `&str`, otherwise it is `String`. This also includes the case when a `string` is used inside of a tuple.*
 
 In Scheme, the allowed values for each of these types is the same as it would be in Rust, even though Scheme (or Guile specifically) does not enforce this limit. Boolean values must be written as `#t`/`#true` or `#f`/`#false`, other truthy values are not allowed in place of `#t`.
 
@@ -55,10 +57,12 @@ In Scheme, the allowed values for each of these types is the same as it would be
 
 The following aggregate types are supported:
 
-| Type   | Scheme                | Rust type                                                            |
-| ------ | --------------------- | -------------------------------------------------------------------- |
-| Tuple  | `(#type1 #type2 ...)` | `(#type1, #type2, ...)`                                              |
-| Vector | `(vec #type)`         | `&[#type]` when used inside a parameter type, `Vec<#type>` otherwise |
+| Type   | Scheme                | Rust type                   |
+| ------ | --------------------- | --------------------------- |
+| Tuple  | `(#type1 #type2 ...)` | `(#type1, #type2, ...)`     |
+| Vector | `(vec #type)`         | `&[#type]`/`Vec<#type>` \*) |
+
+\*) *When a `vec` is used as a parameter, the parameter type is a slice, otherwise it is a `Vec`. This also includes the case when a `vec` is used inside of a tuple. If a `vec` is converted to a slice, elements of the slice will always use owned types.*
 
 A tuple is a fixed-length sequence of up to eight elements of arbitrary types. When supplying a value to a variable with tuple type in Scheme, simply list the values for each element in order.
 

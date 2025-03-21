@@ -102,15 +102,14 @@ pub struct ProjectControls<'project, P: SkyliteProject> {
 }
 
 impl<'project, P: SkyliteProject> ProjectControls<'project, P> {
-
     /// Schedules a root node change. When this method is called from a
     /// node's update method, the current update cycle is run to completion
     /// and only after that is the new root node set.
     ///
     /// Since the root node is potentially very large, this method receives
     /// a callback which should load the new node. This way, the old root node
-    /// can be freed before the new node is loaded into memory, preventing two large
-    /// nodes from being loaded at the same time.
+    /// can be freed before the new node is loaded into memory, preventing two
+    /// large nodes from being loaded at the same time.
     pub fn set_queued_root_node<F: FnOnce() -> Box<dyn Node<P = P>> + 'static>(&mut self, fun: F) {
         self.pending_root_node = Some(Box::new(fun));
     }

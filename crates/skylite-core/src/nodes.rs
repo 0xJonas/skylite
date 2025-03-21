@@ -112,11 +112,12 @@ system_fn!(system7, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6, n7:N7);
 system_fn!(system8, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6, n7:N7, n8:N8);
 
 pub mod _private {
+    use std::marker::PhantomData;
+
     use skylite_compress::Decoder;
 
     use super::{Node, TypeId};
     use crate::{DrawContext, ProjectControls, SkyliteProject};
-    use std::marker::PhantomData;
 
     pub fn update_node_rec<P: SkyliteProject>(
         node: &mut dyn Node<P = P>,

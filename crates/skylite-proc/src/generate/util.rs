@@ -92,7 +92,8 @@ pub(crate) fn skylite_type_to_rust_param(t: &Type) -> TokenStream {
             quote!((#(#member_types_tokens),*))
         }
         Type::Vec(item_type) => {
-            let item_type_tokens = skylite_type_to_rust_param(&item_type);
+            // Only use a slice for the top-level Vec, use the owned type for elements.
+            let item_type_tokens = skylite_type_to_rust_owned(&item_type);
             quote!(&[#item_type_tokens])
         }
     }
