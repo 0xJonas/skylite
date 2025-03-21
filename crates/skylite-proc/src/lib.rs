@@ -1,15 +1,11 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use generate::actors::generate_actor_definition;
 use generate::nodes::generate_node_definition;
-use generate::scenes::generate_scene_definition;
 use generate::util::get_macro_item;
-use parse::actors::Actor;
 use parse::guile::SCM;
 use parse::nodes::Node;
 use parse::project::{SkyliteProject, SkyliteProjectStub};
-use parse::scenes::SceneStub;
 use parse::scheme_util::form_to_string;
 use parse::util::{change_case, IdentCase};
 use proc_macro2::{TokenStream, TokenTree};
@@ -22,7 +18,7 @@ mod ecs;
 mod generate;
 mod parse;
 
-use ecs::{derive_component_impl, system_impl};
+use ecs::system_impl;
 
 #[derive(Debug, Clone)]
 enum SkyliteProcError {
@@ -227,48 +223,6 @@ fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skylit
     Ok(out)
 }
 
-fn actor_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
-    let items = parse2::<File>(body_raw.clone())
-        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
-        .items;
-
-    let args = get_macro_item("skylite_proc::asset_file", &items)?.ok_or(
-        SkyliteProcError::DataError(format!("Missing required macro asset_file!")),
-    )?;
-    let (project_stub, name) = extract_asset_file(args)?;
-
-    let (id, path) = project_stub.assets.actors.find_asset(&name)?;
-    let actor = Actor::from_file(&path)?;
-
-    let out = generate_actor_definition(&actor, id, &project_stub.name, &items, &body_raw)?;
-
-    #[cfg(debug_assertions)]
-    process_debug_output(&out, &items)?;
-
-    Ok(out)
-}
-
-fn scene_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
-    let items = parse2::<File>(body_raw.clone())
-        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
-        .items;
-
-    let mac = get_macro_item("skylite_proc::asset_file", &items)?.ok_or(
-        SkyliteProcError::DataError(format!("Missing required macro asset_file!")),
-    )?;
-    let (project_stub, name) = extract_asset_file(mac)?;
-
-    let (id, path) = project_stub.assets.scenes.find_asset(&name)?;
-    let scene = SceneStub::from_file(&path)?;
-
-    let out = generate_scene_definition(&scene, id as u32, &items, &project_stub.name, &body_raw)?;
-
-    #[cfg(debug_assertions)]
-    process_debug_output(&out, &items)?;
-
-    Ok(out)
-}
-
 fn skylite_project_impl(body_raw: TokenStream) -> TokenStream {
     match skylite_project_impl_fallible(body_raw) {
         Ok(t) => t,
@@ -278,20 +232,6 @@ fn skylite_project_impl(body_raw: TokenStream) -> TokenStream {
 
 fn node_definition_impl(body_raw: TokenStream) -> TokenStream {
     match node_definition_fallible(body_raw) {
-        Ok(stream) => stream,
-        Err(err) => err.into(),
-    }
-}
-
-fn actor_definition_impl(body_raw: TokenStream) -> TokenStream {
-    match actor_definition_fallible(body_raw) {
-        Ok(stream) => stream,
-        Err(err) => err.into(),
-    }
-}
-
-fn scene_definition_impl(body_raw: TokenStream) -> TokenStream {
-    match scene_definition_fallible(body_raw) {
         Ok(stream) => stream,
         Err(err) => err.into(),
     }
@@ -307,26 +247,9 @@ pub fn node_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream
     node_definition_impl(body.into()).into()
 }
 
-#[doc = include_str!("../../../docs/actor_definition.md")]
-#[proc_macro]
-pub fn actor_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    actor_definition_impl(body.into()).into()
-}
-
-#[doc = include_str!("../../../docs/scene_definition.md")]
-#[proc_macro]
-pub fn scene_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    scene_definition_impl(body.into()).into()
-}
-
 #[proc_macro]
 pub fn system(args: proc_macro::TokenStream) -> proc_macro::TokenStream {
     system_impl(args.into()).into()
-}
-
-#[proc_macro_derive(Component)]
-pub fn derive_component(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    derive_component_impl(item.into()).into()
 }
 
 #[proc_macro]
@@ -339,8 +262,8 @@ pub fn target_type(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     proc_macro::TokenStream::new()
 }
 
-/// Marks a function to be called to initialize an instance of `SkyliteProject`
-/// or `Scene.`
+/// Marks a function to initialize something. Used for `node_definition!` and
+/// `skylite_project!`.
 ///
 /// **This macro must always be used with an absolute path:
 /// `#[skylite_proc::init]`.**
@@ -402,9 +325,9 @@ pub fn pre_render(
     body
 }
 
-/// Marks a function to be called for rendering something. Used for actors,
-/// because actors do not have any intrinsic properties that are rendered
-/// automatically.
+/// Marks a function to be called for rendering something.
+///
+/// This macro should be used from inside a `node_definition!`.
 ///
 /// **This macro must always be used with an absolute path:
 /// `#[skylite_proc::render]`.**
@@ -428,7 +351,7 @@ pub fn post_render(
     body
 }
 
-/// Marks a function to be used to construct an actor's or scene's properties
+/// Marks a function to be used to construct an node's properties
 /// from the parameters defined in the asset file (see `properties!`).
 ///
 /// **This macro must always be used with an absolute path:
@@ -441,24 +364,7 @@ pub fn create_properties(
     body
 }
 
-/// Marks an action for an actor.
-///
-/// The name of the corresponding action in the actor asset file should be given
-/// like this:
-///
-/// ```ignore
-/// #[skylite_proc::action("some_action")]
-/// fn some_action(actor: &mut Actor, project: &mut Project, args...) { ... }
-/// ```
-#[proc_macro_attribute]
-pub fn action(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Sets the backing asset file for an `actor_definition` or `scene_definition`.
+/// Sets the backing asset file for an `node_definition`.
 ///
 /// **This macro must always be used with an absolute path:
 /// `skylite_proc::asset_file!`.**
@@ -466,14 +372,14 @@ pub fn action(
 /// The definition file consists of the path to the project root file and the
 /// name of the asset. The name of the asset does *not* include the file
 /// extension. The specific file will be searched within the files for the
-/// respective asset defined in the project definition, i.e. actors files for
-/// `actor_definition!`, scenes for `scene_definition!`, etc.
+/// respective asset defined in the project definition, e.g. nodes for
+/// `node_definition!`.
 ///
 /// ## Example
 /// ```ignore
-/// actor_definition! {
-///     // Uses the asset information from the actor asset 'some_actor'.
-///     skylite_proc::asset_file!("./path/project.scm", "some_actor");
+/// node_definition! {
+///     // Uses the asset information from the node asset 'some_node'.
+///     skylite_proc::asset_file!("./path/project.scm", "some_node");
 /// }
 /// ```
 #[proc_macro]
@@ -481,17 +387,17 @@ pub fn asset_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     proc_macro::TokenStream::new()
 }
 
-/// Defines properties for a scene or actor. These properties are converted into
+/// Defines properties for a node. These properties are converted into
 /// a separate type and can be accessed through the `properties`-member on
-/// actors or scenes.
+/// nodes.
 ///
 /// **This macro must always be used with an absolute path:
 /// `skylite_proc::properties!`.**
 ///
 /// ## Example
 ///
-/// ```rust
-/// actor_definition! {
+/// ```ignore
+/// node_definition! {
 ///     skylite_proc::properties! {
 ///         val1: u8,
 ///         val2: u8
@@ -503,8 +409,8 @@ pub fn properties(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     proc_macro::TokenStream::new()
 }
 
-/// Marks a function that returns the z-order for an actor. The marked function
-/// must take an immutable reference to an actor type.
+/// Marks a function that returns the z-order for a node. The marked function
+/// must take an immutable reference to a node type.
 ///
 /// **This macro must always be used with an absolute path:
 /// `#[skylite_proc::z_order]`.**

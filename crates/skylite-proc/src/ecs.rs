@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
-use syn::{parse2, Expr, ExprClosure, Item, ItemEnum, ItemStruct, ItemUnion, Pat, Token};
+use syn::{Expr, ExprClosure, Pat, Token};
 
 use crate::SkyliteProcError;
 
@@ -53,7 +53,7 @@ fn system_fallible(args: TokenStream) -> Result<TokenStream, SkyliteProcError> {
     })?;
     if args.len() != 2 {
         return Err(SkyliteProcError::SyntaxError(
-            "system takes exactly to arguments.".to_owned(),
+            "system takes exactly two arguments.".to_owned(),
         ));
     }
     let receiver = &args[0];
@@ -70,37 +70,12 @@ fn system_fallible(args: TokenStream) -> Result<TokenStream, SkyliteProcError> {
 
     let system_fn = format_ident!("system{}", closure.inputs.len());
 
-    Ok(quote!(::skylite_core::ecs::_private::#system_fn(#receiver, #closure)))
+    Ok(quote!(::skylite_core::nodes::_private::#system_fn(#receiver, #closure)))
 }
 
 pub(crate) fn system_impl(args: TokenStream) -> TokenStream {
     match system_fallible(args) {
         Ok(stream) => stream,
         Err(err) => err.into(),
-    }
-}
-
-pub(crate) fn derive_component_impl(item: TokenStream) -> TokenStream {
-    let (typename, typeparams) = match parse2::<Item>(item) {
-        Ok(Item::Struct(ItemStruct {
-            ident, generics, ..
-        })) => (ident, generics),
-        Ok(Item::Enum(ItemEnum {
-            ident, generics, ..
-        })) => (ident, generics),
-        Ok(Item::Union(ItemUnion {
-            ident, generics, ..
-        })) => (ident, generics),
-        _ => todo!(),
-    };
-
-    quote! {
-        impl #typeparams ::skylite_core::actors::TypeId  for #typename #typeparams {
-            fn get_id() -> usize {
-                <#typename as ::skylite_core::actors::TypeId>::get_id as usize
-            }
-        }
-
-        impl #typeparams ::skylite_core::ecs::Component  for #typename #typeparams {}
     }
 }

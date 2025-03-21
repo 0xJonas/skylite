@@ -1,10 +1,7 @@
-use scenes::SceneParams;
+use nodes::Node;
 
-pub mod actors;
 pub mod decode;
-pub mod ecs;
 pub mod nodes;
-pub mod scenes;
 
 /// Defines which functions a backend must provide to work with Skylite.
 pub trait SkyliteTarget {
@@ -56,7 +53,6 @@ pub trait SkyliteTarget {
 pub trait SkyliteProject {
     type Target: SkyliteTarget;
     type TileType: Copy;
-    type SceneParams: SceneParams<P = Self>;
 
     /// Creates a new instance of the project with the given target.
     fn new(target: Self::Target) -> Self;
@@ -64,18 +60,20 @@ pub trait SkyliteProject {
     /// Performs a single render cycle.
     ///
     /// Rendering, if implemented correctly in user code, should not
-    /// change any state in the scenes or actors, so if `render` is called
+    /// change any state in the node tree, so if `render` is called
     /// multiple times without intermediate updates, the output should stay the
     /// same.
     fn render(&mut self);
 
     /// Performs a single update cycle.
     ///
-    /// This operation changes the state of scenes and actors.
+    /// This operation can change the state of the nodes.
     fn update(&mut self);
 
-    /// Loads a new scene and sets the current scene of the project to it.
-    fn set_scene(&mut self, params: Self::SceneParams);
+    /// Sets a new root node.
+    ///
+    /// See `ProjectControls::set_queued_root_node`.
+    fn set_root_node(&mut self, get_fn: Box<dyn FnOnce() -> Box<dyn Node<P = Self>>>);
 }
 
 /// Holds the rendering state.
@@ -96,10 +94,24 @@ pub struct DrawContext<'project, P: SkyliteProject> {
 
 /// Type used to change various parts of a `SkyliteProject` instance.
 ///
-/// This is the main type that scenes and actors have access to in their
-/// update/action methods.
+/// This is the main type that nodes have access to in their update methods.
 pub struct ProjectControls<'project, P: SkyliteProject> {
     pub target: &'project mut P::Target,
     #[doc(hidden)]
-    pub pending_scene: Option<P::SceneParams>,
+    pub pending_root_node: Option<Box<dyn FnOnce() -> Box<dyn Node<P = P>>>>,
+}
+
+impl<'project, P: SkyliteProject> ProjectControls<'project, P> {
+
+    /// Schedules a root node change. When this method is called from a
+    /// node's update method, the current update cycle is run to completion
+    /// and only after that is the new root node set.
+    ///
+    /// Since the root node is potentially very large, this method receives
+    /// a callback which should load the new node. This way, the old root node
+    /// can be freed before the new node is loaded into memory, preventing two large
+    /// nodes from being loaded at the same time.
+    pub fn set_queued_root_node<F: FnOnce() -> Box<dyn Node<P = P>> + 'static>(&mut self, fun: F) {
+        self.pending_root_node = Some(Box::new(fun));
+    }
 }

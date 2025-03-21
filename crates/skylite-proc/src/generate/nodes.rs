@@ -9,6 +9,10 @@ use crate::generate::util::{
 use crate::parse::nodes::Node;
 use crate::{change_case, get_macro_item, IdentCase, SkyliteProcError};
 
+pub fn node_type_name(name: &str) -> Ident {
+    format_ident!("{}", change_case(name, IdentCase::UpperCamelCase))
+}
+
 fn get_fn_name(item: &ItemFn) -> &Ident {
     &item.sig.ident
 }
@@ -76,7 +80,7 @@ fn gen_static_nodes_type(node: &Node) -> TokenStream {
 }
 
 fn gen_node_type(node: &Node, project_name: &str) -> TokenStream {
-    let node_name = format_ident!("{}", change_case(&node.name, IdentCase::UpperCamelCase));
+    let node_name = node_type_name(&node.name);
     let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
     let properties_type_name = properties_type_name(&node.name);
     let static_nodes_type_name = static_nodes_type_name(&node.name);
@@ -90,7 +94,7 @@ fn gen_node_type(node: &Node, project_name: &str) -> TokenStream {
 }
 
 fn gen_node_new_fn(node: &Node, project_name: &str, items: &[Item]) -> TokenStream {
-    let node_name = format_ident!("{}", change_case(&node.name, IdentCase::UpperCamelCase));
+    let node_name = node_type_name(&node.name);
     let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
     let node_param_list = generate_param_list(&node.parameters);
     let node_args = generate_argument_list(&node.parameters);
@@ -140,7 +144,7 @@ fn gen_node_impl(
     project_name: &str,
     items: &[Item],
 ) -> Result<TokenStream, SkyliteProcError> {
-    let node_name = format_ident!("{}", change_case(&node.name, IdentCase::UpperCamelCase));
+    let node_name = node_type_name(&node.name);
     let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
     let static_node_names: Vec<Ident> = node
         .static_nodes
@@ -268,7 +272,7 @@ pub(crate) fn generate_node_definition(
         }
     });
 
-    let node_name = format_ident!("{}", change_case(&node.name, IdentCase::UpperCamelCase));
+    let node_name = node_type_name(&node.name);
     let properties_type = gen_properties_type(node, items)?;
     let static_nodes_type = gen_static_nodes_type(node);
     let node_type = gen_node_type(node, project_name);

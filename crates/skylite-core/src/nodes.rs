@@ -112,8 +112,11 @@ system_fn!(system7, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6, n7:N7);
 system_fn!(system8, n1:N1, n2:N2, n3:N3, n4:N4, n5:N5, n6:N6, n7:N7, n8:N8);
 
 pub mod _private {
-    use super::Node;
+    use skylite_compress::Decoder;
+
+    use super::{Node, TypeId};
     use crate::{DrawContext, ProjectControls, SkyliteProject};
+    use std::marker::PhantomData;
 
     pub fn update_node_rec<P: SkyliteProject>(
         node: &mut dyn Node<P = P>,
@@ -166,5 +169,67 @@ pub mod _private {
         insert_nodes_by_z_order_rec(&mut z_sorted, node, ctx);
 
         z_sorted.iter().for_each(|a| a._private_render(ctx));
+    }
+
+    struct DummyNode<P: SkyliteProject>(PhantomData<P>);
+
+    impl<P: SkyliteProject> TypeId for DummyNode<P> {
+        fn get_id() -> usize
+        where
+            Self: Sized,
+        {
+            todo!()
+        }
+    }
+
+    impl<P: SkyliteProject> Node for DummyNode<P> {
+        type P = P;
+
+        fn _private_decode(_decoder: &mut dyn Decoder) -> Self
+        where
+            Self: Sized,
+        {
+            unimplemented!()
+        }
+
+        fn _private_update(&mut self, _controls: &mut ProjectControls<Self::P>) {
+            unimplemented!()
+        }
+
+        fn _private_render(&self, _ctx: &mut DrawContext<Self::P>) {
+            unimplemented!()
+        }
+
+        fn z_order(&self) -> i32 {
+            unimplemented!()
+        }
+
+        fn is_visible(&self, _ctx: &DrawContext<Self::P>) -> bool {
+            unimplemented!()
+        }
+
+        fn get_static_nodes(&self) -> Box<[&dyn Node<P = Self::P>]> {
+            unimplemented!()
+        }
+
+        fn get_dynamic_nodes(&self) -> &Vec<Box<dyn Node<P = Self::P>>> {
+            unimplemented!()
+        }
+
+        fn get_static_nodes_mut(&mut self) -> Box<[&mut dyn Node<P = Self::P>]> {
+            unimplemented!()
+        }
+
+        fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>> {
+            unimplemented!()
+        }
+    }
+
+    pub fn replace_node<P: SkyliteProject + 'static, Src: FnOnce() -> Box<dyn Node<P = P>>>(
+        src: Src,
+        dest: &mut Box<dyn Node<P = P>>,
+    ) {
+        *dest = Box::new(DummyNode(PhantomData));
+        *dest = src();
     }
 }

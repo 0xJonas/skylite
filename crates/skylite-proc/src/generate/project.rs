@@ -2,12 +2,8 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Item, ItemFn};
 
-use super::scenes::{generate_scene_data, generate_scene_params_type};
-use crate::generate::scenes::{
-    generate_scene_decode_funs, scene_params_type_name, scene_type_name,
-};
+use crate::generate::nodes::node_type_name;
 use crate::generate::util::{get_annotated_function, typed_value_to_rust};
-use crate::parse::actors::Actor;
 use crate::parse::nodes::NodeInstance;
 use crate::parse::project::SkyliteProject;
 use crate::parse::util::{change_case, IdentCase};
@@ -40,11 +36,6 @@ pub(crate) fn project_ident(project_name: &str) -> Ident {
     format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase))
 }
 
-pub(crate) fn project_type_name(project_name: &str) -> TokenStream {
-    let project_ident = project_ident(project_name);
-    quote!(crate::#project_ident)
-}
-
 fn generate_project_type(project_name: &str, target_type: &TokenStream) -> TokenStream {
     let project_ident = project_ident(project_name);
     quote! {
@@ -65,7 +56,7 @@ fn generate_project_new_method(
     root_node: &NodeInstance,
 ) -> TokenStream {
     let project_ident = project_ident(project_name);
-    let root_node_name = scene_type_name(&root_node.name);
+    let root_node_name = node_type_name(&root_node.name);
     let root_node_params = root_node.args.iter().map(typed_value_to_rust);
     quote! {
         fn new(target: #target_type) -> #project_ident {
@@ -84,14 +75,11 @@ fn generate_project_new_method(
     }
 }
 
-fn generate_project_impl(project_name: &str, actors: &[Actor]) -> TokenStream {
-    let scene_decode_funs = generate_scene_decode_funs(project_name, actors);
+fn generate_project_impl(project_name: &str) -> TokenStream {
     let project_ident = project_ident(project_name);
 
     quote! {
         impl #project_ident {
-            #scene_decode_funs
-
             #[cfg(debug_assertions)]
             pub fn _private_target(&mut self) -> &mut <#project_ident as ::skylite_core::SkyliteProject>::Target {
                 &mut self.target
@@ -112,7 +100,6 @@ fn generate_project_trait_impl(
 
     let project_ident = project_ident(project_name);
     let tile_type_name = tile_type_name(project_name);
-    let scene_params_type_name = scene_params_type_name(project_name);
 
     let init = get_annotated_function(items, "skylite_proc::init")
         .map(get_name)
@@ -145,7 +132,6 @@ fn generate_project_trait_impl(
         impl skylite_core::SkyliteProject for #project_ident {
             type Target = #target_type;
             type TileType = #tile_type_name;
-            type SceneParams = #scene_params_type_name;
 
             #new_method
 
@@ -167,7 +153,7 @@ fn generate_project_trait_impl(
             fn update(&mut self) {
                 let mut controls = ::skylite_core::ProjectControls {
                     target: &mut self.target,
-                    pending_scene: None
+                    pending_root_node: None
                 };
 
                 #pre_update
@@ -177,13 +163,13 @@ fn generate_project_trait_impl(
 
                 #post_update
 
-                if let Some(params) = controls.pending_scene.take() {
-                    self.set_scene(params);
+                if let Some(get_fn) = controls.pending_root_node.take() {
+                    self.set_root_node(get_fn);
                 }
             }
 
-            fn set_scene(&mut self, params: Self::SceneParams) {
-                // ::skylite_core::scenes::_private::replace_scene(params, &mut self.scene);
+            fn set_root_node(&mut self, get_fn: Box<dyn FnOnce() -> Box<dyn ::skylite_core::nodes::Node<P=Self>>>) {
+                ::skylite_core::nodes::_private::replace_node(get_fn, &mut self.root_node);
             }
         }
     }
@@ -197,10 +183,8 @@ impl SkyliteProject {
     ) -> Result<Vec<Item>, SkyliteProcError> {
         Ok(vec![
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
-            Item::Verbatim(generate_scene_data(&self.scenes, &self.actors)),
-            Item::Verbatim(generate_scene_params_type(&self.name, &self.scenes)),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
-            Item::Verbatim(generate_project_impl(&self.name, &self.actors)),
+            Item::Verbatim(generate_project_impl(&self.name)),
             Item::Verbatim(generate_project_trait_impl(
                 &self.name,
                 &target_type,
@@ -246,7 +230,6 @@ mod tests {
             impl skylite_core::SkyliteProject for Test1 {
                 type Target = MockTarget;
                 type TileType = Test1Tiles;
-                type SceneParams = Test1SceneParams;
 
                 fn new(target: MockTarget) -> Test1 {
                     let (w, h) = target.get_screen_size();
@@ -277,7 +260,7 @@ mod tests {
                 fn update(&mut self) {
                     let mut controls = ::skylite_core::ProjectControls {
                         target: &mut self.target,
-                        pending_scene: None
+                        pending_root_node: None
                     };
 
                     pre_update(&mut controls);
@@ -285,13 +268,13 @@ mod tests {
                     // Main update
                     self.root_node._private_update(&mut controls);
 
-                    if let Some(params) = controls.pending_scene.take() {
-                        self.set_scene(params);
+                    if let Some(get_fn) = controls.pending_root_node.take() {
+                        self.set_root_node(get_fn);
                     }
                 }
 
-                fn set_scene(&mut self, params: Self::SceneParams) {
-                    // ::skylite_core::scenes::_private::replace_scene(params, &mut self.scene);
+                fn set_root_node(&mut self, get_fn: Box<dyn FnOnce() -> Box<dyn ::skylite_core::nodes::Node<P=Self>>>) {
+                    ::skylite_core::nodes::_private::replace_node(get_fn, &mut self.root_node);
                 }
             }
         };

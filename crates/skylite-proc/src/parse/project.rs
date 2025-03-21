@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 
 use glob::{GlobError, Pattern};
 
-use super::actors::Actor;
 use super::nodes::{Node, NodeInstance};
-use super::scenes::{Scene, SceneInstance};
 use super::values::{parse_type, parse_typed_value, TypedValue};
 use crate::parse::guile::{scm_is_false, scm_list_p, SCM};
 use crate::parse::scheme_util::CXROp::{CAR, CDR};
@@ -130,9 +128,6 @@ impl<'base> IntoIterator for &'base AssetGroup {
 #[derive(PartialEq, Debug)]
 pub(crate) struct AssetGroups {
     pub nodes: AssetGroup,
-    pub actors: AssetGroup,
-    pub scenes: AssetGroup,
-    pub plays: AssetGroup,
     pub graphics: AssetGroup,
     pub sprites: AssetGroup,
     pub tilesets: AssetGroup,
@@ -151,15 +146,6 @@ impl AssetGroups {
 
             if let Some(expr) = assq_str("nodes", alist)? {
                 out.nodes = AssetGroup::from_scheme(expr, base_dir)?;
-            }
-            if let Some(expr) = assq_str("actors", alist)? {
-                out.actors = AssetGroup::from_scheme(expr, base_dir)?;
-            }
-            if let Some(expr) = assq_str("scenes", alist)? {
-                out.scenes = AssetGroup::from_scheme(expr, base_dir)?;
-            }
-            if let Some(expr) = assq_str("plays", alist)? {
-                out.plays = AssetGroup::from_scheme(expr, base_dir)?;
             }
             if let Some(expr) = assq_str("graphics", alist)? {
                 out.graphics = AssetGroup::from_scheme(expr, base_dir)?;
@@ -188,9 +174,6 @@ fn asset_group_from_single(pattern: &str, base_dir: &Path) -> AssetGroup {
 fn create_default_asset_groups(base_dir: &Path) -> AssetGroups {
     AssetGroups {
         nodes: asset_group_from_single("./nodes/*.scm", base_dir),
-        actors: asset_group_from_single("./actors/*.scm", base_dir),
-        scenes: asset_group_from_single("./scenes/*.scm", base_dir),
-        plays: asset_group_from_single("./plays/*.scm", base_dir),
         graphics: asset_group_from_single("./graphics/*.scm", base_dir),
         sprites: asset_group_from_single("./sprites/*.scm", base_dir),
         tilesets: asset_group_from_single("./tilesets/*.scm", base_dir),
@@ -312,8 +295,6 @@ impl SkyliteProjectStub {
 pub(crate) struct SkyliteProject {
     pub name: String,
     pub nodes: Vec<Node>,
-    pub actors: Vec<Actor>,
-    pub scenes: Vec<Scene>,
     pub root_node: NodeInstance,
     pub _save_data: Vec<SaveItem>,
     pub tile_types: Vec<String>,
@@ -323,35 +304,9 @@ impl SkyliteProject {
     pub(crate) fn from_stub(stub: SkyliteProjectStub) -> Result<SkyliteProject, SkyliteProcError> {
         let nodes = Node::from_asset_group_all(&stub.assets.nodes)?;
 
-        let actors = stub
-            .assets
-            .actors
-            .into_iter()
-            .map(|path_res| {
-                let path = path_res.map_err(|err| {
-                    SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string()))
-                })?;
-                Actor::from_file(path.as_path())
-            })
-            .collect::<Result<Vec<Actor>, SkyliteProcError>>()?;
-
-        let scenes = stub
-            .assets
-            .scenes
-            .into_iter()
-            .map(|path_res| {
-                let path = path_res.map_err(|err| {
-                    SkyliteProcError::OtherError(format!("GlobError: {}", err.to_string()))
-                })?;
-                Scene::from_file(path.as_path(), &actors)
-            })
-            .collect::<Result<Vec<Scene>, SkyliteProcError>>()?;
-
         Ok(SkyliteProject {
             name: stub.name,
             nodes,
-            actors,
-            scenes,
             root_node: stub.root_node,
             _save_data: stub.save_data,
             tile_types: stub.tile_types,
@@ -383,9 +338,6 @@ mod tests {
                 name: "TestProject1".to_owned(),
                 assets: AssetGroups {
                     nodes: asset_group_from_single("./nodes/*.scm", &project_root),
-                    actors: asset_group_from_single("./actors/*.scm", &project_root),
-                    scenes: asset_group_from_single("./scenes/*.scm", &project_root),
-                    plays: asset_group_from_single("./plays/*.scm", &project_root),
                     graphics: asset_group_from_single("./graphics/*.scm", &project_root),
                     sprites: asset_group_from_single("./sprites/*.scm", &project_root),
                     tilesets: asset_group_from_single("./tilesets/*.scm", &project_root),
