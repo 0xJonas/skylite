@@ -11,7 +11,7 @@ node_definition! {
     skylite_proc::asset_file!("./tests/test-project-1/project.scm", "basic-node-1");
 
     #[skylite_proc::create_properties]
-    fn create_properties(id: &str) -> BasicNode1Properties {
+    fn create_properties(id: String) -> BasicNode1Properties {
         BasicNode1Properties { id: id.to_owned() }
     }
 
@@ -35,7 +35,7 @@ node_definition! {
     skylite_proc::asset_file!("./tests/test-project-1/project.scm", "basic-node-2");
 
     #[skylite_proc::create_properties]
-    fn create_properties(id: &str) -> BasicNode2Properties {
+    fn create_properties(id: String) -> BasicNode2Properties {
         BasicNode2Properties { id: id.to_owned() }
     }
 
@@ -54,7 +54,7 @@ node_definition! {
     skylite_proc::asset_file!("./tests/test-project-1/project.scm", "z-order-node");
 
     #[skylite_proc::create_properties]
-    fn create_properties(id: &str, z_order: i16) -> ZOrderNodeProperties {
+    fn create_properties(id: String, z_order: i16) -> ZOrderNodeProperties {
         ZOrderNodeProperties { id: id.to_owned(), z_order }
     }
 

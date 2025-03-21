@@ -2,9 +2,9 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Ident, Item, ItemFn};
 
-use super::util::{generate_deserialize_statements, generate_member_list};
 use crate::generate::util::{
-    generate_argument_list, generate_param_list, get_annotated_function, typed_value_to_rust,
+    generate_argument_list, generate_deserialize_statements, generate_field_list,
+    get_annotated_function, typed_value_to_rust,
 };
 use crate::parse::nodes::Node;
 use crate::{change_case, get_macro_item, IdentCase, SkyliteProcError};
@@ -25,11 +25,11 @@ fn properties_type_name(node_name: &str) -> Ident {
 }
 
 fn gen_properties_type(node: &Node, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
-    let node_param_list = generate_param_list(&node.parameters);
+    let node_param_list = generate_field_list(&node.parameters, TokenStream::new());
     let node_args = generate_argument_list(&node.parameters);
     let properties_type_name = properties_type_name(&node.name);
 
-    let asset_properties = generate_member_list(&node.properties, quote!(pub));
+    let asset_properties = generate_field_list(&node.properties, quote!(pub));
     let extra_properties = match get_macro_item("skylite_proc::extra_properties", items)? {
         Some(tokens) => tokens.clone(),
         None => TokenStream::new(),
@@ -96,7 +96,7 @@ fn gen_node_type(node: &Node, project_name: &str) -> TokenStream {
 fn gen_node_new_fn(node: &Node, project_name: &str, items: &[Item]) -> TokenStream {
     let node_name = node_type_name(&node.name);
     let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
-    let node_param_list = generate_param_list(&node.parameters);
+    let node_param_list = generate_field_list(&node.parameters, TokenStream::new());
     let node_args = generate_argument_list(&node.parameters);
     let properties_type_name = properties_type_name(&node.name);
     let static_nodes_type_name = static_nodes_type_name(&node.name);
@@ -116,7 +116,7 @@ fn gen_node_new_fn(node: &Node, project_name: &str, items: &[Item]) -> TokenStre
 
     let init_call = get_annotated_function(items, "skylite_proc::init")
         .map(get_fn_name)
-        .map(|name| quote!(super::#name(&mut out, #node_args);))
+        .map(|name| quote!(super::#name(&mut out);))
         .unwrap_or(TokenStream::new());
 
     quote! {
@@ -415,7 +415,7 @@ mod tests {
                     static_nodes,
                     dynamic_nodes
                 };
-                super::init(&mut out, param1, param2);
+                super::init(&mut out);
                 out
             }
         };

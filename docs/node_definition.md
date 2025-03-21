@@ -68,7 +68,7 @@ When a new instance of a Node is created, it must first be initialized. There ar
 
 ### `#[skylite_proc::create_properties]`
 
-A function marked with this attribute is responsible for creating the instance of the Node's property type. The marked function receives arguments to the parameters defined in the [node asset](node_assets.md#parameters), in the order they are given there, and should return a new instance of the property type. Unless the node defines no properties or `skylite_proc::extra_properties`, this function is **required**.
+A function marked with this attribute is responsible for creating the instance of the Node's property type. The marked function receives arguments to the parameters defined in the [node asset](node_assets.md#parameters), in the order they are given there, and should return a new instance of the property type. The parameters are moved into the function, so they are only available at this point. Unless the node defines no properties or `skylite_proc::extra_properties`, this function is **required**.
 
 ```rust
 #[skylite_proc::create_properties]
@@ -79,11 +79,11 @@ fn create_properties(param1: u8, param2: u8) -> MyNodeProperties {
 
 ### `#[skylite_proc::init]`
 
-This function can be used to run custom setup code for a newly created Node. It is called when all fields of the node type are fully initialized. It receives a mutable reference to the new Node instance, as well as arguments to the Node's parameters.
+This function can be used to run custom setup code for a newly created Node. It is called when all fields of the node type are fully initialized and receives a mutable reference to the new Node instance.
 
 ```rust
 #[skylite_proc::init]
-fn init(node: &mut MyNode, param1: u8, param2: u8) {
+fn init(node: &mut MyNode) {
     // ...
 }
 ```
