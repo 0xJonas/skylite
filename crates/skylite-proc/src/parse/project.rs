@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 
 use glob::{GlobError, Pattern};
 
+use super::node_lists::NodeList;
 use super::nodes::{Node, NodeInstance};
 use super::values::{parse_type, parse_typed_value, TypedValue};
 use crate::parse::guile::{scm_is_false, scm_list_p, SCM};
@@ -128,6 +129,7 @@ impl<'base> IntoIterator for &'base AssetGroup {
 #[derive(PartialEq, Debug)]
 pub(crate) struct AssetGroups {
     pub nodes: AssetGroup,
+    pub node_lists: AssetGroup,
     pub graphics: AssetGroup,
     pub sprites: AssetGroup,
     pub tilesets: AssetGroup,
@@ -145,6 +147,9 @@ impl AssetGroups {
             let mut out = create_default_asset_groups(base_dir);
 
             if let Some(expr) = assq_str("nodes", alist)? {
+                out.nodes = AssetGroup::from_scheme(expr, base_dir)?;
+            }
+            if let Some(expr) = assq_str("node_lists", alist)? {
                 out.nodes = AssetGroup::from_scheme(expr, base_dir)?;
             }
             if let Some(expr) = assq_str("graphics", alist)? {
@@ -174,6 +179,7 @@ fn asset_group_from_single(pattern: &str, base_dir: &Path) -> AssetGroup {
 fn create_default_asset_groups(base_dir: &Path) -> AssetGroups {
     AssetGroups {
         nodes: asset_group_from_single("./nodes/*.scm", base_dir),
+        node_lists: asset_group_from_single("./node_lists/*.scm", base_dir),
         graphics: asset_group_from_single("./graphics/*.scm", base_dir),
         sprites: asset_group_from_single("./sprites/*.scm", base_dir),
         tilesets: asset_group_from_single("./tilesets/*.scm", base_dir),
@@ -202,11 +208,11 @@ impl SaveItem {
 // Early form of `SkyliteProject`, where the assets are not yet
 // resolved and parsed. Used for contexts where the full representation
 // of the project is not required, e.g. node_definition`.
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub(crate) struct SkyliteProjectStub {
     pub name: String,
     pub assets: AssetGroups,
-    pub root_node: NodeInstance,
+    pub root_node_def: SCM,
     pub save_data: Vec<SaveItem>,
     pub tile_types: Vec<String>,
 }
@@ -227,12 +233,9 @@ impl SkyliteProjectStub {
                 create_default_asset_groups(&project_root)
             };
 
-            let root_node = {
-                let instance_def = assq_str("root-node", definition)?.ok_or(
-                    SkyliteProcError::DataError(format!("Missing required field 'root-node'")),
-                )?;
-                NodeInstance::from_scheme(instance_def, &assets.nodes)?
-            };
+            let root_node_def = assq_str("root-node", definition)?.ok_or(
+                SkyliteProcError::DataError(format!("Missing required field 'root-node'")),
+            )?;
 
             let save_data = if let Some(list) = assq_str("save-data", definition)? {
                 iter_list(list)?
@@ -259,7 +262,7 @@ impl SkyliteProjectStub {
             Ok(SkyliteProjectStub {
                 name,
                 assets,
-                root_node,
+                root_node_def,
                 save_data,
                 tile_types,
             })
@@ -290,11 +293,23 @@ impl SkyliteProjectStub {
     }
 }
 
+#[cfg(test)]
+impl PartialEq for SkyliteProjectStub {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.assets == other.assets
+            // && self.root_node_def == other.root_node_def // exclude SCM type
+            && self.save_data == other.save_data
+            && self.tile_types == other.tile_types
+    }
+}
+
 /// Main type for managing the asset files and code generation
 /// of a Skylite project.
 pub(crate) struct SkyliteProject {
     pub name: String,
     pub nodes: Vec<Node>,
+    pub node_lists: Vec<NodeList>,
     pub root_node: NodeInstance,
     pub _save_data: Vec<SaveItem>,
     pub tile_types: Vec<String>,
@@ -303,11 +318,26 @@ pub(crate) struct SkyliteProject {
 impl SkyliteProject {
     pub(crate) fn from_stub(stub: SkyliteProjectStub) -> Result<SkyliteProject, SkyliteProcError> {
         let nodes = Node::from_asset_group_all(&stub.assets.nodes)?;
+        let node_lists = stub
+            .assets
+            .node_lists
+            .into_iter()
+            .map(|path_res| {
+                let path = path_res
+                    .map_err(|err| SkyliteProcError::OtherError(format!("IO Error: {}", err)))?;
+                NodeList::from_file(&path, &nodes)
+            })
+            .collect::<Result<Vec<NodeList>, SkyliteProcError>>()?;
+
+        let root_node = NodeInstance::from_scheme(stub.root_node_def, &nodes)?;
+
+        let nodes_vec: Vec<Node> = nodes.into_values().collect();
 
         Ok(SkyliteProject {
             name: stub.name,
-            nodes,
-            root_node: stub.root_node,
+            nodes: nodes_vec,
+            node_lists,
+            root_node: root_node,
             _save_data: stub.save_data,
             tile_types: stub.tile_types,
         })
@@ -318,10 +348,10 @@ impl SkyliteProject {
 mod tests {
     use std::fs::{create_dir, remove_dir_all, File};
     use std::path::PathBuf;
+    use std::ptr;
     use std::str::FromStr;
 
     use super::SkyliteProjectStub;
-    use crate::parse::nodes::NodeInstance;
     use crate::parse::project::{asset_group_from_single, AssetGroups, SaveItem};
     use crate::parse::values::TypedValue;
 
@@ -338,6 +368,7 @@ mod tests {
                 name: "TestProject1".to_owned(),
                 assets: AssetGroups {
                     nodes: asset_group_from_single("./nodes/*.scm", &project_root),
+                    node_lists: asset_group_from_single("./node_lists/*.scm", &project_root),
                     graphics: asset_group_from_single("./graphics/*.scm", &project_root),
                     sprites: asset_group_from_single("./sprites/*.scm", &project_root),
                     tilesets: asset_group_from_single("./tilesets/*.scm", &project_root),
@@ -353,10 +384,7 @@ mod tests {
                         data: TypedValue::U8(5)
                     }
                 ],
-                root_node: NodeInstance {
-                    name: "basic-node-1".to_owned(),
-                    args: vec![TypedValue::String("root-node".to_owned()),]
-                },
+                root_node_def: ptr::null_mut(),
                 tile_types: vec![
                     "solid".to_owned(),
                     "non-solid".to_owned(),

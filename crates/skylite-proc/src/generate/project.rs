@@ -221,6 +221,7 @@ mod tests {
             "Test1",
             &quote!(MockTarget),
             &NodeInstance {
+                node_id: 0,
                 name: "TestNode".to_owned(),
                 args: vec![TypedValue::Bool(false), TypedValue::U8(5)],
             },

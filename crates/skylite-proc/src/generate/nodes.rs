@@ -257,7 +257,6 @@ fn gen_node_impl(
 
 pub(crate) fn generate_node_definition(
     node: &Node,
-    node_id: usize,
     project_name: &str,
     items: &[Item],
     body_raw: &TokenStream,
@@ -273,6 +272,7 @@ pub(crate) fn generate_node_definition(
     });
 
     let node_name = node_type_name(&node.name);
+    let node_id = node.id;
     let properties_type = gen_properties_type(node, items)?;
     let static_nodes_type = gen_static_nodes_type(node);
     let node_type = gen_node_type(node, project_name);
@@ -334,6 +334,7 @@ mod tests {
 
     fn create_test_node() -> Node {
         Node {
+            id: 0,
             name: "TestNode".to_owned(),
             parameters: vec![
                 Variable {
@@ -358,11 +359,13 @@ mod tests {
             static_nodes: vec![(
                 "static1".to_owned(),
                 NodeInstance {
+                    node_id: 1,
                     name: "TestNode2".to_owned(),
                     args: vec![TypedValue::Bool(false)],
                 },
             )],
             dynamic_nodes: vec![NodeInstance {
+                node_id: 2,
                 name: "TestNode2".to_owned(),
                 args: vec![TypedValue::Bool(true)],
             }],

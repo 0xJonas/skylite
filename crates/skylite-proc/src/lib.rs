@@ -212,10 +212,9 @@ fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skylit
     )?;
     let (project_stub, name) = extract_asset_file(args)?;
 
-    let (id, path) = project_stub.assets.nodes.find_asset(&name)?;
-    let node = Node::from_file_single(&path, &project_stub.assets.nodes)?;
+    let node = Node::from_file_single(&project_stub.assets.nodes, &name)?;
 
-    let out = generate_node_definition(&node, id, &project_stub.name, &items, &body_raw)?;
+    let out = generate_node_definition(&node, &project_stub.name, &items, &body_raw)?;
 
     #[cfg(debug_assertions)]
     process_debug_output(&out, &items)?;

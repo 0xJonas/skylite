@@ -1,4 +1,5 @@
 pub(crate) mod guile;
+pub(crate) mod node_lists;
 pub(crate) mod nodes;
 pub(crate) mod project;
 pub(crate) mod scheme_util;

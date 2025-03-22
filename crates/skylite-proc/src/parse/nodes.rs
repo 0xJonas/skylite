@@ -41,6 +41,7 @@ impl NodeInstanceStub {
 /// An instantiation of a Node, containing arguments for a Node's parameters.
 #[derive(PartialEq, Debug)]
 pub(crate) struct NodeInstance {
+    pub node_id: usize,
     pub name: String,
     pub args: Vec<TypedValue>,
 }
@@ -51,7 +52,7 @@ impl NodeInstance {
     /// looked up from a cache, or loaded once if it is not found.
     fn from_stub_cached(
         instance_stub: NodeInstanceStub,
-        asset_files: &[PathBuf],
+        node_assets: &AssetGroup,
         stub_cache: &mut HashMap<String, NodeStub>,
     ) -> Result<NodeInstance, SkyliteProcError> {
         let node_stub = if let Some(s) = stub_cache.get(&instance_stub.name) {
@@ -59,18 +60,13 @@ impl NodeInstance {
             s
         } else {
             // NodeStub was not found, create it and add it to the cache.
-            let file = asset_files
-                .iter()
-                .find(|a| a.file_stem().unwrap().to_str().unwrap() == instance_stub.name)
-                .ok_or(SkyliteProcError::DataError(format!(
-                    "Node {} not found.",
-                    instance_stub.name
-                )))?;
-            let stub = NodeStub::from_file_guile(file)?;
+            let (id, file) = node_assets.find_asset(&instance_stub.name)?;
+            let stub = NodeStub::from_file_guile(&file, id)?;
             stub_cache.entry(instance_stub.name.clone()).or_insert(stub)
         };
 
         Ok(NodeInstance {
+            node_id: node_stub.id,
             name: instance_stub.name,
             args: unsafe { parse_argument_list(instance_stub.args_raw, &node_stub.parameters)? },
         })
@@ -92,6 +88,7 @@ impl NodeInstance {
         };
 
         Ok(NodeInstance {
+            node_id: node_stub.id,
             name: instance_stub.name,
             args: unsafe { parse_argument_list(instance_stub.args_raw, &node_stub.parameters)? },
         })
@@ -99,18 +96,30 @@ impl NodeInstance {
 
     pub fn from_scheme(
         definition: SCM,
-        assets: &AssetGroup,
+        nodes: &HashMap<String, Node>,
     ) -> Result<NodeInstance, SkyliteProcError> {
-        let stub = NodeInstanceStub::from_scheme(definition)?;
-        let (_, node_file) = assets.find_asset(&stub.name)?;
-        let node = NodeStub::from_file_guile(&node_file)?;
-        let cache: HashMap<String, NodeStub> = [(stub.name.clone(), node)].into_iter().collect();
-        NodeInstance::from_stub(stub, &cache)
+        let instance_stub = NodeInstanceStub::from_scheme(definition)?;
+
+        let node = if let Some(s) = nodes.get(&instance_stub.name) {
+            s
+        } else {
+            return Err(SkyliteProcError::DataError(format!(
+                "Node not found: {}",
+                instance_stub.name
+            )));
+        };
+
+        Ok(NodeInstance {
+            node_id: node.id,
+            name: instance_stub.name,
+            args: unsafe { parse_argument_list(instance_stub.args_raw, &node.parameters)? },
+        })
     }
 }
 
 /// A partially parsed Node asset.
 struct NodeStub {
+    id: usize,
     name: String,
     parameters: Vec<Variable>,
     properties: Option<SCM>,
@@ -119,7 +128,7 @@ struct NodeStub {
 }
 
 impl NodeStub {
-    fn from_scheme(def: SCM, name: &str) -> Result<NodeStub, SkyliteProcError> {
+    fn from_scheme(def: SCM, name: &str, id: usize) -> Result<NodeStub, SkyliteProcError> {
         unsafe {
             if scm_is_false(scm_pair_p(def)) && !scm_is_null(def) {
                 return Err(SkyliteProcError::DataError(format!(
@@ -143,6 +152,7 @@ impl NodeStub {
             let maybe_dynamic_nodes = assq_str("dynamic-nodes", def)?;
 
             Ok(NodeStub {
+                id,
                 name: name.to_owned(),
                 parameters,
                 properties: maybe_properties,
@@ -152,19 +162,20 @@ impl NodeStub {
         }
     }
 
-    fn from_file_guile(path: &Path) -> Result<NodeStub, SkyliteProcError> {
+    fn from_file_guile(path: &Path, id: usize) -> Result<NodeStub, SkyliteProcError> {
         let definition_raw = read_to_string(path).map_err(|e| {
             SkyliteProcError::OtherError(format!("Error reading project definition: {}", e))
         })?;
         let definition = unsafe { eval_str(&definition_raw)? };
         let name = &path.file_stem().unwrap().to_string_lossy();
-        NodeStub::from_scheme(definition, &name)
+        NodeStub::from_scheme(definition, &name, id)
     }
 }
 
 /// Fully parsed Node asset.
 #[derive(PartialEq, Debug)]
 pub(crate) struct Node {
+    pub id: usize,
     pub name: String,
     pub parameters: Vec<Variable>,
     pub properties: Vec<Variable>,
@@ -222,6 +233,7 @@ impl Node {
         };
 
         Ok(Node {
+            id: stub.id,
             name: stub.name.clone(),
             parameters: stub.parameters.clone(),
             properties,
@@ -232,29 +244,26 @@ impl Node {
 
     /// Creates a single Node from an asset file.
     pub(crate) fn from_file_single(
-        path: &Path,
         node_assets: &AssetGroup,
+        asset_name: &str,
     ) -> Result<Node, SkyliteProcError> {
         // Since we are not actually accessing anything from this signature from C,
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
         extern "C" fn from_file_single_guile(
-            params: &(&Path, &AssetGroup),
+            params: &(&AssetGroup, &str),
         ) -> Result<Node, SkyliteProcError> {
-            let (path, node_assets) = *params;
-            let stub = NodeStub::from_file_guile(path)?;
-            let asset_files: Vec<PathBuf> = node_assets
-                .into_iter()
-                .collect::<Result<Vec<PathBuf>, GlobError>>()
-                .map_err(|err| SkyliteProcError::OtherError(format!("IO Error: {}", err)))?;
+            let (node_assets, asset_name) = *params;
+            let (id, path) = node_assets.find_asset(asset_name)?;
+            let stub = NodeStub::from_file_guile(&path, id)?;
             let mut stub_cache = HashMap::new();
 
             Node::from_stub(&stub, |instance_stub| {
-                NodeInstance::from_stub_cached(instance_stub, &asset_files, &mut stub_cache)
+                NodeInstance::from_stub_cached(instance_stub, node_assets, &mut stub_cache)
             })
         }
 
-        with_guile(from_file_single_guile, &(path, node_assets))
+        with_guile(from_file_single_guile, &(node_assets, asset_name))
     }
 
     /// Creates Nodes for each asset file in the `AssetGroup`.
@@ -262,33 +271,34 @@ impl Node {
     /// than calling `from_file_single` for each asset file.
     pub(crate) fn from_asset_group_all(
         node_assets: &AssetGroup,
-    ) -> Result<Vec<Node>, SkyliteProcError> {
+    ) -> Result<HashMap<String, Node>, SkyliteProcError> {
         // Since we are not actually accessing anything from this signature from C,
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
         extern "C" fn from_asset_group_all_guile(
             node_assets: &AssetGroup,
-        ) -> Result<Vec<Node>, SkyliteProcError> {
+        ) -> Result<HashMap<String, Node>, SkyliteProcError> {
             let stubs = node_assets
                 .into_iter()
-                .map(|path_res| {
+                .enumerate()
+                .map(|(id, path_res)| {
                     let path = path_res.map_err(|err| {
                         SkyliteProcError::OtherError(format!("IO Error: {}", err))
                     })?;
-                    let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
-                    let stub = NodeStub::from_file_guile(&path)?;
-                    Ok((name, stub))
+                    let stub = NodeStub::from_file_guile(&path, id)?;
+                    Ok((stub.name.clone(), stub))
                 })
                 .collect::<Result<HashMap<String, NodeStub>, SkyliteProcError>>()?;
 
             stubs
                 .values()
                 .map(|stub| {
-                    Node::from_stub(stub, |instance_stub| {
+                    let node = Node::from_stub(stub, |instance_stub| {
                         NodeInstance::from_stub(instance_stub, &stubs)
-                    })
+                    })?;
+                    Ok((node.name.clone(), node))
                 })
-                .collect::<Result<Vec<Node>, SkyliteProcError>>()
+                .collect::<Result<HashMap<String, Node>, SkyliteProcError>>()
         }
 
         with_guile(from_asset_group_all_guile, node_assets)
@@ -314,14 +324,11 @@ mod tests {
             .unwrap();
 
         let project_stub = SkyliteProjectStub::from_file(&project_dir.join("project.scm")).unwrap();
-        let node = Node::from_file_single(
-            &project_dir.join("nodes/basic-node-1.scm"),
-            &project_stub.assets.nodes,
-        )
-        .unwrap();
+        let node = Node::from_file_single(&project_stub.assets.nodes, "basic-node-1").unwrap();
         assert_eq!(
             node,
             Node {
+                id: 0,
                 name: "basic-node-1".to_owned(),
                 parameters: vec![Variable {
                     name: "id".to_owned(),
@@ -339,6 +346,7 @@ mod tests {
                     (
                         "sub1".to_owned(),
                         NodeInstance {
+                            node_id: 1,
                             name: "basic-node-2".to_owned(),
                             args: vec![TypedValue::String("sub1".to_owned())]
                         }
@@ -346,6 +354,7 @@ mod tests {
                     (
                         "sub2".to_owned(),
                         NodeInstance {
+                            node_id: 2,
                             name: "z-order-node".to_owned(),
                             args: vec![TypedValue::String("sub2".to_owned()), TypedValue::I16(2)]
                         }
@@ -353,10 +362,12 @@ mod tests {
                 ],
                 dynamic_nodes: vec![
                     NodeInstance {
+                        node_id: 1,
                         name: "basic-node-2".to_owned(),
                         args: vec![TypedValue::String("dynamic1".to_owned())]
                     },
                     NodeInstance {
+                        node_id: 2,
                         name: "z-order-node".to_owned(),
                         args: vec![
                             TypedValue::String("dynamic2".to_owned()),
