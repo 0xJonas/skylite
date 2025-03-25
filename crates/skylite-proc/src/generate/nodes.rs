@@ -27,7 +27,7 @@ fn properties_type_name(node_name: &str) -> Ident {
 fn gen_properties_type(node: &Node, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     let node_param_list = generate_field_list(&node.parameters, TokenStream::new());
     let node_args = generate_argument_list(&node.parameters);
-    let properties_type_name = properties_type_name(&node.name);
+    let properties_type_name = properties_type_name(&node.meta.name);
 
     let asset_properties = generate_field_list(&node.properties, quote!(pub));
     let extra_properties = match get_macro_item("skylite_proc::extra_properties", items)? {
@@ -66,7 +66,7 @@ fn static_nodes_type_name(node_name: &str) -> Ident {
 }
 
 fn gen_static_nodes_type(node: &Node) -> TokenStream {
-    let static_nodes_type_name = static_nodes_type_name(&node.name);
+    let static_nodes_type_name = static_nodes_type_name(&node.meta.name);
     let members = node.static_nodes.iter().map(|(name, instance)| {
         let member_name = format_ident!("{}", change_case(name, IdentCase::LowerSnakeCase));
         let node_type = format_ident!("{}", change_case(&instance.name, IdentCase::UpperCamelCase));
@@ -80,10 +80,10 @@ fn gen_static_nodes_type(node: &Node) -> TokenStream {
 }
 
 fn gen_node_type(node: &Node, project_name: &str) -> TokenStream {
-    let node_name = node_type_name(&node.name);
+    let node_name = node_type_name(&node.meta.name);
     let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
-    let properties_type_name = properties_type_name(&node.name);
-    let static_nodes_type_name = static_nodes_type_name(&node.name);
+    let properties_type_name = properties_type_name(&node.meta.name);
+    let static_nodes_type_name = static_nodes_type_name(&node.meta.name);
     quote! {
         pub struct #node_name {
             pub properties: #properties_type_name,
@@ -94,23 +94,29 @@ fn gen_node_type(node: &Node, project_name: &str) -> TokenStream {
 }
 
 fn gen_node_new_fn(node: &Node, project_name: &str, items: &[Item]) -> TokenStream {
-    let node_name = node_type_name(&node.name);
-    let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
+    let node_name = node_type_name(&node.meta.name);
+    let project_ident = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
     let node_param_list = generate_field_list(&node.parameters, TokenStream::new());
     let node_args = generate_argument_list(&node.parameters);
-    let properties_type_name = properties_type_name(&node.name);
-    let static_nodes_type_name = static_nodes_type_name(&node.name);
+    let properties_type_name = properties_type_name(&node.meta.name);
+    let static_nodes_type_name = static_nodes_type_name(&node.meta.name);
 
     let static_nodes = node.static_nodes.iter().map(|(name, instance)| {
         let member_name = format_ident!("{}", change_case(name, IdentCase::LowerSnakeCase));
         let node_type = format_ident!("{}", change_case(&instance.name, IdentCase::UpperCamelCase));
-        let args = instance.args.iter().map(typed_value_to_rust);
+        let args = instance
+            .args
+            .iter()
+            .map(|arg| typed_value_to_rust(arg, project_name));
         quote!(#member_name: #node_type::new(#(#args),*))
     });
 
     let dynamic_nodes = node.dynamic_nodes.iter().map(|instance| {
         let node_type = format_ident!("{}", change_case(&instance.name, IdentCase::UpperCamelCase));
-        let args = instance.args.iter().map(typed_value_to_rust);
+        let args = instance
+            .args
+            .iter()
+            .map(|arg| typed_value_to_rust(arg, project_name));
         quote!(#node_type::new(#(#args),*))
     });
 
@@ -125,7 +131,7 @@ fn gen_node_new_fn(node: &Node, project_name: &str, items: &[Item]) -> TokenStre
             let static_nodes = #static_nodes_type_name {
                 #(#static_nodes),*
             };
-            let dynamic_nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=#project_name>>> = vec! [
+            let dynamic_nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=#project_ident>>> = vec! [
                 #(Box::new(#dynamic_nodes)),*
             ];
             let mut out = #node_name {
@@ -144,7 +150,7 @@ fn gen_node_impl(
     project_name: &str,
     items: &[Item],
 ) -> Result<TokenStream, SkyliteProcError> {
-    let node_name = node_type_name(&node.name);
+    let node_name = node_type_name(&node.meta.name);
     let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
     let static_node_names: Vec<Ident> = node
         .static_nodes
@@ -261,7 +267,10 @@ pub(crate) fn generate_node_definition(
     items: &[Item],
     body_raw: &TokenStream,
 ) -> Result<TokenStream, SkyliteProcError> {
-    let node_module_name = format_ident!("{}", change_case(&node.name, IdentCase::LowerSnakeCase));
+    let node_module_name = format_ident!(
+        "{}",
+        change_case(&node.meta.name, IdentCase::LowerSnakeCase)
+    );
 
     let imports = items.iter().filter_map(|item| {
         if let Item::Use(import) = item {
@@ -271,8 +280,8 @@ pub(crate) fn generate_node_definition(
         }
     });
 
-    let node_name = node_type_name(&node.name);
-    let node_id = node.id;
+    let node_name = node_type_name(&node.meta.name);
+    let node_id = node.meta.id as usize;
     let properties_type = gen_properties_type(node, items)?;
     let static_nodes_type = gen_static_nodes_type(node);
     let node_type = gen_node_type(node, project_name);
@@ -323,10 +332,13 @@ pub(crate) fn generate_node_definition(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use quote::quote;
     use syn::{parse_quote, File, Item};
 
     use super::gen_node_new_fn;
+    use crate::assets::{AssetMetaData, AssetType};
     use crate::generate::nodes::gen_node_impl;
     use crate::parse::nodes::NodeInstance;
     use crate::parse::values::{Type, TypedValue, Variable};
@@ -334,8 +346,12 @@ mod tests {
 
     fn create_test_node() -> Node {
         Node {
-            id: 0,
-            name: "TestNode".to_owned(),
+            meta: AssetMetaData {
+                atype: AssetType::Node,
+                name: "TestNode".to_owned(),
+                id: 0,
+                path: PathBuf::new(),
+            },
             parameters: vec![
                 Variable {
                     name: "param1".to_owned(),

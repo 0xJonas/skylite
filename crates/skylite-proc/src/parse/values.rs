@@ -7,6 +7,7 @@ use super::scheme_util::{
     cxr, form_to_string, iter_list, parse_bool, parse_f32, parse_f64, parse_int, parse_string,
     parse_symbol,
 };
+use crate::assets::Assets;
 use crate::SkyliteProcError;
 
 /// Type of a Skylite variable or parameter.
@@ -26,6 +27,7 @@ pub(crate) enum Type {
     String,
     Tuple(Vec<Type>),
     Vec(Box<Type>),
+    NodeList,
 }
 
 /// Converts a type name from Scheme to an instance of `Type`.
@@ -57,6 +59,7 @@ pub(crate) unsafe fn parse_type(typename: SCM) -> Result<Type, SkyliteProcError>
             "f64" => Ok(Type::F64),
             "bool" => Ok(Type::Bool),
             "string" => Ok(Type::String),
+            "node-list" => Ok(Type::NodeList),
             _ => Err(SkyliteProcError::DataError(format!(
                 "Unknown data type: {}",
                 type_name
@@ -99,12 +102,14 @@ pub(crate) enum TypedValue {
     String(String),
     Tuple(Vec<TypedValue>),
     Vec(Vec<TypedValue>),
+    NodeList(u32),
 }
 
 /// Constructs a `TypedValue` given a type and a Scheme form for the value.
 pub(crate) unsafe fn parse_typed_value(
     typename: &Type,
     data: SCM,
+    assets: &Assets,
 ) -> Result<TypedValue, SkyliteProcError> {
     match typename {
         Type::U8 => Ok(TypedValue::U8(parse_int(data)?)),
@@ -121,17 +126,30 @@ pub(crate) unsafe fn parse_typed_value(
         Type::String => Ok(TypedValue::String(parse_string(data)?)),
 
         Type::Vec(item_type) => iter_list(data)?
-            .map(|e| parse_typed_value(&item_type, e))
+            .map(|e| parse_typed_value(&item_type, e, assets))
             .collect::<Result<Vec<TypedValue>, SkyliteProcError>>()
             .map(|ok| TypedValue::Vec(ok)),
 
-        Type::Tuple(types) => parse_typed_value_tuple(types, data),
+        Type::Tuple(types) => parse_typed_value_tuple(types, data, assets),
+
+        Type::NodeList => {
+            let name = parse_symbol(data)?;
+            let meta = assets
+                .node_lists
+                .get(&name)
+                .ok_or(SkyliteProcError::DataError(format!(
+                    "Node list not found: {}",
+                    name
+                )))?;
+            Ok(TypedValue::NodeList(meta.id))
+        }
     }
 }
 
 unsafe fn parse_typed_value_tuple(
     types: &[Type],
     values: SCM,
+    assets: &Assets,
 ) -> Result<TypedValue, SkyliteProcError> {
     if types.len() as i64 != scm_to_int64(scm_length(values)) {
         return Err(SkyliteProcError::DataError(format!(
@@ -140,7 +158,7 @@ unsafe fn parse_typed_value_tuple(
     }
 
     Iterator::zip(types.iter(), iter_list(values)?)
-        .map(|(t, v)| parse_typed_value(t, v))
+        .map(|(t, v)| parse_typed_value(t, v, assets))
         .collect::<Result<Vec<TypedValue>, SkyliteProcError>>()
         .map(|ok| TypedValue::Tuple(ok))
 }
@@ -153,7 +171,10 @@ pub(crate) struct Variable {
     pub default: Option<TypedValue>,
 }
 
-pub(crate) unsafe fn parse_variable_definition(def: SCM) -> Result<Variable, SkyliteProcError> {
+pub(crate) unsafe fn parse_variable_definition(
+    def: SCM,
+    assets: &Assets,
+) -> Result<Variable, SkyliteProcError> {
     if scm_is_false(scm_list_p(def)) {
         return Err(SkyliteProcError::DataError(format!(
             "Expected variable definition, found {}",
@@ -198,7 +219,7 @@ pub(crate) unsafe fn parse_variable_definition(def: SCM) -> Result<Variable, Sky
             default: None,
         });
     } else {
-        Some(parse_typed_value(&typename, scm_car(current_pair))?)
+        Some(parse_typed_value(&typename, scm_car(current_pair), assets)?)
     };
 
     Ok(Variable {
@@ -212,6 +233,7 @@ pub(crate) unsafe fn parse_variable_definition(def: SCM) -> Result<Variable, Sky
 pub(crate) unsafe fn parse_argument_list(
     args_raw: SCM,
     parameters: &[Variable],
+    assets: &Assets,
 ) -> Result<Vec<TypedValue>, SkyliteProcError> {
     // Pad with empty values. If there are any empty values left after the argument
     // list has been parsed, replace with the corresponding default values. If
@@ -243,7 +265,7 @@ pub(crate) unsafe fn parse_argument_list(
             };
         next_arg = arg_idx + 1;
 
-        args[arg_idx] = Some(parse_typed_value(&param.typename, value)?);
+        args[arg_idx] = Some(parse_typed_value(&param.typename, value, assets)?);
     }
 
     let mut out = Vec::with_capacity(parameters.len());
@@ -268,46 +290,57 @@ pub(crate) unsafe fn parse_argument_list(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::parse_argument_list;
+    use crate::assets::Assets;
     use crate::parse::guile::{scm_from_bool, scm_from_double, scm_from_int32};
     use crate::parse::scheme_util::{eval_str, with_guile};
     use crate::parse::values::{
         parse_type, parse_typed_value, parse_variable_definition, Type, TypedValue, Variable,
     };
 
+    fn empty_assets() -> Assets {
+        Assets {
+            nodes: HashMap::new(),
+            node_lists: HashMap::new(),
+        }
+    }
+
     extern "C" fn test_typed_value_impl(_: &()) {
+        let assets = empty_assets();
         unsafe {
             let type_name = parse_type(eval_str("'u8").unwrap()).unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, scm_from_int32(5)).unwrap(),
+                parse_typed_value(&type_name, scm_from_int32(5), &assets).unwrap(),
                 TypedValue::U8(5)
             );
-            assert!(parse_typed_value(&type_name, scm_from_int32(300)).is_err());
+            assert!(parse_typed_value(&type_name, scm_from_int32(300), &assets).is_err());
 
             let type_name = parse_type(eval_str("'f64").unwrap()).unwrap();
             let value = scm_from_double(1.0);
             assert_eq!(
-                parse_typed_value(&type_name, value).unwrap(),
+                parse_typed_value(&type_name, value, &assets).unwrap(),
                 TypedValue::F64(1.0)
             );
 
             let type_name = parse_type(eval_str("'string").unwrap()).unwrap();
             let value = eval_str("\"test123\"").unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, value).unwrap(),
+                parse_typed_value(&type_name, value, &assets).unwrap(),
                 TypedValue::String("test123".to_owned())
             );
 
             let type_name = parse_type(eval_str("'bool").unwrap()).unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, scm_from_bool(true)).unwrap(),
+                parse_typed_value(&type_name, scm_from_bool(true), &assets).unwrap(),
                 TypedValue::Bool(true)
             );
 
             let type_name = parse_type(eval_str("'(u8 bool (u16 u16))").unwrap()).unwrap();
             let value = eval_str("'(1 #t (2 3))").unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, value).unwrap(),
+                parse_typed_value(&type_name, value, &assets).unwrap(),
                 TypedValue::Tuple(vec![
                     TypedValue::U8(1),
                     TypedValue::Bool(true),
@@ -318,7 +351,7 @@ mod tests {
             let type_name = parse_type(eval_str("'(vec i16)").unwrap()).unwrap();
             let value = eval_str("'(0 5 10 15 20 25)").unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, value).unwrap(),
+                parse_typed_value(&type_name, value, &assets).unwrap(),
                 TypedValue::Vec(vec![
                     TypedValue::I16(0),
                     TypedValue::I16(5),
@@ -337,10 +370,11 @@ mod tests {
     }
 
     extern "C" fn test_variable_impl(_: &()) {
+        let assets = empty_assets();
         unsafe {
             let form = eval_str("'(test1 u8)").unwrap();
             assert_eq!(
-                parse_variable_definition(form).unwrap(),
+                parse_variable_definition(form, &assets).unwrap(),
                 Variable {
                     name: String::from("test1"),
                     typename: Type::U8,
@@ -351,7 +385,7 @@ mod tests {
 
             let form = eval_str("'(test2 i32 \"Something\")").unwrap();
             assert_eq!(
-                parse_variable_definition(form).unwrap(),
+                parse_variable_definition(form, &assets).unwrap(),
                 Variable {
                     name: String::from("test2"),
                     typename: Type::I32,
@@ -362,7 +396,7 @@ mod tests {
 
             let form = eval_str("'(test3 (vec u8) \"Something else\" (0 1 2 3))").unwrap();
             assert_eq!(
-                parse_variable_definition(form).unwrap(),
+                parse_variable_definition(form, &assets).unwrap(),
                 Variable {
                     name: String::from("test3"),
                     typename: Type::Vec(Box::new(Type::U8)),
@@ -404,34 +438,35 @@ mod tests {
                 default: Some(TypedValue::U8(10)),
             },
         ];
+        let assets = empty_assets();
 
         unsafe {
             let args_raw = eval_str("'(1 2 3)").unwrap();
-            let args = parse_argument_list(args_raw, parameters).unwrap();
+            let args = parse_argument_list(args_raw, parameters, &assets).unwrap();
             assert_eq!(
                 args,
                 vec![TypedValue::U8(1), TypedValue::U8(2), TypedValue::U8(3)]
             );
 
             let args_raw = eval_str("'(1)").unwrap();
-            let args = parse_argument_list(args_raw, parameters).unwrap();
+            let args = parse_argument_list(args_raw, parameters, &assets).unwrap();
             assert_eq!(
                 args,
                 vec![TypedValue::U8(1), TypedValue::U8(5), TypedValue::U8(10)]
             );
 
             let args_raw = eval_str("'((c . 3) (a . 1) (b . 2))").unwrap();
-            let args = parse_argument_list(args_raw, parameters).unwrap();
+            let args = parse_argument_list(args_raw, parameters, &assets).unwrap();
             assert_eq!(
                 args,
                 vec![TypedValue::U8(1), TypedValue::U8(2), TypedValue::U8(3)]
             );
 
             let args_raw = eval_str("'((c . 3))").unwrap();
-            assert!(parse_argument_list(args_raw, parameters).is_err());
+            assert!(parse_argument_list(args_raw, parameters, &assets).is_err());
 
             let args_raw = eval_str("'(1 2 3 4)").unwrap();
-            assert!(parse_argument_list(args_raw, parameters).is_err());
+            assert!(parse_argument_list(args_raw, parameters, &assets).is_err());
         }
     }
 

@@ -2,6 +2,7 @@ use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use syn::{parse_str, Item, ItemFn, Meta, Path};
 
+use super::project::project_ident;
 use crate::parse::util::{change_case, IdentCase};
 use crate::parse::values::{Type, TypedValue, Variable};
 use crate::SkyliteProcError;
@@ -107,6 +108,7 @@ pub(crate) fn skylite_type_to_rust(t: &Type) -> TokenStream {
             let item_type_tokens = skylite_type_to_rust(&item_type);
             quote!(Vec<#item_type_tokens>)
         }
+        Type::NodeList => quote!(::skylite_core::nodes::NodeList),
     }
 }
 
@@ -131,7 +133,7 @@ pub(crate) fn generate_argument_list(args: &[Variable]) -> TokenStream {
     quote!(#(#idents),*)
 }
 
-pub(crate) fn typed_value_to_rust(val: &TypedValue) -> TokenStream {
+pub(crate) fn typed_value_to_rust(val: &TypedValue, project_name: &str) -> TokenStream {
     match val {
         TypedValue::U8(v) => Literal::u8_suffixed(*v).into_token_stream(),
         TypedValue::U16(v) => Literal::u16_suffixed(*v).into_token_stream(),
@@ -155,12 +157,20 @@ pub(crate) fn typed_value_to_rust(val: &TypedValue) -> TokenStream {
             quote!(String::from(#lit))
         }
         TypedValue::Tuple(vec) => {
-            let members = vec.iter().map(typed_value_to_rust);
+            let members = vec
+                .iter()
+                .map(|item| typed_value_to_rust(item, project_name));
             quote!((#(#members),*))
         }
         TypedValue::Vec(vec) => {
-            let members = vec.iter().map(typed_value_to_rust);
+            let members = vec
+                .iter()
+                .map(|item| typed_value_to_rust(item, project_name));
             quote!(vec![#(#members),*])
+        }
+        TypedValue::NodeList(id) => {
+            let project_ident = project_ident(project_name);
+            quote!(crate::#project_ident::load_node_list(#id))
         }
     }
 }

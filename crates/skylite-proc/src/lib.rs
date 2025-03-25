@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use assets::AssetMetaData;
 use generate::nodes::generate_node_definition;
 use generate::util::get_macro_item;
 use parse::guile::SCM;
@@ -14,6 +15,7 @@ use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{parse2, File, Item, LitStr, Token};
 
+mod assets;
 mod ecs;
 mod generate;
 mod parse;
@@ -211,8 +213,16 @@ fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skylit
         SkyliteProcError::DataError(format!("Missing required macro asset_file!")),
     )?;
     let (project_stub, name) = extract_asset_file(args)?;
+    let meta = project_stub
+        .assets
+        .nodes
+        .get(&name)
+        .ok_or(SkyliteProcError::DataError(format!(
+            "Node not found: {}",
+            name
+        )))?;
 
-    let node = Node::from_file_single(&project_stub.assets.nodes, &name)?;
+    let node = Node::from_meta(meta.clone(), &project_stub.assets)?;
 
     let out = generate_node_definition(&node, &project_stub.name, &items, &body_raw)?;
 

@@ -57,7 +57,10 @@ fn generate_project_new_method(
 ) -> TokenStream {
     let project_ident = project_ident(project_name);
     let root_node_name = node_type_name(&root_node.name);
-    let root_node_params = root_node.args.iter().map(typed_value_to_rust);
+    let root_node_params = root_node
+        .args
+        .iter()
+        .map(|arg| typed_value_to_rust(arg, project_name));
     quote! {
         fn new(target: #target_type) -> #project_ident {
             let (w, h) = target.get_screen_size();

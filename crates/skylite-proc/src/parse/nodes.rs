@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 use std::fs::read_to_string;
-use std::path::{Path, PathBuf};
-
-use glob::GlobError;
+use std::path::Path;
 
 use super::guile::{scm_car, scm_cdr, SCM};
-use super::project::AssetGroup;
 use super::scheme_util::{iter_list, parse_symbol};
 use super::values::{parse_argument_list, parse_variable_definition, TypedValue, Variable};
+use crate::assets::{AssetMetaData, Assets};
 use crate::parse::guile::{scm_is_false, scm_is_null, scm_pair_p};
 use crate::parse::scheme_util::{assq_str, eval_str, form_to_string, with_guile};
 use crate::SkyliteProcError;
@@ -41,7 +39,7 @@ impl NodeInstanceStub {
 /// An instantiation of a Node, containing arguments for a Node's parameters.
 #[derive(PartialEq, Debug)]
 pub(crate) struct NodeInstance {
-    pub node_id: usize,
+    pub node_id: u32,
     pub name: String,
     pub args: Vec<TypedValue>,
 }
@@ -52,23 +50,32 @@ impl NodeInstance {
     /// looked up from a cache, or loaded once if it is not found.
     fn from_stub_cached(
         instance_stub: NodeInstanceStub,
-        node_assets: &AssetGroup,
         stub_cache: &mut HashMap<String, NodeStub>,
+        assets: &Assets,
     ) -> Result<NodeInstance, SkyliteProcError> {
         let node_stub = if let Some(s) = stub_cache.get(&instance_stub.name) {
             // NodeStub found in cache
             s
         } else {
             // NodeStub was not found, create it and add it to the cache.
-            let (id, file) = node_assets.find_asset(&instance_stub.name)?;
-            let stub = NodeStub::from_file_guile(&file, id)?;
+            let meta = assets
+                .nodes
+                .get(&instance_stub.name)
+                .ok_or(SkyliteProcError::DataError(format!(
+                    "No node asset with name {} found.",
+                    &instance_stub.name
+                )))?
+                .to_owned();
+            let stub = NodeStub::from_file_guile(&meta.path.clone(), meta, assets)?;
             stub_cache.entry(instance_stub.name.clone()).or_insert(stub)
         };
 
         Ok(NodeInstance {
-            node_id: node_stub.id,
+            node_id: node_stub.meta.id,
             name: instance_stub.name,
-            args: unsafe { parse_argument_list(instance_stub.args_raw, &node_stub.parameters)? },
+            args: unsafe {
+                parse_argument_list(instance_stub.args_raw, &node_stub.parameters, assets)?
+            },
         })
     }
 
@@ -77,6 +84,7 @@ impl NodeInstance {
     fn from_stub(
         instance_stub: NodeInstanceStub,
         node_stubs: &HashMap<String, NodeStub>,
+        assets: &Assets,
     ) -> Result<NodeInstance, SkyliteProcError> {
         let node_stub = if let Some(s) = node_stubs.get(&instance_stub.name) {
             s
@@ -88,15 +96,18 @@ impl NodeInstance {
         };
 
         Ok(NodeInstance {
-            node_id: node_stub.id,
+            node_id: node_stub.meta.id,
             name: instance_stub.name,
-            args: unsafe { parse_argument_list(instance_stub.args_raw, &node_stub.parameters)? },
+            args: unsafe {
+                parse_argument_list(instance_stub.args_raw, &node_stub.parameters, assets)?
+            },
         })
     }
 
     pub fn from_scheme(
         definition: SCM,
         nodes: &HashMap<String, Node>,
+        assets: &Assets,
     ) -> Result<NodeInstance, SkyliteProcError> {
         let instance_stub = NodeInstanceStub::from_scheme(definition)?;
 
@@ -110,17 +121,16 @@ impl NodeInstance {
         };
 
         Ok(NodeInstance {
-            node_id: node.id,
+            node_id: node.meta.id,
             name: instance_stub.name,
-            args: unsafe { parse_argument_list(instance_stub.args_raw, &node.parameters)? },
+            args: unsafe { parse_argument_list(instance_stub.args_raw, &node.parameters, assets)? },
         })
     }
 }
 
 /// A partially parsed Node asset.
 struct NodeStub {
-    id: usize,
-    name: String,
+    meta: AssetMetaData,
     parameters: Vec<Variable>,
     properties: Option<SCM>,
     static_nodes: Option<SCM>,
@@ -128,7 +138,11 @@ struct NodeStub {
 }
 
 impl NodeStub {
-    fn from_scheme(def: SCM, name: &str, id: usize) -> Result<NodeStub, SkyliteProcError> {
+    fn from_scheme(
+        def: SCM,
+        meta: AssetMetaData,
+        assets: &Assets,
+    ) -> Result<NodeStub, SkyliteProcError> {
         unsafe {
             if scm_is_false(scm_pair_p(def)) && !scm_is_null(def) {
                 return Err(SkyliteProcError::DataError(format!(
@@ -141,7 +155,7 @@ impl NodeStub {
 
             let parameters = if let Some(parameters_scm) = maybe_parameters {
                 iter_list(parameters_scm)?
-                    .map(|p| parse_variable_definition(p))
+                    .map(|p| parse_variable_definition(p, assets))
                     .collect::<Result<Vec<Variable>, SkyliteProcError>>()?
             } else {
                 vec![]
@@ -152,8 +166,7 @@ impl NodeStub {
             let maybe_dynamic_nodes = assq_str("dynamic-nodes", def)?;
 
             Ok(NodeStub {
-                id,
-                name: name.to_owned(),
+                meta,
                 parameters,
                 properties: maybe_properties,
                 static_nodes: maybe_static_nodes,
@@ -162,21 +175,23 @@ impl NodeStub {
         }
     }
 
-    fn from_file_guile(path: &Path, id: usize) -> Result<NodeStub, SkyliteProcError> {
+    fn from_file_guile(
+        path: &Path,
+        meta: AssetMetaData,
+        assets: &Assets,
+    ) -> Result<NodeStub, SkyliteProcError> {
         let definition_raw = read_to_string(path).map_err(|e| {
             SkyliteProcError::OtherError(format!("Error reading project definition: {}", e))
         })?;
         let definition = unsafe { eval_str(&definition_raw)? };
-        let name = &path.file_stem().unwrap().to_string_lossy();
-        NodeStub::from_scheme(definition, &name, id)
+        NodeStub::from_scheme(definition, meta, assets)
     }
 }
 
 /// Fully parsed Node asset.
 #[derive(PartialEq, Debug)]
 pub(crate) struct Node {
-    pub id: usize,
-    pub name: String,
+    pub meta: AssetMetaData,
     pub parameters: Vec<Variable>,
     pub properties: Vec<Variable>,
     pub static_nodes: Vec<(String, NodeInstance)>,
@@ -186,12 +201,13 @@ pub(crate) struct Node {
 impl Node {
     fn from_stub<F: FnMut(NodeInstanceStub) -> Result<NodeInstance, SkyliteProcError>>(
         stub: &NodeStub,
+        assets: &Assets,
         mut resolve_instance_fn: F,
     ) -> Result<Node, SkyliteProcError> {
         let properties = if let Some(properties_scm) = stub.properties {
             unsafe {
                 iter_list(properties_scm)?
-                    .map(|p| parse_variable_definition(p))
+                    .map(|p| parse_variable_definition(p, assets))
                     .collect::<Result<Vec<Variable>, SkyliteProcError>>()?
             }
         } else {
@@ -233,8 +249,7 @@ impl Node {
         };
 
         Ok(Node {
-            id: stub.id,
-            name: stub.name.clone(),
+            meta: stub.meta.to_owned(),
             parameters: stub.parameters.clone(),
             properties,
             static_nodes,
@@ -243,65 +258,61 @@ impl Node {
     }
 
     /// Creates a single Node from an asset file.
-    pub(crate) fn from_file_single(
-        node_assets: &AssetGroup,
-        asset_name: &str,
+    pub(crate) fn from_meta(
+        meta: AssetMetaData,
+        assets: &Assets,
     ) -> Result<Node, SkyliteProcError> {
         // Since we are not actually accessing anything from this signature from C,
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
-        extern "C" fn from_file_single_guile(
-            params: &(&AssetGroup, &str),
+        extern "C" fn from_meta_guile(
+            params: &(&AssetMetaData, &Assets),
         ) -> Result<Node, SkyliteProcError> {
-            let (node_assets, asset_name) = *params;
-            let (id, path) = node_assets.find_asset(asset_name)?;
-            let stub = NodeStub::from_file_guile(&path, id)?;
+            let (meta, assets) = *params;
+            let stub = NodeStub::from_file_guile(&meta.path.clone(), meta.to_owned(), assets)?;
             let mut stub_cache = HashMap::new();
 
-            Node::from_stub(&stub, |instance_stub| {
-                NodeInstance::from_stub_cached(instance_stub, node_assets, &mut stub_cache)
+            Node::from_stub(&stub, assets, |instance_stub| {
+                NodeInstance::from_stub_cached(instance_stub, &mut stub_cache, assets)
             })
         }
 
-        with_guile(from_file_single_guile, &(node_assets, asset_name))
+        with_guile(from_meta_guile, &(&meta, assets))
     }
 
     /// Creates Nodes for each asset file in the `AssetGroup`.
     /// If all nodes of a group should be loaded, this is more efficient
     /// than calling `from_file_single` for each asset file.
-    pub(crate) fn from_asset_group_all(
-        node_assets: &AssetGroup,
+    pub(crate) fn parse_all_nodes(
+        assets: &Assets,
     ) -> Result<HashMap<String, Node>, SkyliteProcError> {
         // Since we are not actually accessing anything from this signature from C,
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
         extern "C" fn from_asset_group_all_guile(
-            node_assets: &AssetGroup,
+            assets: &Assets,
         ) -> Result<HashMap<String, Node>, SkyliteProcError> {
-            let stubs = node_assets
-                .into_iter()
-                .enumerate()
-                .map(|(id, path_res)| {
-                    let path = path_res.map_err(|err| {
-                        SkyliteProcError::OtherError(format!("IO Error: {}", err))
-                    })?;
-                    let stub = NodeStub::from_file_guile(&path, id)?;
-                    Ok((stub.name.clone(), stub))
+            let stubs = assets
+                .nodes
+                .iter()
+                .map(|(name, meta)| {
+                    let stub = NodeStub::from_file_guile(&meta.path, meta.clone(), assets)?;
+                    Ok((name.clone(), stub))
                 })
                 .collect::<Result<HashMap<String, NodeStub>, SkyliteProcError>>()?;
 
             stubs
                 .values()
                 .map(|stub| {
-                    let node = Node::from_stub(stub, |instance_stub| {
-                        NodeInstance::from_stub(instance_stub, &stubs)
+                    let node = Node::from_stub(stub, assets, |instance_stub| {
+                        NodeInstance::from_stub(instance_stub, &stubs, assets)
                     })?;
-                    Ok((node.name.clone(), node))
+                    Ok((node.meta.name.clone(), node))
                 })
                 .collect::<Result<HashMap<String, Node>, SkyliteProcError>>()
         }
 
-        with_guile(from_asset_group_all_guile, node_assets)
+        with_guile(from_asset_group_all_guile, assets)
     }
 }
 
@@ -311,6 +322,7 @@ mod tests {
     use std::path::PathBuf;
     use std::str::FromStr;
 
+    use crate::assets::{AssetMetaData, AssetType};
     use crate::parse::nodes::{Node, NodeInstance};
     use crate::parse::values::{Type, TypedValue, Variable};
     use crate::SkyliteProjectStub;
@@ -324,12 +336,17 @@ mod tests {
             .unwrap();
 
         let project_stub = SkyliteProjectStub::from_file(&project_dir.join("project.scm")).unwrap();
-        let node = Node::from_file_single(&project_stub.assets.nodes, "basic-node-1").unwrap();
+        let meta = AssetMetaData {
+            id: 0,
+            atype: AssetType::Node,
+            name: "basic-node-1".to_owned(),
+            path: project_dir.join("nodes/basic-node-1.scm"),
+        };
+        let node = Node::from_meta(meta.clone(), &project_stub.assets).unwrap();
         assert_eq!(
             node,
             Node {
-                id: 0,
-                name: "basic-node-1".to_owned(),
+                meta,
                 parameters: vec![Variable {
                     name: "id".to_owned(),
                     typename: Type::String,
