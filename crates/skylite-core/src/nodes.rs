@@ -63,6 +63,22 @@ pub trait Node: TypeId + InstanceId {
     fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>>;
 }
 
+pub struct NodeList<P: SkyliteProject>(Vec<Box<dyn Node<P = P>>>);
+
+impl<P: SkyliteProject> NodeList<P> {
+    pub fn new(nodes: Vec<Box<dyn Node<P = P>>>) -> NodeList<P> {
+        NodeList(nodes)
+    }
+
+    pub fn get_nodes(&self) -> &Vec<Box<dyn Node<P = P>>> {
+        &self.0
+    }
+
+    pub fn get_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = P>>> {
+        &mut self.0
+    }
+}
+
 macro_rules! system_fn {
     ($name:ident, $($vars:ident : $types:ident),+) => {
         pub fn $name<P: SkyliteProject, $($types: Node<P=P>),+>(node: &mut dyn Node<P=P>, func: &mut impl FnMut($(&mut $types),+)) {

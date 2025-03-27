@@ -2,6 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Ident, Item, ItemFn};
 
+use crate::generate::project::project_ident;
 use crate::generate::util::{
     generate_argument_list, generate_deserialize_statements, generate_field_list,
     get_annotated_function, typed_value_to_rust,
@@ -11,6 +12,27 @@ use crate::{change_case, get_macro_item, IdentCase, SkyliteProcError};
 
 pub fn node_type_name(name: &str) -> Ident {
     format_ident!("{}", change_case(name, IdentCase::UpperCamelCase))
+}
+
+pub(crate) fn generate_decode_node_fn(nodes: &[Node], project_name: &str) -> TokenStream {
+    let project_ident = project_ident(project_name);
+    let match_arms = nodes.iter().map(|n| {
+        let id = n.meta.id;
+        let ident = node_type_name(&n.meta.name);
+        quote!(#id => Box::new(#ident::_private_decode(decoder)))
+    });
+    quote! {
+        pub(crate) fn _private_decode_node(
+            decoder: &mut dyn ::skylite_compress::Decoder
+        ) -> Box<dyn ::skylite_core::nodes::Node<P=#project_ident>> {
+            use ::skylite_core::nodes::Node;
+            let id = ::skylite_core::decode::read_varint(decoder);
+            match id {
+                #(#match_arms,)*
+                _ => unreachable!()
+            }
+        }
+    }
 }
 
 fn get_fn_name(item: &ItemFn) -> &Ident {
@@ -281,7 +303,7 @@ pub(crate) fn generate_node_definition(
     });
 
     let node_name = node_type_name(&node.meta.name);
-    let node_id = node.meta.id as usize;
+    let node_id = node.meta.id;
     let properties_type = gen_properties_type(node, items)?;
     let static_nodes_type = gen_static_nodes_type(node);
     let node_type = gen_node_type(node, project_name);

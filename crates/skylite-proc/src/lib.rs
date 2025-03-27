@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use assets::AssetMetaData;
 use generate::nodes::generate_node_definition;
 use generate::util::get_macro_item;
 use parse::guile::SCM;

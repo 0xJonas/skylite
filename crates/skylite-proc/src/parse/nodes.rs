@@ -39,7 +39,7 @@ impl NodeInstanceStub {
 /// An instantiation of a Node, containing arguments for a Node's parameters.
 #[derive(PartialEq, Debug)]
 pub(crate) struct NodeInstance {
-    pub node_id: u32,
+    pub node_id: usize,
     pub name: String,
     pub args: Vec<TypedValue>,
 }

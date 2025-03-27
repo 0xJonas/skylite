@@ -102,7 +102,7 @@ pub(crate) enum TypedValue {
     String(String),
     Tuple(Vec<TypedValue>),
     Vec(Vec<TypedValue>),
-    NodeList(u32),
+    NodeList(usize),
 }
 
 /// Constructs a `TypedValue` given a type and a Scheme form for the value.

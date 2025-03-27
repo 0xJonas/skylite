@@ -9,8 +9,8 @@ use crate::parse::scheme_util::{eval_str, with_guile};
 use crate::{Node, SkyliteProcError};
 
 pub(crate) struct NodeList {
-    meta: AssetMetaData,
-    content: Vec<NodeInstance>,
+    pub meta: AssetMetaData,
+    pub content: Vec<NodeInstance>,
 }
 
 impl NodeList {

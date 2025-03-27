@@ -82,7 +82,7 @@ skylite_project! {
     use skylite_core::{SkyliteTarget, ProjectControls, DrawContext};
     use skylite_mock::MockTarget;
 
-    use super::BasicNode1;
+    use super::{BasicNode1, BasicNode2, ZOrderNode};
 
     skylite_proc::project_file!("./tests/test-project-1/project.scm");
 

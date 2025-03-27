@@ -2,6 +2,8 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Item, ItemFn};
 
+use super::node_lists::generate_node_lists;
+use super::nodes::generate_decode_node_fn;
 use crate::generate::nodes::node_type_name;
 use crate::generate::util::{get_annotated_function, typed_value_to_rust};
 use crate::parse::nodes::NodeInstance;
@@ -186,6 +188,8 @@ impl SkyliteProject {
     ) -> Result<Vec<Item>, SkyliteProcError> {
         Ok(vec![
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
+            Item::Verbatim(generate_decode_node_fn(&self.nodes, &self.name)),
+            Item::Verbatim(generate_node_lists(&self.node_lists, &self.name)),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
             Item::Verbatim(generate_project_impl(&self.name)),
             Item::Verbatim(generate_project_trait_impl(

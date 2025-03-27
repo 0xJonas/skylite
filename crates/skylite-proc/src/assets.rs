@@ -17,7 +17,7 @@ pub(crate) enum AssetType {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AssetMetaData {
     pub atype: AssetType,
-    pub id: u32,
+    pub id: usize,
     pub name: String,
     pub path: PathBuf,
 }
@@ -55,7 +55,7 @@ fn asset_mapping_from_globs(
             let meta = AssetMetaData {
                 atype: atype.clone(),
                 name: name.clone(),
-                id: i as u32,
+                id: i,
                 path,
             };
             Ok((name, meta))
