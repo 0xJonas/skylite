@@ -2,17 +2,21 @@ use super::{Node, NodeList, TypeId};
 use crate::decode::read_varint;
 use crate::SkyliteProject;
 
-pub struct List<P: SkyliteProject> {
+/// A Node that integrates the contents of a `NodeList` into the Node tree
+/// by adding the nodes to the `SList`'s dynamic nodes.
+pub struct SList<P: SkyliteProject> {
     nodes: NodeList<P>,
 }
 
-impl<P: SkyliteProject> List<P> {
-    pub fn new(nodes: NodeList<P>) -> List<P> {
-        List { nodes }
+impl<P: SkyliteProject> SList<P> {
+
+    /// Creates a new `SList` for adding the given `NodeList` to the node tree.
+    pub fn new(nodes: NodeList<P>) -> SList<P> {
+        SList { nodes }
     }
 }
 
-impl<P: SkyliteProject> TypeId for List<P> {
+impl<P: SkyliteProject> TypeId for SList<P> {
     fn get_id() -> usize
     where
         Self: Sized,
@@ -21,7 +25,7 @@ impl<P: SkyliteProject> TypeId for List<P> {
     }
 }
 
-impl<P: SkyliteProject> Node for List<P> {
+impl<P: SkyliteProject> Node for SList<P> {
     type P = P;
 
     fn _private_decode(decoder: &mut dyn skylite_compress::Decoder) -> Self
@@ -29,7 +33,7 @@ impl<P: SkyliteProject> Node for List<P> {
         Self: Sized,
     {
         let id = read_varint(decoder);
-        List {
+        SList {
             nodes: P::_private_decode_node_list(id),
         }
     }

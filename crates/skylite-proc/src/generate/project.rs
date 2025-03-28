@@ -131,7 +131,8 @@ fn generate_project_trait_impl(
 
     let new_method =
         generate_project_new_method(&project.name, target_type, &init, &project.root_node);
-    let decode_node_fn = generate_decode_node_fn(&project.nodes, &project.name);
+    let decode_node_fn =
+        generate_decode_node_fn(&project.name, &project.nodes, &project.node_lists);
     let decode_node_list_fn = generate_decode_node_list_fn(&project.name);
 
     quote! {
@@ -296,7 +297,6 @@ mod tests {
                     use ::skylite_core::nodes::Node;
                     let id = ::skylite_core::decode::read_varint(decoder);
                     match id {
-                        0usize => Box::new(TestNode::_private_decode(decoder)),
                         _ => unreachable!()
                     }
                 }

@@ -1,31 +1,58 @@
+use std::collections::HashSet;
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Ident, Item, ItemFn};
 
+use super::encode::{CompressionBuffer, Serialize};
+use crate::assets::AssetSource;
 use crate::generate::project::project_ident;
 use crate::generate::util::{
     generate_argument_list, generate_deserialize_statements, generate_field_list,
     get_annotated_function, typed_value_to_rust,
 };
-use crate::parse::nodes::Node;
+use crate::parse::node_lists::NodeList;
+use crate::parse::nodes::{Node, NodeInstance};
 use crate::{change_case, get_macro_item, IdentCase, SkyliteProcError};
 
 pub fn node_type_name(name: &str) -> Ident {
     format_ident!("{}", change_case(name, IdentCase::UpperCamelCase))
 }
 
-pub(crate) fn generate_decode_node_fn(nodes: &[Node], project_name: &str) -> TokenStream {
-    let project_ident = project_ident(project_name);
-    let match_arms = nodes.iter().map(|n| {
-        let id = n.meta.id;
-        let ident = node_type_name(&n.meta.name);
-        quote!(#id => Box::new(#ident::_private_decode(decoder)))
+pub(crate) fn encode_node_instance(instance: &NodeInstance, buffer: &mut CompressionBuffer) {
+    buffer.write_varint(instance.node_id);
+    instance.args.iter().for_each(|v| v.serialize(buffer));
+}
+
+pub(crate) fn generate_decode_node_fn(
+    project_name: &str,
+    nodes: &[Node],
+    node_lists: &[NodeList],
+) -> TokenStream {
+    // Only include nodes which are actually encoded,
+    // i.e. those which appear as NodeInstances in NodeLists or Node properties.
+    // This is so that unused nodes can be removed by LTO.
+
+    let used_nodes = node_lists
+        .iter()
+        .flat_map(|node_list| node_list.content.iter())
+        .map(|i| i.node_id)
+        .collect::<HashSet<usize>>();
+
+    let match_arms = used_nodes.iter().map(|id| {
+        let node = &nodes[*id];
+        let id = node.meta.id;
+        let ident = node_type_name(&node.meta.name);
+        match node.meta.source {
+            AssetSource::BuiltIn(_) => {
+                // Use full path for built-in nodes, since it is known.
+                quote!(#id => Box::new(::skylite_core::nodes::#ident::_private_decode(decoder)))
+            }
+            _ => quote!(#id => Box::new(#ident::_private_decode(decoder))),
+        }
     });
 
-    // TODO: Match arms for built-in nodes.
-    // Only include built-in nodes which are actually encoded,
-    // i.e. those which appear as NodeInstances in Nodes or NodeLists.
-    // This is so that unused built-ins can be removed by LTO.
+    let project_ident = project_ident(project_name);
 
     quote! {
         fn _private_decode_node(
@@ -325,6 +352,7 @@ pub(crate) fn generate_node_definition(
         mod #node_module_name {
             mod gen {
                 #![allow(unused_imports)]
+                use ::skylite_core::prelude::*;
                 #(
                     #imports
                 )*
@@ -348,6 +376,7 @@ pub(crate) fn generate_node_definition(
                 #node_impl
             }
 
+            use ::skylite_core::prelude::*;
             pub use gen::*;
 
             #body_raw

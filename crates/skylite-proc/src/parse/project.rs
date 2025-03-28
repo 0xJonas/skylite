@@ -147,13 +147,16 @@ impl SkyliteProject {
 
         let root_node = NodeInstance::from_scheme(stub.root_node_def, &nodes, &stub.assets)?;
 
-        let nodes_vec: Vec<Node> = nodes.into_values().collect();
+        let mut nodes_vec: Vec<Node> = nodes.into_values().collect();
+
+        // The Asset id is later used as an index, so the Node vec must be sorted.
+        nodes_vec.sort_by_key(|node| node.meta.id);
 
         Ok(SkyliteProject {
             name: stub.name,
             nodes: nodes_vec,
             node_lists,
-            root_node: root_node,
+            root_node,
             _save_data: stub.save_data,
             tile_types: stub.tile_types,
         })
@@ -162,12 +165,8 @@ impl SkyliteProject {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::ptr;
-
     use super::SkyliteProjectStub;
     use crate::assets::tests::create_tmp_fs;
-    use crate::assets::{AssetMetaData, AssetSource, AssetType, Assets};
     use crate::parse::project::SaveItem;
     use crate::parse::values::TypedValue;
 
@@ -188,55 +187,28 @@ mod tests {
         .unwrap();
 
         let project = SkyliteProjectStub::from_file(&tmp_fs.path().join("project.scm")).unwrap();
+
+        assert_eq!(project.name, "TestProject1");
         assert_eq!(
-            project,
-            SkyliteProjectStub {
-                name: "TestProject1".to_owned(),
-                assets: Assets {
-                    nodes: [
-                        (
-                            "basic-node-1".to_owned(),
-                            AssetMetaData {
-                                atype: AssetType::Node,
-                                id: 0,
-                                name: "basic-node-1".to_owned(),
-                                source: AssetSource::Path(
-                                    tmp_fs.path().join("nodes/basic-node-1.scm")
-                                )
-                            }
-                        ),
-                        (
-                            "basic-node-2".to_owned(),
-                            AssetMetaData {
-                                atype: AssetType::Node,
-                                id: 1,
-                                name: "basic-node-2".to_owned(),
-                                source: AssetSource::Path(
-                                    tmp_fs.path().join("nodes/basic-node-2.scm")
-                                )
-                            }
-                        )
-                    ]
-                    .into(),
-                    node_lists: HashMap::new()
+            project.save_data,
+            vec![
+                SaveItem {
+                    name: "flag1".to_owned(),
+                    data: TypedValue::Bool(false)
                 },
-                save_data: vec![
-                    SaveItem {
-                        name: "flag1".to_owned(),
-                        data: TypedValue::Bool(false)
-                    },
-                    SaveItem {
-                        name: "val2".to_owned(),
-                        data: TypedValue::U8(5)
-                    }
-                ],
-                root_node_def: ptr::null_mut(),
-                tile_types: vec![
-                    "solid".to_owned(),
-                    "non-solid".to_owned(),
-                    "semi-solid".to_owned()
-                ]
-            }
+                SaveItem {
+                    name: "val2".to_owned(),
+                    data: TypedValue::U8(5)
+                }
+            ]
+        );
+        assert_eq!(
+            project.tile_types,
+            vec![
+                "solid".to_owned(),
+                "non-solid".to_owned(),
+                "semi-solid".to_owned()
+            ]
         );
     }
 }

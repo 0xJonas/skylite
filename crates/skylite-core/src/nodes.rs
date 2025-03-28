@@ -4,7 +4,7 @@ use crate::{DrawContext, ProjectControls, SkyliteProject};
 
 mod list;
 
-pub use list::List;
+pub use list::SList;
 
 /// **For internal use only.**
 ///
@@ -67,17 +67,21 @@ pub trait Node: TypeId + InstanceId {
     fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>>;
 }
 
+/// A collection of `Nodes`.
 pub struct NodeList<P: SkyliteProject>(Vec<Box<dyn Node<P = P>>>);
 
 impl<P: SkyliteProject> NodeList<P> {
+    /// Creates a new `NodeList`.
     pub fn new(nodes: Vec<Box<dyn Node<P = P>>>) -> NodeList<P> {
         NodeList(nodes)
     }
 
+    /// Returns a shared reference to the `NodeList`'s contents.
     pub fn get_nodes(&self) -> &Vec<Box<dyn Node<P = P>>> {
         &self.0
     }
 
+    /// Returns a mutable reference to the `NodeList`'s contents.
     pub fn get_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = P>>> {
         &mut self.0
     }

@@ -79,10 +79,9 @@ node_definition! {
 }
 
 skylite_project! {
-    use skylite_core::{SkyliteTarget, ProjectControls, DrawContext};
     use skylite_mock::MockTarget;
 
-    use super::{BasicNode1, BasicNode2, ZOrderNode};
+    use super::{BasicNode1, BasicNode2};
 
     skylite_proc::project_file!("./tests/test-project-1/project.scm");
 
@@ -129,7 +128,7 @@ fn test_update_cycle() {
     project.update();
     let target = project._private_target();
     let calls = target.get_calls_by_tag("root");
-    assert_eq!(calls.len(), 8);
+    assert_eq!(calls.len(), 9);
     assert!(match_call(&calls[0], "pre_update"));
     assert!(match_call(&calls[1], "basic-node-1::pre_update"));
     assert!(match_call(&calls[2], "basic-node-2::update"));
@@ -137,7 +136,8 @@ fn test_update_cycle() {
     assert!(match_call(&calls[4], "basic-node-2::update"));
     assert!(match_call(&calls[5], "z-order-node::update"));
     assert!(match_call(&calls[6], "basic-node-1::post_update"));
-    assert!(match_call(&calls[7], "post_update"));
+    assert!(match_call(&calls[7], "basic-node-2::update"));
+    assert!(match_call(&calls[8], "post_update"));
 }
 
 #[test]

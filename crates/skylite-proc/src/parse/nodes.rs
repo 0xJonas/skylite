@@ -34,16 +34,6 @@ impl NodeInstanceStub {
     }
 }
 
-fn get_parameter_list_for_builtin_node(name: &str) -> Result<Vec<Variable>, SkyliteProcError> {
-    match name {
-        "skylite/list" => todo!(),
-        _ => Err(SkyliteProcError::DataError(format!(
-            "Unknown built-in node: {}",
-            name
-        ))),
-    }
-}
-
 /// An instantiation of a Node, containing arguments for a Node's parameters.
 #[derive(PartialEq, Debug)]
 pub(crate) struct NodeInstance {
@@ -82,7 +72,7 @@ impl NodeInstance {
 
         Ok(NodeInstance {
             node_id: node_stub.meta.id,
-            name: instance_stub.name,
+            name: node_stub.meta.name.clone(),
             args: unsafe {
                 parse_argument_list(instance_stub.args_raw, &node_stub.parameters, assets)?
             },
@@ -107,7 +97,7 @@ impl NodeInstance {
 
         Ok(NodeInstance {
             node_id: node_stub.meta.id,
-            name: instance_stub.name,
+            name: node_stub.meta.name.clone(),
             args: unsafe {
                 parse_argument_list(instance_stub.args_raw, &node_stub.parameters, assets)?
             },
@@ -132,7 +122,7 @@ impl NodeInstance {
 
         Ok(NodeInstance {
             node_id: node.meta.id,
-            name: instance_stub.name,
+            name: node.meta.name.clone(),
             args: unsafe { parse_argument_list(instance_stub.args_raw, &node.parameters, assets)? },
         })
     }
@@ -297,12 +287,12 @@ impl Node {
                 .collect::<Result<HashMap<String, NodeStub>, SkyliteProcError>>()?;
 
             stubs
-                .values()
-                .map(|stub| {
+                .iter()
+                .map(|(name, stub)| {
                     let node = Node::from_stub(stub, assets, |instance_stub| {
                         NodeInstance::from_stub(instance_stub, &stubs, assets)
                     })?;
-                    Ok((node.meta.name.clone(), node))
+                    Ok((name.clone(), node))
                 })
                 .collect::<Result<HashMap<String, Node>, SkyliteProcError>>()
         }

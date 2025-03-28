@@ -1,24 +1,19 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::encode::{CompressionBuffer, Serialize};
+use super::encode::CompressionBuffer;
 use crate::change_case;
+use crate::generate::nodes::encode_node_instance;
 use crate::generate::project::project_ident;
 use crate::parse::node_lists::NodeList;
 
 fn encode_node_list(list: &NodeList) -> TokenStream {
-    let data: Vec<u8> = list
-        .content
-        .iter()
-        .flat_map(|instance| {
-            let mut buffer = CompressionBuffer::new();
-            buffer.write_varint(instance.node_id);
-            for arg in &instance.args {
-                arg.serialize(&mut buffer);
-            }
-            buffer.encode()
-        })
-        .collect();
+    let mut buffer = CompressionBuffer::new();
+    buffer.write_varint(list.content.len());
+    for instance in &list.content {
+        encode_node_instance(instance, &mut buffer)
+    }
+    let data = buffer.encode();
 
     quote!(&[#(#data),*])
 }

@@ -3,6 +3,7 @@ use skylite_compress::Decoder;
 
 pub mod decode;
 pub mod nodes;
+pub mod prelude;
 
 /// Defines which functions a backend must provide to work with Skylite.
 pub trait SkyliteTarget {

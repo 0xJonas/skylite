@@ -13,18 +13,19 @@ use crate::SkyliteProcError;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum AssetSource {
     Path(PathBuf),
-}
-
-fn load_file_asset(path: &Path) -> Result<SCM, SkyliteProcError> {
-    let definition_raw = read_to_string(path)
-        .map_err(|e| SkyliteProcError::OtherError(format!("Error reading asset file: {}", e)))?;
-    unsafe { eval_str(&definition_raw) }
+    BuiltIn(String),
 }
 
 impl AssetSource {
     pub(crate) fn load_with_guile(&self) -> Result<SCM, SkyliteProcError> {
         match self {
-            AssetSource::Path(path) => load_file_asset(&path),
+            AssetSource::Path(path) => {
+                let definition_raw = read_to_string(path).map_err(|e| {
+                    SkyliteProcError::OtherError(format!("Error reading asset file: {}", e))
+                })?;
+                unsafe { eval_str(&definition_raw) }
+            }
+            AssetSource::BuiltIn(definition_raw) => unsafe { eval_str(&definition_raw) },
         }
     }
 }
@@ -33,6 +34,7 @@ impl Display for AssetSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AssetSource::Path(p) => p.fmt(f),
+            AssetSource::BuiltIn(_) => write!(f, "<built-in>"),
         }
     }
 }
@@ -131,8 +133,36 @@ pub(crate) struct Assets {
     pub node_lists: HashMap<String, AssetMetaData>,
 }
 
+fn add_builtin_nodes(nodes: &mut HashMap<String, AssetMetaData>) {
+    let next_id = match nodes.values().map(|meta| meta.id).max() {
+        Some(max) => max + 1,
+        None => 0,
+    };
+
+    nodes.insert(
+        "s-list".to_owned(),
+        AssetMetaData {
+            atype: AssetType::Node,
+            id: next_id,
+            name: "s-list".to_owned(),
+            source: AssetSource::BuiltIn(include_str!("../built-ins/s-list.scm").to_owned()),
+        },
+    );
+}
+
 impl Assets {
     pub(crate) fn from_scheme_with_guile(
+        alist: Option<SCM>,
+        base_dir: &Path,
+    ) -> Result<Assets, SkyliteProcError> {
+        let mut out = Self::from_scheme_with_guile_without_builtins(alist, base_dir)?;
+
+        add_builtin_nodes(&mut out.nodes);
+
+        Ok(out)
+    }
+
+    fn from_scheme_with_guile_without_builtins(
         alist: Option<SCM>,
         base_dir: &Path,
     ) -> Result<Assets, SkyliteProcError> {
@@ -185,7 +215,7 @@ pub(crate) mod tests {
                 )
                 .unwrap()
             };
-            Assets::from_scheme_with_guile(Some(def), base_dir).unwrap()
+            Assets::from_scheme_with_guile_without_builtins(Some(def), base_dir).unwrap()
         }
 
         let tmp_fs = create_tmp_fs(&[

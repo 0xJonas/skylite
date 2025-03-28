@@ -119,13 +119,14 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
 
         mod #module_name {
             pub mod gen {
+                use ::skylite_core::prelude::*;
                 use super::*;
-
 
                 #(#project_items)
                 *
             }
 
+            use ::skylite_core::prelude::*;
             use gen::*;
 
             #(#items)
