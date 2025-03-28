@@ -1,13 +1,11 @@
 use std::collections::HashMap;
-use std::fs::read_to_string;
-use std::path::Path;
 
 use super::guile::{scm_car, scm_cdr, SCM};
 use super::scheme_util::{iter_list, parse_symbol};
 use super::values::{parse_argument_list, parse_variable_definition, TypedValue, Variable};
 use crate::assets::{AssetMetaData, Assets};
 use crate::parse::guile::{scm_is_false, scm_is_null, scm_pair_p};
-use crate::parse::scheme_util::{assq_str, eval_str, form_to_string, with_guile};
+use crate::parse::scheme_util::{assq_str, form_to_string, with_guile};
 use crate::SkyliteProcError;
 
 /// A partially parsed NodeInstance.
@@ -36,6 +34,16 @@ impl NodeInstanceStub {
     }
 }
 
+fn get_parameter_list_for_builtin_node(name: &str) -> Result<Vec<Variable>, SkyliteProcError> {
+    match name {
+        "skylite/list" => todo!(),
+        _ => Err(SkyliteProcError::DataError(format!(
+            "Unknown built-in node: {}",
+            name
+        ))),
+    }
+}
+
 /// An instantiation of a Node, containing arguments for a Node's parameters.
 #[derive(PartialEq, Debug)]
 pub(crate) struct NodeInstance {
@@ -53,7 +61,9 @@ impl NodeInstance {
         stub_cache: &mut HashMap<String, NodeStub>,
         assets: &Assets,
     ) -> Result<NodeInstance, SkyliteProcError> {
-        let node_stub = if let Some(s) = stub_cache.get(&instance_stub.name) {
+        let node_stub = if instance_stub.name.starts_with("skylite/") {
+            todo!()
+        } else if let Some(s) = stub_cache.get(&instance_stub.name) {
             // NodeStub found in cache
             s
         } else {
@@ -66,7 +76,7 @@ impl NodeInstance {
                     &instance_stub.name
                 )))?
                 .to_owned();
-            let stub = NodeStub::from_file_guile(&meta.path.clone(), meta, assets)?;
+            let stub = NodeStub::from_meta_guile(meta, assets)?;
             stub_cache.entry(instance_stub.name.clone()).or_insert(stub)
         };
 
@@ -138,11 +148,8 @@ struct NodeStub {
 }
 
 impl NodeStub {
-    fn from_scheme(
-        def: SCM,
-        meta: AssetMetaData,
-        assets: &Assets,
-    ) -> Result<NodeStub, SkyliteProcError> {
+    fn from_meta_guile(meta: AssetMetaData, assets: &Assets) -> Result<NodeStub, SkyliteProcError> {
+        let def = meta.source.load_with_guile()?;
         unsafe {
             if scm_is_false(scm_pair_p(def)) && !scm_is_null(def) {
                 return Err(SkyliteProcError::DataError(format!(
@@ -173,18 +180,6 @@ impl NodeStub {
                 dynamic_nodes: maybe_dynamic_nodes,
             })
         }
-    }
-
-    fn from_file_guile(
-        path: &Path,
-        meta: AssetMetaData,
-        assets: &Assets,
-    ) -> Result<NodeStub, SkyliteProcError> {
-        let definition_raw = read_to_string(path).map_err(|e| {
-            SkyliteProcError::OtherError(format!("Error reading project definition: {}", e))
-        })?;
-        let definition = unsafe { eval_str(&definition_raw)? };
-        NodeStub::from_scheme(definition, meta, assets)
     }
 }
 
@@ -269,7 +264,7 @@ impl Node {
             params: &(&AssetMetaData, &Assets),
         ) -> Result<Node, SkyliteProcError> {
             let (meta, assets) = *params;
-            let stub = NodeStub::from_file_guile(&meta.path.clone(), meta.to_owned(), assets)?;
+            let stub = NodeStub::from_meta_guile(meta.to_owned(), assets)?;
             let mut stub_cache = HashMap::new();
 
             Node::from_stub(&stub, assets, |instance_stub| {
@@ -296,7 +291,7 @@ impl Node {
                 .nodes
                 .iter()
                 .map(|(name, meta)| {
-                    let stub = NodeStub::from_file_guile(&meta.path, meta.clone(), assets)?;
+                    let stub = NodeStub::from_meta_guile(meta.clone(), assets)?;
                     Ok((name.clone(), stub))
                 })
                 .collect::<Result<HashMap<String, NodeStub>, SkyliteProcError>>()?;
@@ -322,7 +317,7 @@ mod tests {
     use std::path::PathBuf;
     use std::str::FromStr;
 
-    use crate::assets::{AssetMetaData, AssetType};
+    use crate::assets::{AssetMetaData, AssetSource, AssetType};
     use crate::parse::nodes::{Node, NodeInstance};
     use crate::parse::values::{Type, TypedValue, Variable};
     use crate::SkyliteProjectStub;
@@ -340,7 +335,7 @@ mod tests {
             id: 0,
             atype: AssetType::Node,
             name: "basic-node-1".to_owned(),
-            path: project_dir.join("nodes/basic-node-1.scm"),
+            source: AssetSource::Path(project_dir.join("nodes/basic-node-1.scm")),
         };
         let node = Node::from_meta(meta.clone(), &project_stub.assets).unwrap();
         assert_eq!(

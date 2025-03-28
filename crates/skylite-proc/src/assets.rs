@@ -1,12 +1,41 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::fmt::{Debug, Display};
+use std::fs::read_to_string;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 
 use glob::{glob, Paths};
 
 use crate::parse::guile::SCM;
-use crate::parse::scheme_util::{assq_str, iter_list, parse_string};
+use crate::parse::scheme_util::{assq_str, eval_str, iter_list, parse_string};
 use crate::SkyliteProcError;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum AssetSource {
+    Path(PathBuf),
+}
+
+fn load_file_asset(path: &Path) -> Result<SCM, SkyliteProcError> {
+    let definition_raw = read_to_string(path)
+        .map_err(|e| SkyliteProcError::OtherError(format!("Error reading asset file: {}", e)))?;
+    unsafe { eval_str(&definition_raw) }
+}
+
+impl AssetSource {
+    pub(crate) fn load_with_guile(&self) -> Result<SCM, SkyliteProcError> {
+        match self {
+            AssetSource::Path(path) => load_file_asset(&path),
+        }
+    }
+}
+
+impl Display for AssetSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AssetSource::Path(p) => p.fmt(f),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum AssetType {
@@ -19,7 +48,7 @@ pub(crate) struct AssetMetaData {
     pub atype: AssetType,
     pub id: usize,
     pub name: String,
-    pub path: PathBuf,
+    pub source: AssetSource,
 }
 
 fn normalize_glob(glob: &str, base_dir: &Path) -> String {
@@ -56,7 +85,7 @@ fn asset_mapping_from_globs(
                 atype: atype.clone(),
                 name: name.clone(),
                 id: i,
-                path,
+                source: AssetSource::Path(path),
             };
             Ok((name, meta))
         });
@@ -69,8 +98,8 @@ fn asset_mapping_from_globs(
             return Err(SkyliteProcError::DataError(format!(
                 "Asset name {} is ambiguous; both {:?} and {:?} match",
                 name,
-                metadata.path,
-                e.get().path
+                metadata.source,
+                e.get().source
             )));
         } else {
             entry.insert_entry(metadata);
@@ -128,7 +157,7 @@ pub(crate) mod tests {
 
     use tempfile::{tempdir, TempDir};
 
-    use crate::assets::{AssetMetaData, AssetType, Assets};
+    use crate::assets::{AssetMetaData, AssetSource, AssetType, Assets};
     use crate::parse::scheme_util::{eval_str, with_guile};
 
     pub(crate) fn create_tmp_fs(files: &[(&str, &str)]) -> Result<TempDir, std::io::Error> {
@@ -177,7 +206,9 @@ pub(crate) mod tests {
                             atype: AssetType::Node,
                             id: 0,
                             name: "test-node-1".to_owned(),
-                            path: tmp_fs.path().join("test-nodes/test-node-1.scm")
+                            source: AssetSource::Path(
+                                tmp_fs.path().join("test-nodes/test-node-1.scm")
+                            )
                         }
                     ),
                     (
@@ -186,7 +217,9 @@ pub(crate) mod tests {
                             atype: AssetType::Node,
                             id: 1,
                             name: "test-node-2".to_owned(),
-                            path: tmp_fs.path().join("test-nodes/test-node-2.scm")
+                            source: AssetSource::Path(
+                                tmp_fs.path().join("test-nodes/test-node-2.scm")
+                            )
                         }
                     )
                 ]
@@ -197,7 +230,7 @@ pub(crate) mod tests {
                         atype: AssetType::NodeList,
                         id: 0,
                         name: "list".to_owned(),
-                        path: tmp_fs.path().join("node-lists/list.scm")
+                        source: AssetSource::Path(tmp_fs.path().join("node-lists/list.scm"))
                     }
                 )]
                 .into()

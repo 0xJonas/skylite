@@ -1,4 +1,5 @@
-use nodes::Node;
+use nodes::{Node, NodeList};
+use skylite_compress::Decoder;
 
 pub mod decode;
 pub mod nodes;
@@ -74,6 +75,11 @@ pub trait SkyliteProject {
     ///
     /// See `ProjectControls::set_queued_root_node`.
     fn set_root_node(&mut self, get_fn: Box<dyn FnOnce() -> Box<dyn Node<P = Self>>>);
+
+    fn _private_decode_node(decoder: &mut dyn Decoder) -> Box<dyn Node<P = Self>>;
+    fn _private_decode_node_list(id: usize) -> NodeList<Self>
+    where
+        Self: Sized;
 }
 
 /// Holds the rendering state.

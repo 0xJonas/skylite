@@ -21,8 +21,14 @@ pub(crate) fn generate_decode_node_fn(nodes: &[Node], project_name: &str) -> Tok
         let ident = node_type_name(&n.meta.name);
         quote!(#id => Box::new(#ident::_private_decode(decoder)))
     });
+
+    // TODO: Match arms for built-in nodes.
+    // Only include built-in nodes which are actually encoded,
+    // i.e. those which appear as NodeInstances in Nodes or NodeLists.
+    // This is so that unused built-ins can be removed by LTO.
+
     quote! {
-        pub(crate) fn _private_decode_node(
+        fn _private_decode_node(
             decoder: &mut dyn ::skylite_compress::Decoder
         ) -> Box<dyn ::skylite_core::nodes::Node<P=#project_ident>> {
             use ::skylite_core::nodes::Node;
@@ -303,7 +309,6 @@ pub(crate) fn generate_node_definition(
     });
 
     let node_name = node_type_name(&node.meta.name);
-    let node_id = node.meta.id;
     let properties_type = gen_properties_type(node, items)?;
     let static_nodes_type = gen_static_nodes_type(node);
     let node_type = gen_node_type(node, project_name);
@@ -336,7 +341,7 @@ pub(crate) fn generate_node_definition(
 
                 impl ::skylite_core::nodes::TypeId for #node_name {
                     fn get_id() -> usize {
-                        #node_id
+                        Self::get_id as usize
                     }
                 }
 
@@ -360,7 +365,7 @@ mod tests {
     use syn::{parse_quote, File, Item};
 
     use super::gen_node_new_fn;
-    use crate::assets::{AssetMetaData, AssetType};
+    use crate::assets::{AssetMetaData, AssetSource, AssetType};
     use crate::generate::nodes::gen_node_impl;
     use crate::parse::nodes::NodeInstance;
     use crate::parse::values::{Type, TypedValue, Variable};
@@ -372,7 +377,7 @@ mod tests {
                 atype: AssetType::Node,
                 name: "TestNode".to_owned(),
                 id: 0,
-                path: PathBuf::new(),
+                source: AssetSource::Path(PathBuf::new()),
             },
             parameters: vec![
                 Variable {

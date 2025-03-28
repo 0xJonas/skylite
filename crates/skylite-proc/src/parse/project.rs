@@ -142,7 +142,7 @@ impl SkyliteProject {
             .assets
             .node_lists
             .values()
-            .map(|meta| NodeList::from_file(meta, &nodes, &stub.assets))
+            .map(|meta| NodeList::from_meta(meta, &nodes, &stub.assets))
             .collect::<Result<Vec<NodeList>, SkyliteProcError>>()?;
 
         let root_node = NodeInstance::from_scheme(stub.root_node_def, &nodes, &stub.assets)?;
@@ -167,7 +167,7 @@ mod tests {
 
     use super::SkyliteProjectStub;
     use crate::assets::tests::create_tmp_fs;
-    use crate::assets::{AssetMetaData, AssetType, Assets};
+    use crate::assets::{AssetMetaData, AssetSource, AssetType, Assets};
     use crate::parse::project::SaveItem;
     use crate::parse::values::TypedValue;
 
@@ -200,7 +200,9 @@ mod tests {
                                 atype: AssetType::Node,
                                 id: 0,
                                 name: "basic-node-1".to_owned(),
-                                path: tmp_fs.path().join("nodes/basic-node-1.scm")
+                                source: AssetSource::Path(
+                                    tmp_fs.path().join("nodes/basic-node-1.scm")
+                                )
                             }
                         ),
                         (
@@ -209,7 +211,9 @@ mod tests {
                                 atype: AssetType::Node,
                                 id: 1,
                                 name: "basic-node-2".to_owned(),
-                                path: tmp_fs.path().join("nodes/basic-node-2.scm")
+                                source: AssetSource::Path(
+                                    tmp_fs.path().join("nodes/basic-node-2.scm")
+                                )
                             }
                         )
                     ]

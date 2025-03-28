@@ -170,7 +170,7 @@ pub(crate) fn typed_value_to_rust(val: &TypedValue, project_name: &str) -> Token
         }
         TypedValue::NodeList(id) => {
             let project_ident = project_ident(project_name);
-            quote!(crate::#project_ident::load_node_list(#id))
+            quote!(#project_ident::_private_decode_node_list(#id))
         }
     }
 }
