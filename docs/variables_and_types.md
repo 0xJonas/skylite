@@ -65,3 +65,13 @@ A tuple is a fixed-length sequence of up to eight elements of arbitrary types. W
 A vector is a list of variable length of entries of a single type. Values to vector type variables in scheme are simply lists which contain only elements of the vectors item type.
 
 Vectors and tuples can be arbitrarily nested.
+
+### Asset types
+
+Certain assets can also be used as parameters or properties, when declaring the property with one of the following types:
+
+| Type      | Scheme      | Rust type                       |
+| --------- | ----------- | ------------------------------- |
+| Node list | `node-list` | `skylite_core::nodes::NodeList` |
+
+When passing a value to a parameter of one of these types, a the name of the asset as a symbol (unquoted string) should be used.

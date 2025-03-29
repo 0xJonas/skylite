@@ -1,11 +1,11 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 
 use super::encode::CompressionBuffer;
-use crate::change_case;
 use crate::generate::nodes::encode_node_instance;
 use crate::generate::project::project_ident;
 use crate::parse::node_lists::NodeList;
+use crate::{change_case, IdentCase};
 
 fn encode_node_list(list: &NodeList) -> TokenStream {
     let mut buffer = CompressionBuffer::new();
@@ -26,6 +26,39 @@ pub(crate) fn generate_node_list_data(node_lists: &[NodeList]) -> TokenStream {
         static NODE_LIST_DATA: [&[u8]; #num_node_lists] = [
             #(#node_list_data),*
         ];
+    }
+}
+
+pub(crate) fn node_list_ids_type(project_name: &str) -> Ident {
+    format_ident!(
+        "{}NodeListIds",
+        change_case(project_name, IdentCase::UpperCamelCase)
+    )
+}
+
+pub(crate) fn generate_node_list_ids(node_lists: &[NodeList], project_name: &str) -> TokenStream {
+    let node_list_ids_type = node_list_ids_type(project_name);
+    let names = node_lists.iter().map(|list| {
+        format_ident!(
+            "{}",
+            change_case(&list.meta.name, IdentCase::UpperCamelCase)
+        )
+    });
+    let ids = node_lists.iter().map(|list| list.meta.id);
+
+    quote! {
+        #[repr(usize)]
+        #[derive(Clone, Copy)]
+        pub enum #node_list_ids_type {
+            #(#names = #ids),*
+        }
+
+        impl ::skylite_core::Ids for #node_list_ids_type {
+            fn get(self) -> usize {
+                self as usize
+            }
+        }
+        impl ::skylite_core::nodes::NodeListIds for #node_list_ids_type {}
     }
 }
 

@@ -2,7 +2,10 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Item, ItemFn};
 
-use crate::generate::node_lists::{generate_decode_node_list_fn, generate_node_list_data};
+use super::node_lists::generate_node_list_ids;
+use crate::generate::node_lists::{
+    generate_decode_node_list_fn, generate_node_list_data, node_list_ids_type,
+};
 use crate::generate::nodes::{generate_decode_node_fn, node_type_name};
 use crate::generate::util::{get_annotated_function, typed_value_to_rust};
 use crate::parse::nodes::NodeInstance;
@@ -103,6 +106,7 @@ fn generate_project_trait_impl(
 
     let project_ident = project_ident(&project.name);
     let tile_type_name = tile_type_name(&project.name);
+    let node_list_ids_type = node_list_ids_type(&project.name);
 
     let init = get_annotated_function(items, "skylite_proc::init")
         .map(get_name)
@@ -139,6 +143,7 @@ fn generate_project_trait_impl(
         impl skylite_core::SkyliteProject for #project_ident {
             type Target = #target_type;
             type TileType = #tile_type_name;
+            type NodeListIds = #node_list_ids_type;
 
             #new_method
 
@@ -195,6 +200,7 @@ impl SkyliteProject {
         Ok(vec![
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
             Item::Verbatim(generate_node_list_data(&self.node_lists)),
+            Item::Verbatim(generate_node_list_ids(&self.node_lists, &self.name)),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
             Item::Verbatim(generate_project_impl(&self.name)),
             Item::Verbatim(generate_project_trait_impl(self, &target_type, items)),
@@ -246,6 +252,7 @@ mod tests {
             impl skylite_core::SkyliteProject for Test1 {
                 type Target = MockTarget;
                 type TileType = Test1Tiles;
+                type NodeListIds = Test1NodeListIds;
 
                 fn new(target: MockTarget) -> Test1 {
                     let (w, h) = target.get_screen_size();

@@ -9,7 +9,6 @@ pub struct SList<P: SkyliteProject> {
 }
 
 impl<P: SkyliteProject> SList<P> {
-
     /// Creates a new `SList` for adding the given `NodeList` to the node tree.
     pub fn new(nodes: NodeList<P>) -> SList<P> {
         SList { nodes }

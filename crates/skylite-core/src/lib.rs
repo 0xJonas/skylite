@@ -1,4 +1,4 @@
-use nodes::{Node, NodeList};
+use nodes::{Node, NodeList, NodeListIds};
 use skylite_compress::Decoder;
 
 pub mod decode;
@@ -51,10 +51,20 @@ pub trait SkyliteTarget {
     fn read_storage(&self, offset: usize, len: usize) -> Vec<u8>;
 }
 
+/// Base trait for types that represent ids for something,
+/// such as asset ids.
+///
+/// Implementations of this trait are usually enums, where
+/// each of the variants is one of the available ids.
+pub trait Ids: Copy {
+    fn get(self) -> usize;
+}
+
 /// The main type for skylite projects.
 pub trait SkyliteProject {
     type Target: SkyliteTarget;
     type TileType: Copy;
+    type NodeListIds: NodeListIds;
 
     /// Creates a new instance of the project with the given target.
     fn new(target: Self::Target) -> Self;

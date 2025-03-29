@@ -1,6 +1,6 @@
 use skylite_compress::Decoder;
 
-use crate::{DrawContext, ProjectControls, SkyliteProject};
+use crate::{DrawContext, Ids, ProjectControls, SkyliteProject};
 
 mod list;
 
@@ -70,10 +70,17 @@ pub trait Node: TypeId + InstanceId {
 /// A collection of `Nodes`.
 pub struct NodeList<P: SkyliteProject>(Vec<Box<dyn Node<P = P>>>);
 
+pub trait NodeListIds: Ids {}
+
 impl<P: SkyliteProject> NodeList<P> {
     /// Creates a new `NodeList`.
     pub fn new(nodes: Vec<Box<dyn Node<P = P>>>) -> NodeList<P> {
         NodeList(nodes)
+    }
+
+    /// Loads the pre-defined node list with the given id.
+    pub fn load(id: P::NodeListIds) -> NodeList<P> {
+        P::_private_decode_node_list(id.get())
     }
 
     /// Returns a shared reference to the `NodeList`'s contents.

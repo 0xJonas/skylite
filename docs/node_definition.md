@@ -17,6 +17,8 @@ node_definition! {
 
 The attributes and macros inside a `node_definition` must be given with their full path name, so the `skylite_proc::`-prefix is always required. Unless otherwise stated, special items are *optional*. Special items are only recognized by their attribute, the actual name of the item is not important. Special function items are required to take certain parameters, based on the attribute used, which are described in the sections for the respective attribute. The body of a `node_definition` is a separate scope, so multiple `node_definitions` in the same module can use the same identifiers for their items.
 
+Within the body of a `node_definition`, the types and functions from `skylite_core::prelude` are automatically imported.
+
 ## Node Type
 
 A `node_definition` generates the main **node type**, as well as types for its fields:
