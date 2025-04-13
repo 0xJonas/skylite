@@ -70,4 +70,10 @@ impl<P: SkyliteProject> Node for SList<P> {
     fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>> {
         self.nodes.get_nodes_mut()
     }
+
+    fn _private_custom_action(&mut self, _id: u16) {}
+
+    fn _private_custom_condition(&self, _id: u16) -> bool {
+        false
+    }
 }

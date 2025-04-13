@@ -4,6 +4,7 @@ use skylite_compress::Decoder;
 pub mod decode;
 pub mod nodes;
 pub mod prelude;
+pub mod sequences;
 
 /// Defines which functions a backend must provide to work with Skylite.
 pub trait SkyliteTarget {
@@ -91,6 +92,9 @@ pub trait SkyliteProject {
     fn _private_decode_node_list(id: usize) -> NodeList<Self>
     where
         Self: Sized;
+
+    fn _private_get_offset(field_id: usize) -> u32;
+    fn _private_get_sequence_data(sequence_id: usize) -> &'static [u8];
 }
 
 /// Holds the rendering state.

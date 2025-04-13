@@ -46,6 +46,9 @@ pub trait Node: TypeId + InstanceId {
 
     fn _private_update(&mut self, controls: &mut ProjectControls<Self::P>);
 
+    fn _private_custom_action(&mut self, id: u16);
+    fn _private_custom_condition(&self, id: u16) -> bool;
+
     fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
 
     fn z_order(&self) -> i32;
@@ -253,6 +256,14 @@ pub mod _private {
         }
 
         fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>> {
+            unimplemented!()
+        }
+
+        fn _private_custom_action(&mut self, _id: u16) {
+            unimplemented!()
+        }
+
+        fn _private_custom_condition(&self, _id: u16) -> bool {
             unimplemented!()
         }
     }

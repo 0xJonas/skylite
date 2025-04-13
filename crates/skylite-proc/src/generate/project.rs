@@ -187,6 +187,14 @@ fn generate_project_trait_impl(
             #decode_node_fn
 
             #decode_node_list_fn
+
+            fn _private_get_offset(field_id: usize) -> u32 {
+                todo!()
+            }
+
+            fn _private_get_sequence_data(sequence_id: usize) -> &'static [u8] {
+                todo!()
+            }
         }
     }
 }
@@ -316,6 +324,14 @@ mod tests {
                         .map(|_| Test1::_private_decode_node(decoder.as_mut()))
                         .collect();
                     ::skylite_core::nodes::NodeList::new(nodes)
+                }
+
+                fn _private_get_offset(field_id: usize) -> u32 {
+                    todo!()
+                }
+
+                fn _private_get_sequence_data(sequence_id: usize) -> &'static [u8] {
+                    todo!()
                 }
             }
         };

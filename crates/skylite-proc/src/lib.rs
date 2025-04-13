@@ -87,6 +87,34 @@ fn get_crate_root_check() -> TokenStream {
     }
 }
 
+// Matching endianness is required because various functions
+// for decoding compressed data assume that they are stored in native
+// endianness. Endianness is configured via a feature for skylite_proc. Because
+// skylite_proc is a proc-macro crate, it does not have access to the final
+// compilation target and thus does not know the correct endianness.
+
+#[cfg(feature = "big-endian")]
+fn get_endianness_check() -> TokenStream {
+    quote! {
+        #[cfg(not(target_endian = "big"))]
+        const _: () = panic!(
+            "Wrong endianness configured for skylite_proc. "
+            "Remove feature \"big-endian\" from skylite_proc dependency or use a big-endian target."
+        );
+    }
+}
+
+#[cfg(not(feature = "big-endian"))]
+fn get_endianness_check() -> TokenStream {
+    quote! {
+        #[cfg(target_endian = "big")]
+        const _: () = panic!(
+            "Wrong endianness configured for skylite_proc. "
+            "Add feature \"big-endian\" to skylite_proc dependency or use a little-endian target."
+        );
+    }
+}
+
 fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
     let items = parse2::<File>(body_raw)
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
@@ -113,9 +141,11 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
     let project_items = project.generate(&target_type_mac, &items)?;
 
     let crate_root_check = get_crate_root_check();
+    let endianness_check = get_endianness_check();
 
     let out = quote! {
         #crate_root_check
+        #endianness_check
 
         mod #module_name {
             pub mod gen {

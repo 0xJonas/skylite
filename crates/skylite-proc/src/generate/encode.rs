@@ -58,7 +58,10 @@ macro_rules! serialize_for_primitive {
     ($typename:ident) => {
         impl Serialize for $typename {
             fn serialize(&self, buffer: &mut CompressionBuffer) {
+                #[cfg(feature = "big-endian")]
                 let bytes = self.to_be_bytes();
+                #[cfg(not(feature = "big-endian"))]
+                let bytes = self.to_le_bytes();
                 bytes.iter().for_each(|b| buffer.write_byte(*b));
             }
         }
@@ -146,6 +149,7 @@ mod tests {
     use super::CompressionBuffer;
     use crate::generate::encode::Serialize;
 
+    #[cfg(not(feature = "big-endian"))]
     #[test]
     fn test_serialize() {
         let mut buffer = CompressionBuffer::new();
@@ -172,10 +176,10 @@ mod tests {
 
         let encoded = buffer.encode();
         let expected = vec![
-            3, 0, 1, 6, 18, 64, 232, 140, 25, 133, 254, 148, 114, 121, 80, 150, 38, 203, 10, 145,
-            49, 75, 159, 24, 235, 88, 128, 173, 107, 26, 106, 176, 79, 150, 183, 6, 57, 242, 188,
-            94, 113, 15, 244, 245, 231, 182, 250, 51, 110, 98, 154, 5, 119, 126, 131, 176, 116,
-            178, 13, 45, 142, 113, 4, 128,
+            3, 0, 1, 6, 18, 64, 232, 123, 221, 72, 188, 42, 225, 101, 167, 1, 99, 5, 16, 136, 132,
+            81, 84, 227, 47, 35, 136, 157, 39, 32, 154, 217, 143, 168, 154, 148, 186, 68, 100, 167,
+            101, 255, 159, 177, 3, 73, 26, 67, 16, 194, 36, 23, 87, 1, 248, 40, 2, 223, 20, 30,
+            222, 82, 209,
         ];
         assert_eq!(encoded, expected);
     }

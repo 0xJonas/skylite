@@ -15,7 +15,7 @@ macro_rules! deserialize_for_primitive {
                 for i in 0..$bytes {
                     data[i] = decoder.decode_u8();
                 }
-                $typename::from_be_bytes(data)
+                $typename::from_ne_bytes(data)
             }
         }
     };
@@ -24,9 +24,11 @@ macro_rules! deserialize_for_primitive {
 deserialize_for_primitive!(u8, 1);
 deserialize_for_primitive!(u16, 2);
 deserialize_for_primitive!(u32, 4);
+deserialize_for_primitive!(u64, 8);
 deserialize_for_primitive!(i8, 1);
 deserialize_for_primitive!(i16, 2);
 deserialize_for_primitive!(i32, 4);
+deserialize_for_primitive!(i64, 8);
 deserialize_for_primitive!(f32, 4);
 deserialize_for_primitive!(f64, 8);
 
@@ -106,14 +108,15 @@ mod tests {
 
     use super::Deserialize;
 
+    #[cfg(target_endian = "little")]
     #[test]
     fn test_deserialize() {
         // Should be the same as the result in the test from encode.rs
         let input = vec![
-            3, 0, 1, 6, 18, 64, 232, 140, 25, 133, 254, 148, 114, 121, 80, 150, 38, 203, 10, 145,
-            49, 75, 159, 24, 235, 88, 128, 173, 107, 26, 106, 176, 79, 150, 183, 6, 57, 242, 188,
-            94, 113, 15, 244, 245, 231, 182, 250, 51, 110, 98, 154, 5, 119, 126, 131, 176, 116,
-            178, 13, 45, 142, 113, 4, 128,
+            3, 0, 1, 6, 18, 64, 232, 123, 221, 72, 188, 42, 225, 101, 167, 1, 99, 5, 16, 136, 132,
+            81, 84, 227, 47, 35, 136, 157, 39, 32, 154, 217, 143, 168, 154, 148, 186, 68, 100, 167,
+            101, 255, 159, 177, 3, 73, 26, 67, 16, 194, 36, 23, 87, 1, 248, 40, 2, 223, 20, 30,
+            222, 82, 209,
         ];
         let mut decoder = make_decoder(&input);
 
