@@ -283,14 +283,6 @@ fn gen_node_impl(
                 #render_call;
             }
 
-            fn _private_custom_action(&mut self, id: u16) {
-                todo!()
-            }
-
-            fn _private_custom_condition(&self, id: u16) -> bool {
-                todo!()
-            }
-
             fn z_order(&self) -> i32 {
                 #z_order_call
             }
@@ -536,14 +528,6 @@ mod tests {
 
                 fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
                     super::render(self, ctx);
-                }
-
-                fn _private_custom_action(&mut self, id: u16) {
-                    todo!()
-                }
-
-                fn _private_custom_condition(&self, id: u16) -> bool {
-                    todo!()
                 }
 
                 fn z_order(&self) -> i32 {

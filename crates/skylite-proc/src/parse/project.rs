@@ -3,6 +3,7 @@ use std::path::Path;
 
 use super::node_lists::NodeList;
 use super::nodes::{Node, NodeInstance};
+use super::sequences::{self, Sequence};
 use super::values::{parse_type, parse_typed_value, TypedValue};
 use crate::assets::Assets;
 use crate::parse::guile::SCM;
@@ -130,6 +131,7 @@ pub(crate) struct SkyliteProject {
     pub name: String,
     pub nodes: Vec<Node>,
     pub node_lists: Vec<NodeList>,
+    pub sequences: Vec<Sequence>,
     pub root_node: NodeInstance,
     pub _save_data: Vec<SaveItem>,
     pub tile_types: Vec<String>,
@@ -149,6 +151,13 @@ impl SkyliteProject {
 
         let mut nodes_vec: Vec<Node> = nodes.into_values().collect();
 
+        let sequences = stub
+            .assets
+            .sequences
+            .values()
+            .map(|meta| Sequence::from_meta(meta, &nodes_vec, &stub.assets))
+            .collect::<Result<Vec<Sequence>, SkyliteProcError>>()?;
+
         // The Asset id is later used as an index, so the Node vec must be sorted.
         nodes_vec.sort_by_key(|node| node.meta.id);
 
@@ -156,6 +165,7 @@ impl SkyliteProject {
             name: stub.name,
             nodes: nodes_vec,
             node_lists,
+            sequences,
             root_node,
             _save_data: stub.save_data,
             tile_types: stub.tile_types,

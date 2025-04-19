@@ -43,6 +43,7 @@ impl Display for AssetSource {
 pub(crate) enum AssetType {
     Node,
     NodeList,
+    Sequence,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,7 +62,7 @@ fn normalize_glob(glob: &str, base_dir: &Path) -> String {
     }
 }
 
-fn asset_mapping_from_globs(
+fn load_metas_from_raw_globs(
     atype: AssetType,
     globs_raw: Vec<String>,
     base_dir: &Path,
@@ -131,6 +132,7 @@ fn extract_raw_globs(
 pub(crate) struct Assets {
     pub nodes: HashMap<String, AssetMetaData>,
     pub node_lists: HashMap<String, AssetMetaData>,
+    pub sequences: HashMap<String, AssetMetaData>,
 }
 
 fn add_builtin_nodes(nodes: &mut HashMap<String, AssetMetaData>) {
@@ -168,12 +170,18 @@ impl Assets {
     ) -> Result<Assets, SkyliteProcError> {
         let nodes_globs_raw = extract_raw_globs(alist, "nodes", "nodes/*.scm")?;
         let node_lists_globs_raw = extract_raw_globs(alist, "node-lists", "node-lists/*.scm")?;
+        let sequences_globs_raw = extract_raw_globs(alist, "sequences", "sequences/*.scm")?;
 
         Ok(Assets {
-            nodes: asset_mapping_from_globs(AssetType::Node, nodes_globs_raw, base_dir)?,
-            node_lists: asset_mapping_from_globs(
+            nodes: load_metas_from_raw_globs(AssetType::Node, nodes_globs_raw, base_dir)?,
+            node_lists: load_metas_from_raw_globs(
                 AssetType::NodeList,
                 node_lists_globs_raw,
+                base_dir,
+            )?,
+            sequences: load_metas_from_raw_globs(
+                AssetType::Sequence,
+                sequences_globs_raw,
                 base_dir,
             )?,
         })
@@ -182,6 +190,7 @@ impl Assets {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::collections::HashMap;
     use std::fs::create_dir_all;
     use std::path::Path;
 
@@ -263,7 +272,8 @@ pub(crate) mod tests {
                         source: AssetSource::Path(tmp_fs.path().join("node-lists/list.scm"))
                     }
                 )]
-                .into()
+                .into(),
+                sequences: HashMap::new()
             }
         )
     }

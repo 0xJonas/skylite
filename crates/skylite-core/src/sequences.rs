@@ -10,8 +10,8 @@ use crate::SkyliteProject;
 enum Comparison {
     Equals,
     NotEquals,
-    LessThen,
-    GreaterThen,
+    LessThan,
+    GreaterThan,
     LessEquals,
     GreaterEquals,
 }
@@ -21,8 +21,8 @@ impl Comparison {
         match u8::deserialize(decoder) {
             0 => Comparison::Equals,
             1 => Comparison::NotEquals,
-            2 => Comparison::LessThen,
-            3 => Comparison::GreaterThen,
+            2 => Comparison::LessThan,
+            3 => Comparison::GreaterThan,
             4 => Comparison::LessEquals,
             5 => Comparison::GreaterEquals,
             _ => unreachable!(),
@@ -34,8 +34,8 @@ fn test_comparison<T: PartialEq + PartialOrd>(lhs: T, comparison: Comparison, rh
     match comparison {
         Comparison::Equals => lhs == rhs,
         Comparison::NotEquals => lhs != rhs,
-        Comparison::LessThen => lhs < rhs,
-        Comparison::GreaterThen => lhs > rhs,
+        Comparison::LessThan => lhs < rhs,
+        Comparison::GreaterThan => lhs > rhs,
         Comparison::LessEquals => lhs <= rhs,
         Comparison::GreaterEquals => lhs >= rhs,
     }
@@ -224,57 +224,41 @@ impl Op {
     }
 }
 
-/// Represents the set of information needed to load a `Sequence`.
-///
-/// This trait is implemented by zero-sized types, which can be passed
-/// to `Sequence::load()`, to load the actual `Sequence`.
-pub trait SequenceHandle {
-    type P: SkyliteProject;
-    type Target: Node<P = Self::P>;
-    const ID: usize;
-}
-
-/// A Sequence is a series of commands that can be run on a Node, such as
-/// changing fields or running custom code.
-///
-/// Sequences are always specific to the Node type defined in the Sequence's
-/// asset file.
-pub struct Sequence<P: SkyliteProject, Target: Node<P = P>> {
+pub struct GenSequence<P: SkyliteProject> {
     script: Box<[Op]>,
     data: Box<[u8]>,
-    _target: PhantomData<Target>,
+    _project: PhantomData<P>,
 }
 
-fn gen_decode_sequence<P: SkyliteProject>(id: usize) -> (Box<[Op]>, Box<[u8]>) {
-    let compressed = <P as SkyliteProject>::_private_get_sequence_data(id);
-    let mut decoder = make_decoder(compressed);
+impl<P: SkyliteProject> GenSequence<P> {
+    pub fn _private_decode_from_id(id: usize) -> GenSequence<P> {
+        let compressed = <P as SkyliteProject>::_private_get_sequence_data(id);
+        let mut decoder = make_decoder(compressed);
 
-    let sequence_len = read_varint(decoder.as_mut());
-    let mut script = Vec::with_capacity(sequence_len);
-    (0..sequence_len).for_each(|_| script.push(Op::decode::<P>(decoder.as_mut())));
+        let sequence_len = read_varint(decoder.as_mut());
+        let mut script = Vec::with_capacity(sequence_len);
+        (0..sequence_len).for_each(|_| script.push(Op::decode::<P>(decoder.as_mut())));
 
-    let data_len = read_varint(decoder.as_mut());
-    let mut data = Vec::with_capacity(sequence_len);
-    (0..data_len).for_each(|_| data.push(u8::deserialize(decoder.as_mut())));
+        let data_len = read_varint(decoder.as_mut());
+        let mut data = Vec::with_capacity(sequence_len);
+        (0..data_len).for_each(|_| data.push(u8::deserialize(decoder.as_mut())));
 
-    (script.into_boxed_slice(), data.into_boxed_slice())
-}
-
-impl<P: SkyliteProject, Target: Node<P = P>> Sequence<P, Target> {
-    pub fn _private_decode_from_id(id: usize) -> Sequence<P, Target> {
-        let (script, data) = gen_decode_sequence::<P>(id);
-        Sequence {
-            script,
-            data,
-            _target: PhantomData,
+        GenSequence {
+            script: script.into_boxed_slice(),
+            data: data.into_boxed_slice(),
+            _project: PhantomData,
         }
     }
+}
 
-    /// Load a `Sequence` from a `SequenceHandle`. This will return a `Sequence`
-    /// which is bound to its intended target Node type.
-    pub fn load<Handle: SequenceHandle>(_handle: Handle) -> Sequence<Handle::P, Handle::Target> {
-        Sequence::_private_decode_from_id(Handle::ID)
-    }
+pub trait Sequence {
+    type P: SkyliteProject;
+    type Target: Node<P = Self::P>;
+
+    fn load() -> Self;
+    fn _private_run_custom(node: &mut Self::Target, id: u16);
+    fn _private_branch_custom(node: &Self::Target, id: u16) -> bool;
+    fn _private_get_generic_sequence(&self) -> &GenSequence<Self::P>;
 }
 
 fn read_string(data: &[u8], mut offset: u32) -> String {
@@ -354,15 +338,28 @@ struct GenSequencer<'sequence, P: SkyliteProject> {
 }
 
 impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
-    fn new<'s>(script: &'s [Op], data: &'s [u8]) -> GenSequencer<'s, P> {
+    fn new<'s>(gen_sequence: &'s GenSequence<P>) -> GenSequencer<'s, P> {
         GenSequencer {
-            script,
-            data,
+            script: &gen_sequence.script,
+            data: &gen_sequence.data,
             position: 0,
             call_stack: Vec::new(),
             wait_timer: 0,
             offset: 0,
             _project: PhantomData,
+        }
+    }
+
+    fn fetch_next(&mut self) -> Option<Op> {
+        if self.wait_timer > 0 {
+            self.wait_timer -= 1;
+            None
+        } else if self.position >= self.script.len() {
+            None
+        } else {
+            let op = self.script[self.position].clone();
+            self.position += 1;
+            Some(op)
         }
     }
 
@@ -496,24 +493,8 @@ impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
                 }
                 self.offset = 0;
             }
-            Op::RunCustom { id } => node._private_custom_action(id),
-            Op::BranchCustom { id, target } => {
-                if node._private_custom_condition(id) {
-                    self.position = target as usize;
-                }
-            }
-        }
-    }
-
-    fn update(&mut self, node: &mut dyn Node<P = P>) {
-        if self.wait_timer > 0 {
-            self.wait_timer -= 1;
-        }
-
-        while self.position < self.script.len() && self.wait_timer == 0 {
-            let op = self.script[self.position].clone();
-            self.position += 1;
-            self.run_single_op(op, node);
+            Op::RunCustom { .. } => unreachable!(),
+            Op::BranchCustom { .. } => unreachable!(),
         }
     }
 }
@@ -525,23 +506,31 @@ impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
 /// function. This function should be called exactly once during a Node's update
 /// cycle, either in the `pre_update` or the `post_update`. The sequencer will
 /// make the modifications to the Node that are defined in the sequence.
-pub struct Sequencer<'sequence, P: SkyliteProject, Target: Node<P = P>> {
-    gen_sequencer: GenSequencer<'sequence, P>,
-    _target: PhantomData<Target>,
+pub struct Sequencer<'sequence, S: Sequence> {
+    gen_sequencer: GenSequencer<'sequence, S::P>,
 }
 
-impl<'sequence, P: SkyliteProject, Target: Node<P = P>> Sequencer<'sequence, P, Target> {
+impl<'sequence, S: Sequence> Sequencer<'sequence, S> {
     /// Creates a new `Sequencer` for a `Sequence`.
-    pub fn new<'s>(sequence: &'s Sequence<P, Target>) -> Sequencer<'s, P, Target> {
+    pub fn new<'s>(sequence: &'s mut S) -> Sequencer<'s, S> {
         Sequencer {
-            gen_sequencer: GenSequencer::new(&sequence.script, &sequence.data),
-            _target: PhantomData,
+            gen_sequencer: GenSequencer::new(sequence._private_get_generic_sequence()),
         }
     }
 
     /// Updates the `Sequencer`. This will run the commands from the Sequence
     /// until either a 'wait' command or the end of the Sequence is reached.
-    pub fn update(&mut self, node: &mut Target) {
-        self.gen_sequencer.update(node);
+    pub fn update(&mut self, node: &mut S::Target) {
+        while let Some(op) = self.gen_sequencer.fetch_next() {
+            match op {
+                Op::RunCustom { id } => <S as Sequence>::_private_run_custom(node, id),
+                Op::BranchCustom { id, target } => {
+                    if <S as Sequence>::_private_branch_custom(node, id) {
+                        self.gen_sequencer.position = target as usize;
+                    }
+                }
+                _ => self.gen_sequencer.run_single_op(op, node),
+            }
+        }
     }
 }

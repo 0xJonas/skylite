@@ -304,6 +304,7 @@ mod tests {
         Assets {
             nodes: HashMap::new(),
             node_lists: HashMap::new(),
+            sequences: HashMap::new(),
         }
     }
 
