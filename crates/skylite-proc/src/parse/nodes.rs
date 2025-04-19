@@ -20,10 +20,10 @@ impl NodeInstanceStub {
     fn from_scheme(def: SCM) -> Result<NodeInstanceStub, SkyliteProcError> {
         unsafe {
             if scm_is_false(scm_pair_p(def)) {
-                return Err(SkyliteProcError::DataError(format!(
+                return Err(data_err!(
                     "Expected node instance, found {}",
                     form_to_string(def)
-                )));
+                ));
             } else {
                 Ok(NodeInstanceStub {
                     name: parse_symbol(scm_car(def))?,
@@ -61,10 +61,10 @@ impl NodeInstance {
             let meta = assets
                 .nodes
                 .get(&instance_stub.name)
-                .ok_or(SkyliteProcError::DataError(format!(
+                .ok_or(data_err!(
                     "No node asset with name {} found.",
                     &instance_stub.name
-                )))?
+                ))?
                 .to_owned();
             let stub = NodeStub::from_meta_guile(meta, assets)?;
             stub_cache.entry(instance_stub.name.clone()).or_insert(stub)
@@ -89,10 +89,7 @@ impl NodeInstance {
         let node_stub = if let Some(s) = node_stubs.get(&instance_stub.name) {
             s
         } else {
-            return Err(SkyliteProcError::DataError(format!(
-                "Node not found: {}",
-                instance_stub.name
-            )));
+            return Err(data_err!("Node not found: {}", instance_stub.name));
         };
 
         Ok(NodeInstance {
@@ -114,10 +111,7 @@ impl NodeInstance {
         let node = if let Some(s) = nodes.get(&instance_stub.name) {
             s
         } else {
-            return Err(SkyliteProcError::DataError(format!(
-                "Node not found: {}",
-                instance_stub.name
-            )));
+            return Err(data_err!("Node not found: {}", instance_stub.name));
         };
 
         Ok(NodeInstance {
@@ -142,10 +136,10 @@ impl NodeStub {
         let def = meta.source.load_with_guile()?;
         unsafe {
             if scm_is_false(scm_pair_p(def)) && !scm_is_null(def) {
-                return Err(SkyliteProcError::DataError(format!(
+                return Err(data_err!(
                     "Expected list for node, got {}",
                     form_to_string(def)
-                )));
+                ));
             }
 
             let maybe_parameters = assq_str("parameters", def)?;
@@ -204,10 +198,10 @@ impl Node {
                 iter_list(static_nodes_scm)?
                     .map(|item| {
                         if scm_is_false(scm_pair_p(item)) {
-                            return Err(SkyliteProcError::DataError(format!(
+                            return Err(data_err!(
                                 "Expected (name . instance) pair for static node, got {}",
                                 form_to_string(item)
-                            )));
+                            ));
                         }
 
                         let name = parse_symbol(scm_car(item))?;

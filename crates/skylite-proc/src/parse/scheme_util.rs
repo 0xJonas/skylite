@@ -85,10 +85,7 @@ pub fn form_to_string(obj: SCM) -> String {
 /// Returns the value associated with `key` in `alist`.
 pub(crate) unsafe fn assq_str(key: &str, alist: SCM) -> Result<Option<SCM>, SkyliteProcError> {
     if scm_is_false(scm_pair_p(alist)) {
-        return Err(SkyliteProcError::DataError(format!(
-            "Not an alist: {}",
-            form_to_string(alist)
-        )));
+        return Err(data_err!("Not an alist: {}", form_to_string(alist)));
     }
 
     let key_cstr = CString::new(Into::<Vec<u8>>::into(key.as_bytes().to_owned())).unwrap();
@@ -108,24 +105,21 @@ where
     <T as TryFrom<i64>>::Error: Display,
 {
     if scm_is_integer(obj) == 0 {
-        return Err(SkyliteProcError::DataError(format!(
-            "Expected integer, found {}",
-            form_to_string(obj)
-        )));
+        return Err(data_err!("Expected integer, found {}", form_to_string(obj)));
     }
     match T::try_from(scm_to_int64(obj)) {
         Ok(val) => Ok(val),
-        Err(err) => Err(SkyliteProcError::DataError(format!("{}", err))),
+        Err(err) => Err(SkyliteProcError::DataError(err.to_string())),
     }
 }
 
 /// Converts a Scheme flonum to an `f64`.
 pub(crate) unsafe fn parse_f64(obj: SCM) -> Result<f64, SkyliteProcError> {
     if scm_is_real(obj) == 0 {
-        return Err(SkyliteProcError::DataError(format!(
+        return Err(data_err!(
             "Expected floating point numer, found {}",
             form_to_string(obj)
-        )));
+        ));
     }
     Ok(scm_to_double(obj))
 }
@@ -138,10 +132,7 @@ pub(crate) unsafe fn parse_f32(obj: SCM) -> Result<f32, SkyliteProcError> {
 /// Converts a Scheme boolean to a Rust `bool`.
 pub(crate) unsafe fn parse_bool(obj: SCM) -> Result<bool, SkyliteProcError> {
     if scm_is_bool(obj) == 0 {
-        return Err(SkyliteProcError::DataError(format!(
-            "Expected boolean, found {}",
-            form_to_string(obj)
-        )));
+        return Err(data_err!("Expected boolean, found {}", form_to_string(obj)));
     }
 
     Ok(scm_is_true(obj))
@@ -150,10 +141,7 @@ pub(crate) unsafe fn parse_bool(obj: SCM) -> Result<bool, SkyliteProcError> {
 /// Converts a Scheme string to a Rust `String`.
 pub(crate) unsafe fn parse_string(obj: SCM) -> Result<String, SkyliteProcError> {
     if scm_is_false(scm_string_p(obj)) {
-        return Err(SkyliteProcError::DataError(format!(
-            "Expected string, found {}",
-            form_to_string(obj)
-        )));
+        return Err(data_err!("Expected string, found {}", form_to_string(obj)));
     }
 
     let raw_string = scm_to_utf8_stringn(obj, null_mut());
@@ -165,10 +153,7 @@ pub(crate) unsafe fn parse_string(obj: SCM) -> Result<String, SkyliteProcError> 
 /// Converts a Scheme symbol to a Rust `String`.
 pub(crate) unsafe fn parse_symbol(obj: SCM) -> Result<String, SkyliteProcError> {
     if !scm_is_symbol(obj) {
-        return Err(SkyliteProcError::DataError(format!(
-            "Expected symbol, found {}",
-            form_to_string(obj)
-        )));
+        return Err(data_err!("Expected symbol, found {}", form_to_string(obj)));
     }
 
     Ok(parse_string(scm_symbol_to_string(obj)).unwrap())
@@ -198,10 +183,7 @@ impl Iterator for SchemeListIterator {
 /// Returns an `Err` if the input is not a list.
 pub(crate) unsafe fn iter_list(list: SCM) -> Result<SchemeListIterator, SkyliteProcError> {
     if scm_is_false(scm_list_p(list)) {
-        Err(SkyliteProcError::DataError(format!(
-            "Not a list: {}",
-            form_to_string(list)
-        )))
+        Err(data_err!("Not a list: {}", form_to_string(list)))
     } else {
         Ok(SchemeListIterator { cursor: list })
     }
@@ -219,10 +201,10 @@ pub(crate) unsafe fn cxr(pair: SCM, ops: &[CXROp]) -> Result<SCM, SkyliteProcErr
     let mut cursor = pair;
     for op in ops {
         if scm_to_bool(scm_pair_p(cursor)) == 0 {
-            return Err(SkyliteProcError::DataError(format!(
+            return Err(data_err!(
                 "Not a pair, cannot do car/cdr: {}",
                 form_to_string(cursor)
-            )));
+            ));
         }
         match op {
             CAR => cursor = scm_car(cursor),

@@ -14,6 +14,18 @@ use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{parse2, File, Item, LitStr, Token};
 
+macro_rules! syntax_err {
+    ($msg:literal $(,$args:expr)*) => {
+        SkyliteProcError::SyntaxError(format!($msg, $($args),*))
+    };
+}
+
+macro_rules! data_err {
+    ($msg:literal $(,$args:expr)*) => {
+        SkyliteProcError::DataError(format!($msg, $($args),*))
+    };
+}
+
 mod assets;
 mod ecs;
 mod generate;
@@ -52,13 +64,11 @@ impl Into<TokenStream> for SkyliteProcError {
 fn parse_project_file(tokens: &TokenStream) -> Result<PathBuf, SkyliteProcError> {
     let path_raw = parse2::<LitStr>(tokens.clone())
         .map(|lit| lit.value())
-        .map_err(|err| {
-            SkyliteProcError::SyntaxError(format!("Illegal arguments to project_file!: {}", err))
-        })?;
+        .map_err(|err| syntax_err!("Illegal arguments to project_file!: {}", err))?;
 
     let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
-    let relative_path = PathBuf::from_str(&path_raw)
-        .map_err(|err| SkyliteProcError::SyntaxError(format!("Invalid project path: {}", err)))?;
+    let relative_path =
+        PathBuf::from_str(&path_raw).map_err(|err| syntax_err!("Invalid project path: {err}"))?;
     Ok(base_dir.join(relative_path))
 }
 
@@ -121,15 +131,13 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
         .items;
 
     let project_file_mac = get_macro_item("skylite_proc::project_file", &items)?.ok_or(
-        SkyliteProcError::DataError(format!(
-            "Missing required macro skylite_proc::project_file!"
-        )),
+        data_err!("Missing required macro skylite_proc::project_file!"),
     )?;
     let path = parse_project_file(project_file_mac)?;
 
-    let target_type_mac = get_macro_item("skylite_proc::target_type", &items)?.ok_or(
-        SkyliteProcError::DataError(format!("Missing required macro skylite_proc::target_type!")),
-    )?;
+    let target_type_mac = get_macro_item("skylite_proc::target_type", &items)?.ok_or(data_err!(
+        "Missing required macro skylite_proc::target_type!"
+    ))?;
     // Verify that the content of target_type is actually a valid path.
     parse2::<syn::Path>(target_type_mac.clone())
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
@@ -182,21 +190,19 @@ fn extract_asset_file(
         asset_file.clone(),
     )
     .map_err(|err| {
-        SkyliteProcError::SyntaxError(format!(
-            "Failed to parse asset_file! macro: {}. Expected (\"project-path\", \"asset-name\")",
-            err.to_string()
-        ))
+        syntax_err!(
+            "Failed to parse asset_file! macro: {err}. Expected (\"project-path\", \"asset-name\")"
+        )
     })?;
 
     if args.len() != 2 {
-        return Err(SkyliteProcError::SyntaxError(format!(
+        return Err(syntax_err!(
             "Wrong number of arguments to asset_file!, expected (\"project-path\", \"asset-name\")"
-        )));
+        ));
     }
 
-    let relative_path = PathBuf::try_from(args[0].value()).map_err(|_| {
-        SkyliteProcError::DataError(format!("Not a valid project path: {}", args[0].value()))
-    })?;
+    let relative_path = PathBuf::try_from(args[0].value())
+        .map_err(|_| data_err!("Not a valid project path: {}", args[0].value()))?;
 
     let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
     let stub = SkyliteProjectStub::from_file(&base_dir.join(relative_path))?;
@@ -219,12 +225,12 @@ fn process_debug_output(out: &TokenStream, items: &[Item]) -> Result<(), Skylite
             let path_str = lit.to_string();
             // Strip quotes from string literal
             PathBuf::try_from(&path_str[1..path_str.len() - 1])
-                .map_err(|e| SkyliteProcError::SyntaxError(format!("{}", e.to_string())))?
+                .map_err(|e| SkyliteProcError::SyntaxError(e.to_string()))?
         }
         _ => {
-            return Err(SkyliteProcError::SyntaxError(format!(
+            return Err(syntax_err!(
                 "Wrong argument for debug_output!, expected string literal"
-            )))
+            ))
         }
     };
 
@@ -239,18 +245,14 @@ fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skylit
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
         .items;
 
-    let args = get_macro_item("skylite_proc::asset_file", &items)?.ok_or(
-        SkyliteProcError::DataError(format!("Missing required macro asset_file!")),
-    )?;
+    let args = get_macro_item("skylite_proc::asset_file", &items)?
+        .ok_or(data_err!("Missing required macro asset_file!"))?;
     let (project_stub, name) = extract_asset_file(args)?;
     let meta = project_stub
         .assets
         .nodes
         .get(&name)
-        .ok_or(SkyliteProcError::DataError(format!(
-            "Node not found: {}",
-            name
-        )))?;
+        .ok_or(data_err!("Node not found: {name}"))?;
 
     let node = Node::from_meta(meta.clone(), &project_stub.assets)?;
 

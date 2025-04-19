@@ -66,10 +66,7 @@ pub(crate) fn get_macro_item<'tok>(
     };
     match definitions_iter.next() {
         None => Ok(Some(out)),
-        Some(_) => Err(SkyliteProcError::SyntaxError(format!(
-            "Multiple macro invocations for {}!",
-            name
-        ))),
+        Some(_) => Err(syntax_err!("Multiple macro invocations for {name}!")),
     }
 }
 

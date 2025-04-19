@@ -3,7 +3,7 @@ use std::path::Path;
 
 use super::node_lists::NodeList;
 use super::nodes::{Node, NodeInstance};
-use super::sequences::{self, Sequence};
+use super::sequences::Sequence;
 use super::values::{parse_type, parse_typed_value, TypedValue};
 use crate::assets::Assets;
 use crate::parse::guile::SCM;
@@ -47,16 +47,15 @@ impl SkyliteProjectStub {
         project_root: &Path,
     ) -> Result<SkyliteProjectStub, SkyliteProcError> {
         unsafe {
-            let name = parse_symbol(assq_str("name", definition)?.ok_or(
-                SkyliteProcError::DataError("Missing required field 'name'".to_owned()),
-            )?)?;
+            let name = parse_symbol(
+                assq_str("name", definition)?.ok_or(data_err!("Missing required field 'name'"))?,
+            )?;
 
             let assets =
                 Assets::from_scheme_with_guile(assq_str("assets", definition)?, project_root)?;
 
-            let root_node_def = assq_str("root-node", definition)?.ok_or(
-                SkyliteProcError::DataError(format!("Missing required field 'root-node'")),
-            )?;
+            let root_node_def = assq_str("root-node", definition)?
+                .ok_or(data_err!("Missing required field 'root-node'"))?;
 
             let save_data = if let Some(list) = assq_str("save-data", definition)? {
                 iter_list(list)?
@@ -75,9 +74,7 @@ impl SkyliteProjectStub {
             };
 
             if tile_types.len() == 0 {
-                return Err(SkyliteProcError::DataError(
-                    "At least one tile-type must be defined.".to_owned(),
-                ));
+                return Err(data_err!("At least one tile-type must be defined."));
             }
 
             Ok(SkyliteProjectStub {

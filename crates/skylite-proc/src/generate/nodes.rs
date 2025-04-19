@@ -94,7 +94,7 @@ fn gen_properties_type(node: &Node, items: &[Item]) -> Result<TokenStream, Skyli
         get_annotated_function(items, "skylite_proc::create_properties")
             .map(get_fn_name)
             .map(|ident| quote!(super::#ident(#node_args)))
-            .ok_or(SkyliteProcError::DataError(format!("Missing required special function `create_properties`. Function is required because the node has properties.")))?
+            .ok_or(data_err!("Missing required special function `create_properties`. Function is required because the node has properties."))?
     } else {
         quote!(super::#properties_type_name {})
     };
@@ -232,7 +232,7 @@ fn gen_node_impl(
         .map(|item| quote!(super::#item(self, controls)));
 
     if update_call_opt.is_some() && post_update_call_opt.is_some() {
-        return Err(SkyliteProcError::DataError(format!("skylite_proc::update and skylite_proc::post_update have the same meaning, only one must be given.")));
+        return Err(data_err!("skylite_proc::update and skylite_proc::post_update have the same meaning, only one must be given."));
     }
 
     let post_update_call = update_call_opt.or(post_update_call_opt).unwrap_or_default();

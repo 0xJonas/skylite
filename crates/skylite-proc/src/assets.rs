@@ -71,8 +71,7 @@ fn load_metas_from_raw_globs(
         .iter()
         .map(|g| {
             let normalized = normalize_glob(g, base_dir);
-            glob(&normalized)
-                .map_err(|err| SkyliteProcError::DataError(format!("Error parsing glob: {}", err)))
+            glob(&normalized).map_err(|err| data_err!("Error parsing glob: {err}"))
         })
         .collect::<Result<Vec<Paths>, SkyliteProcError>>()?;
 
@@ -82,7 +81,7 @@ fn load_metas_from_raw_globs(
         .enumerate()
         .map(|(i, path)| {
             let path =
-                path.map_err(|err| SkyliteProcError::OtherError(format!("IO Error: {}", err)))?;
+                path.map_err(|err| SkyliteProcError::OtherError(format!("IO Error: {err}")))?;
             let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
             let meta = AssetMetaData {
                 atype: atype.clone(),
@@ -98,12 +97,11 @@ fn load_metas_from_raw_globs(
         let (name, metadata) = res?;
         let entry = out.entry(name.clone());
         if let Entry::Occupied(e) = entry {
-            return Err(SkyliteProcError::DataError(format!(
-                "Asset name {} is ambiguous; both {:?} and {:?} match",
-                name,
+            return Err(data_err!(
+                "Asset name {name} is ambiguous; both {:?} and {:?} match",
                 metadata.source,
                 e.get().source
-            )));
+            ));
         } else {
             entry.insert_entry(metadata);
         }

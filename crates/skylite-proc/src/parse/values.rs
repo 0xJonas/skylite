@@ -60,10 +60,7 @@ pub(crate) unsafe fn parse_type(typename: SCM) -> Result<Type, SkyliteProcError>
             "bool" => Ok(Type::Bool),
             "string" => Ok(Type::String),
             "node-list" => Ok(Type::NodeList),
-            _ => Err(SkyliteProcError::DataError(format!(
-                "Unknown data type: {}",
-                type_name
-            ))),
+            _ => Err(data_err!("Unknown data type: {type_name}")),
         }
     } else if scm_is_true(scm_list_p(typename)) {
         let car = scm_car(typename);
@@ -78,10 +75,7 @@ pub(crate) unsafe fn parse_type(typename: SCM) -> Result<Type, SkyliteProcError>
                 .map(|ok| Type::Tuple(ok))
         }
     } else {
-        Err(SkyliteProcError::DataError(format!(
-            "Unsupported type: {}",
-            form_to_string(typename)
-        )))
+        Err(data_err!("Unsupported type: {}", form_to_string(typename)))
     }
 }
 
@@ -137,10 +131,7 @@ pub(crate) unsafe fn parse_typed_value(
             let meta = assets
                 .node_lists
                 .get(&name)
-                .ok_or(SkyliteProcError::DataError(format!(
-                    "Node list not found: {}",
-                    name
-                )))?;
+                .ok_or(data_err!("Node list not found: {name}"))?;
             Ok(TypedValue::NodeList(meta.id))
         }
     }
@@ -152,9 +143,9 @@ unsafe fn parse_typed_value_tuple(
     assets: &Assets,
 ) -> Result<TypedValue, SkyliteProcError> {
     if types.len() as i64 != scm_to_int64(scm_length(values)) {
-        return Err(SkyliteProcError::DataError(format!(
+        return Err(data_err!(
             "Tuple definition has differing number of types and values."
-        )));
+        ));
     }
 
     Iterator::zip(types.iter(), iter_list(values)?)
@@ -176,25 +167,21 @@ pub(crate) unsafe fn parse_variable_definition(
     assets: &Assets,
 ) -> Result<Variable, SkyliteProcError> {
     if scm_is_false(scm_list_p(def)) {
-        return Err(SkyliteProcError::DataError(format!(
+        return Err(data_err!(
             "Expected variable definition, found {}",
             form_to_string(def)
-        )));
+        ));
     }
 
     let mut current_pair = def;
     if scm_is_null(current_pair) {
-        return Err(SkyliteProcError::DataError(format!(
-            "Expected variable name"
-        )));
+        return Err(data_err!("Expected variable name"));
     }
     let name = parse_symbol(scm_car(current_pair))?;
 
     current_pair = scm_cdr(current_pair);
     if scm_is_null(current_pair) {
-        return Err(SkyliteProcError::DataError(format!(
-            "Expected variable type"
-        )));
+        return Err(data_err!("Expected variable type"));
     }
     let typename = parse_type(scm_car(current_pair))?;
 
@@ -249,16 +236,13 @@ pub(crate) unsafe fn parse_argument_list(
                     .iter()
                     .enumerate()
                     .find(|(_, param)| param.name == arg_name)
-                    .ok_or(SkyliteProcError::DataError(format!(
-                        "No parameter {} found",
-                        arg_name
-                    )))?;
+                    .ok_or(data_err!("No parameter {arg_name} found"))?;
 
                 (idx, p, scm_cdr(arg_raw))
             } else {
                 // Positional argument
                 if next_arg >= parameters.len() {
-                    return Err(SkyliteProcError::DataError(format!("Too many arguments")));
+                    return Err(data_err!("Too many arguments"));
                 } else {
                     (next_arg, &parameters[next_arg], arg_raw)
                 }
@@ -276,10 +260,10 @@ pub(crate) unsafe fn parse_argument_list(
                 if let Some(def) = parameters[i].default.clone() {
                     def
                 } else {
-                    return Err(SkyliteProcError::DataError(format!(
+                    return Err(data_err!(
                         "Missing argument for parameter {}",
                         parameters[i].name
-                    )));
+                    ));
                 }
             }
         };

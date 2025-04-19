@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
-use super::guile::{scm_is_symbol, scm_is_true, scm_symbol_p, SCM};
-use super::scheme_util::{
-    assq_str, form_to_string, parse_bool, parse_f32, parse_f64, parse_int, parse_string,
-};
-use super::values::{parse_typed_value, Type, TypedValue};
 use crate::assets::{AssetMetaData, Assets};
-use crate::parse::guile::{scm_car, scm_cdr, scm_is_false, scm_list_p, scm_pair_p};
-use crate::parse::scheme_util::{iter_list, parse_symbol, with_guile};
+use crate::parse::guile::{
+    scm_car, scm_cdr, scm_is_false, scm_is_symbol, scm_is_true, scm_list_p, scm_pair_p,
+    scm_symbol_p, SCM,
+};
+use crate::parse::scheme_util::{
+    assq_str, form_to_string, iter_list, parse_bool, parse_f32, parse_f64, parse_int, parse_string,
+    parse_symbol, with_guile,
+};
+use crate::parse::values::{parse_typed_value, Type, TypedValue};
 use crate::{Node, SkyliteProcError};
 
 fn parse_field(field_path: &str) -> Vec<String> {
@@ -16,12 +18,10 @@ fn parse_field(field_path: &str) -> Vec<String> {
 
 fn expect_args(items: &[SCM], num: usize, context: &str) -> Result<(), SkyliteProcError> {
     if items.len() - 1 != num {
-        Err(SkyliteProcError::SyntaxError(format!(
-            "{}: expected {} arguments, got {}",
-            context,
-            num,
+        Err(syntax_err!(
+            "{context}: expected {num} arguments, got {}",
             items.len() - 1
-        )))
+        ))
     } else {
         Ok(())
     }
@@ -103,10 +103,7 @@ impl BranchConditionStub {
                     let field = parse_field(field);
                     Ok(BranchConditionStub::IfTrue(field))
                 }
-                op @ _ => Err(SkyliteProcError::SyntaxError(format!(
-                    "Unknown operator {}",
-                    op
-                ))),
+                op @ _ => Err(syntax_err!("Unknown operator {op}")),
             }
         }
     }
@@ -142,9 +139,7 @@ impl InputOpStub {
         unsafe {
             let items: Vec<SCM> = iter_list(definition)?.collect();
             if items.len() == 0 {
-                return Err(SkyliteProcError::SyntaxError(format!(
-                    "Expected sequence directive, got empty list"
-                )));
+                return Err(syntax_err!("Expected sequence directive, got empty list"));
             }
             let mnemonic = parse_symbol(items[0])?;
             match mnemonic.as_str() {
@@ -214,10 +209,7 @@ impl InputOpStub {
                     Ok(InputOpStub::BranchCustom { branch_fn, label })
                 }
                 _ => {
-                    return Err(SkyliteProcError::SyntaxError(format!(
-                        "Illegal sequence directive '{}'",
-                        mnemonic
-                    )));
+                    return Err(syntax_err!("Illegal sequence directive '{mnemonic}'"));
                 }
             }
         }
@@ -245,9 +237,7 @@ fn parse_script(definition: SCM) -> Result<Vec<InputLineStub>, SkyliteProcError>
                     labels: std::mem::take(&mut labels),
                 })
             } else {
-                return Err(SkyliteProcError::SyntaxError(format!(
-                    "Expected symbol or list"
-                )));
+                return Err(syntax_err!("Expected symbol or list"));
             }
         }
     }
@@ -268,25 +258,22 @@ impl SequenceStub {
     fn from_scheme(definition: SCM) -> Result<SequenceStub, SkyliteProcError> {
         unsafe {
             if scm_is_false(scm_list_p(definition)) {
-                return Err(SkyliteProcError::SyntaxError(format!(
+                return Err(syntax_err!(
                     "Expected alist for sequence definition, got {}",
                     form_to_string(definition)
-                )));
+                ));
             }
 
-            let target_node_scm =
-                assq_str("node", definition)?.ok_or(SkyliteProcError::SyntaxError(format!(
-                    "Missing required key 'node' for sequence definition."
-                )))?;
+            let target_node_scm = assq_str("node", definition)?.ok_or(syntax_err!(
+                "Missing required key 'node' for sequence definition."
+            ))?;
             let target_node = parse_symbol(target_node_scm)?;
 
             let subs = match assq_str("subs", definition)? {
                 Some(scm) => iter_list(scm)?
                     .map(|pair| {
                         if scm_is_false(scm_pair_p(pair)) {
-                            return Err(SkyliteProcError::SyntaxError(format!(
-                                "Expected alist for key 'subs'."
-                            )));
+                            return Err(syntax_err!("Expected alist for key 'subs'."));
                         }
 
                         let sub_name = parse_symbol(scm_car(pair))?;
@@ -297,11 +284,9 @@ impl SequenceStub {
                 None => HashMap::new(),
             };
 
-            let script = parse_script(assq_str("script", definition)?.ok_or(
-                SkyliteProcError::SyntaxError(format!(
-                    "Missing required key 'script' for sequence definition"
-                )),
-            )?)?;
+            let script = parse_script(assq_str("script", definition)?.ok_or(syntax_err!(
+                "Missing required key 'script' for sequence definition"
+            ))?)?;
 
             Ok(SequenceStub {
                 target_node_name: target_node,
@@ -356,10 +341,7 @@ fn resolve_field(
             .static_nodes
             .iter()
             .find(|(name, _)| name == segment)
-            .ok_or(SkyliteProcError::DataError(format!(
-                "Static node not found on node: {}",
-                segment
-            )))?
+            .ok_or(data_err!("Static node not found on node: {segment}"))?
             .1
             .name
             .as_str();
@@ -379,10 +361,7 @@ fn resolve_field(
         .properties
         .iter()
         .find(|v| v.name == field_name)
-        .ok_or(SkyliteProcError::DataError(format!(
-            "Property not found one node: {}",
-            field_name
-        )))?
+        .ok_or(data_err!("Property not found one node: {field_name}"))?
         .typename
         .clone();
 
@@ -416,9 +395,7 @@ unsafe fn parse_typed_value_for_primitive(
         Type::F64 => Ok(TypedValue::F64(parse_f64(data)?)),
         Type::Bool => Ok(TypedValue::Bool(parse_bool(data)?)),
         Type::String => Ok(TypedValue::String(parse_string(data)?)),
-        _ => Err(SkyliteProcError::DataError(format!(
-            "Type not supported for operation."
-        ))),
+        _ => Err(data_err!("Type not supported for operation.")),
     }
 }
 
@@ -434,9 +411,9 @@ fn expect_numeric_type(typename: &Type) -> Result<(), SkyliteProcError> {
         | Type::I64
         | Type::F32
         | Type::F64 => Ok(()),
-        Type::Bool | Type::String | Type::Tuple(_) | Type::Vec(_) | Type::NodeList => Err(
-            SkyliteProcError::DataError(format!("Expected numeric type")),
-        ),
+        Type::Bool | Type::String | Type::Tuple(_) | Type::Vec(_) | Type::NodeList => {
+            Err(data_err!("Expected numeric type"))
+        }
     }
 }
 
@@ -465,9 +442,7 @@ impl BranchCondition {
                 if let Type::Bool = field.typename {
                     Ok(BranchCondition::IfTrue(field))
                 } else {
-                    Err(SkyliteProcError::DataError(format!(
-                        "Expected bool for branch condition."
-                    )))
+                    Err(data_err!("Expected bool for branch condition."))
                 }
             }
             BranchConditionStub::IfFalse(field_raw) => {
@@ -475,9 +450,7 @@ impl BranchCondition {
                 if let Type::Bool = field.typename {
                     Ok(BranchCondition::IfFalse(field))
                 } else {
-                    Err(SkyliteProcError::DataError(format!(
-                        "Expected bool for branch condition."
-                    )))
+                    Err(data_err!("Expected bool for branch condition."))
                 }
             }
             BranchConditionStub::Equals(field_raw, value_scm) => {
@@ -638,10 +611,7 @@ impl Sequence {
         let target_node = nodes
             .iter()
             .find(|n| n.meta.name == stub.target_node_name)
-            .ok_or(SkyliteProcError::DataError(format!(
-                "Node not found: {}",
-                stub.target_node_name
-            )))?;
+            .ok_or(data_err!("Node not found: {}", stub.target_node_name))?;
         let subs = stub
             .subs
             .into_iter()
