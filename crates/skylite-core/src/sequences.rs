@@ -44,20 +44,17 @@ fn test_comparison<T: PartialEq + PartialOrd>(lhs: T, comparison: Comparison, rh
 #[derive(Clone)]
 enum Op {
     PushOffset(u32),
-
     SetField {
         data_idx: u32,
         len: u8,
     },
     SetFieldString(u32),
-
     ModifyFieldInt {
         data_idx: u32,
         len: u8,
     },
     ModifyFieldF32(u32),
     ModifyFieldF64(u32),
-
     Jump {
         target: u32,
     },
@@ -68,7 +65,6 @@ enum Op {
     Wait {
         num_updates: u16,
     },
-
     BranchIfTrue {
         target: u32,
     },
@@ -97,7 +93,6 @@ enum Op {
         rhs_idx: u32,
         target: u32,
     },
-
     RunCustom {
         id: u16,
     },
@@ -343,7 +338,8 @@ impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
             script: &gen_sequence.script,
             data: &gen_sequence.data,
             position: 0,
-            call_stack: Vec::new(),
+            // This means that returning from the main script will end the sequence.
+            call_stack: vec![gen_sequence.script.len()],
             wait_timer: 0,
             offset: 0,
             _project: PhantomData,

@@ -249,14 +249,16 @@ fn parse_script(definition: SCM) -> Result<Vec<InputLineStub>, SkyliteProcError>
 /// alone, but no information that would require Node information, such as field
 /// types.
 pub(crate) struct SequenceStub {
+    meta: AssetMetaData,
     target_node_name: String,
     subs: HashMap<String, Vec<InputLineStub>>,
     script: Vec<InputLineStub>,
 }
 
 impl SequenceStub {
-    fn from_scheme(definition: SCM) -> Result<SequenceStub, SkyliteProcError> {
+    fn from_meta_with_guile(meta: &AssetMetaData) -> Result<SequenceStub, SkyliteProcError> {
         unsafe {
+            let definition = meta.source.load_with_guile()?;
             if scm_is_false(scm_list_p(definition)) {
                 return Err(syntax_err!(
                     "Expected alist for sequence definition, got {}",
@@ -289,6 +291,7 @@ impl SequenceStub {
             ))?)?;
 
             Ok(SequenceStub {
+                meta: meta.clone(),
                 target_node_name: target_node,
                 subs,
                 script,
@@ -303,8 +306,7 @@ impl SequenceStub {
         extern "C" fn from_meta_with_guile(
             meta: &AssetMetaData,
         ) -> Result<SequenceStub, SkyliteProcError> {
-            let definition = meta.source.load_with_guile()?;
-            SequenceStub::from_scheme(definition)
+            SequenceStub::from_meta_with_guile(meta)
         }
 
         with_guile(from_meta_with_guile, &meta)
@@ -509,24 +511,24 @@ pub(crate) enum InputOp {
     },
 
     /// Unconditionally jump to a label.
-    Jump(String),
+    Jump { label: String },
 
     /// Call a subroutine defined in the `subs` key in the sequence asset.
-    CallSub(String),
+    CallSub { sub: String },
 
     /// Return from a subroutine.
     Return,
 
     /// Wait the given number of updates.
-    Wait(u16),
+    Wait { updates: u16 },
 
     /// Call custom function. The code for the function must be defined through
     /// a sequence_definition.
-    RunCustom(String),
+    RunCustom { id: String },
 
     /// Branch based on the result of a custom function. The function must be
     /// defined through a sequence_definition.
-    BranchCustom { branch_fn: String, label: String },
+    BranchCustom { id: String, label: String },
 }
 
 impl InputOp {
@@ -560,14 +562,15 @@ impl InputOp {
                 let condition = BranchCondition::from_stub(condition_stub, target_node, nodes)?;
                 Ok(InputOp::Branch { condition, label })
             }
-            InputOpStub::Jump(label) => Ok(InputOp::Jump(label)),
-            InputOpStub::CallSub(sub) => Ok(InputOp::CallSub(sub)),
+            InputOpStub::Jump(label) => Ok(InputOp::Jump { label }),
+            InputOpStub::CallSub(sub) => Ok(InputOp::CallSub { sub }),
             InputOpStub::Return => Ok(InputOp::Return),
-            InputOpStub::Wait(updates) => Ok(InputOp::Wait(updates)),
-            InputOpStub::RunCustom(name) => Ok(InputOp::RunCustom(name)),
-            InputOpStub::BranchCustom { branch_fn, label } => {
-                Ok(InputOp::BranchCustom { branch_fn, label })
-            }
+            InputOpStub::Wait(updates) => Ok(InputOp::Wait { updates }),
+            InputOpStub::RunCustom(id) => Ok(InputOp::RunCustom { id }),
+            InputOpStub::BranchCustom { branch_fn, label } => Ok(InputOp::BranchCustom {
+                id: branch_fn,
+                label,
+            }),
         }
     }
 }
@@ -594,9 +597,120 @@ impl InputLine {
     }
 }
 
+fn validate_labels(script: &[InputLine]) -> Result<(), SkyliteProcError> {
+    for (i, line) in script.iter().enumerate() {
+        let maybe_label = match &line.input_op {
+            InputOp::Jump { label } => Some(label),
+            InputOp::Branch { label, .. } => Some(label),
+            InputOp::BranchCustom { label, .. } => Some(label),
+            _ => None,
+        };
+        if let Some(label) = maybe_label {
+            let first_char = label.chars().next().unwrap();
+            // Labels starting with '-' are backwards searching anonymous labels.
+            let search_range = if first_char == '-' {
+                0..i
+            }
+            // Labels starting with '+' are forwards searching anonymous labels.
+            else if first_char == '+' {
+                (i + 1)..script.len()
+            }
+            // Normal labels
+            else {
+                0..script.len()
+            };
+
+            script[search_range]
+                .iter()
+                .find(|l| l.labels.contains(label))
+                .ok_or(data_err!("Jump target {label} not found"))?;
+        }
+    }
+
+    Ok(())
+}
+
+// TODO: This step should really be done after converting
+// the InputLines to IR, but it becomes more difficult then.
+// The reason for this is that branch ops get preceeded by
+// PushOffset ops, so the case '- (branch -)' becomes more
+// complicated to handle.
+fn rename_labels(input: &mut [InputLine], name: &str) {
+    fn is_forward_label(label: &str) -> bool {
+        label.chars().next().unwrap() == '+'
+    }
+
+    fn is_backward_label(label: &str) -> bool {
+        label.chars().next().unwrap() == '-'
+    }
+
+    fn get_jump_target(input_op: &mut InputOp) -> Option<&mut String> {
+        match input_op {
+            InputOp::Jump { label: target } => Some(target),
+            InputOp::Branch { label: target, .. } => Some(target),
+            InputOp::BranchCustom { label: target, .. } => Some(target),
+            _ => None,
+        }
+    }
+
+    let mut anonymous_labels: HashMap<String, usize> = HashMap::new();
+    for line in input.iter_mut() {
+        let mut target = get_jump_target(&mut line.input_op);
+
+        // Rename normal jump targets and backwards anonymous labels first,
+        // then rename labels, then rename forwards anonymous labels.
+        // This order is to make sure the following works correctly:
+        //
+        // - (...)
+        // - (jump -) ; Jumps to previous line (jump -) ; Jumps to previous line
+        //
+        //   (jump +) ; Jumps to next line
+        // + (jump +) ; Jumps to next line
+        // + (...)
+
+        if let Some(ref mut label) = target {
+            if is_backward_label(label) {
+                // Entry must exist, otherwise the validation during parsing would have failed.
+                let idx = anonymous_labels.get(*label).unwrap();
+                **label = format!("{name}-b-{idx}");
+            } else if !is_forward_label(label) {
+                **label = format!("{name}-l-{label}");
+            }
+        }
+
+        for label in line.labels.iter_mut() {
+            if is_backward_label(label) {
+                let idx = if let Some(idx) = anonymous_labels.get(label) {
+                    idx + 1
+                } else {
+                    0
+                };
+                anonymous_labels.insert(label.to_owned(), idx);
+
+                *label = format!("{name}-b-{idx}");
+            } else if is_forward_label(label) {
+                // Entry must exist, otherwise the validation during parsing would have failed.
+                let idx = anonymous_labels.get(label).unwrap();
+                *label = format!("{name}-f-{idx}");
+                anonymous_labels.insert(label.to_owned(), idx + 1);
+            } else {
+                *label = format!("{name}-l-{label}");
+            }
+        }
+
+        if let Some(label) = target {
+            if is_forward_label(label) {
+                let idx = anonymous_labels.entry(label.to_owned()).or_insert(0);
+                *label = format!("{name}-f-{idx}");
+            }
+        }
+    }
+}
+
 /// Fully parsed Sequence asset.
 #[derive(Debug, PartialEq)]
 pub(crate) struct Sequence {
+    pub meta: AssetMetaData,
     pub target_node_name: String,
     pub subs: HashMap<String, Vec<InputLine>>,
     pub script: Vec<InputLine>,
@@ -612,24 +726,33 @@ impl Sequence {
             .iter()
             .find(|n| n.meta.name == stub.target_node_name)
             .ok_or(data_err!("Node not found: {}", stub.target_node_name))?;
+
         let subs = stub
             .subs
             .into_iter()
             .map(|(name, script)| {
-                let resolved = script
+                let mut resolved = script
                     .into_iter()
                     .map(|s| InputLine::from_stub(s, target_node, nodes, assets))
                     .collect::<Result<Vec<InputLine>, SkyliteProcError>>()?;
+
+                validate_labels(&resolved)?;
+                rename_labels(&mut resolved, &format!("sub-{name}"));
                 Ok((name, resolved))
             })
             .collect::<Result<HashMap<String, Vec<InputLine>>, SkyliteProcError>>()?;
-        let script = stub
+
+        let mut script = stub
             .script
             .into_iter()
             .map(|s| InputLine::from_stub(s, target_node, nodes, assets))
             .collect::<Result<Vec<InputLine>, SkyliteProcError>>()?;
 
+        validate_labels(&script)?;
+        rename_labels(&mut script, "main");
+
         Ok(Sequence {
+            meta: stub.meta,
             target_node_name: stub.target_node_name,
             subs,
             script,
@@ -648,8 +771,7 @@ impl Sequence {
             args: &(&AssetMetaData, &[Node], &Assets),
         ) -> Result<Sequence, SkyliteProcError> {
             let (meta, nodes, assets) = *args;
-            let definition = meta.source.load_with_guile()?;
-            let stub = SequenceStub::from_scheme(definition)?;
+            let stub = SequenceStub::from_meta_with_guile(meta)?;
             Sequence::from_stub(stub, nodes, assets)
         }
 
@@ -688,7 +810,7 @@ mod tests {
                       (call sub1)
                     -
                       (run-custom custom-fn)
-                      (branch prop2 -)
+                    - (branch prop2 -)
                       (modify static1.prop1 5)
                       (branch (< prop1 10) -)
                       (branch-custom branch-fn end)
@@ -706,23 +828,20 @@ mod tests {
             .unwrap()
             .into_values()
             .collect();
-        let sequence = Sequence::from_meta(
-            assets.sequences.get("test-sequence").unwrap(),
-            &nodes,
-            &assets,
-        )
-        .unwrap();
+        let meta = assets.sequences.get("test-sequence").unwrap();
+        let sequence = Sequence::from_meta(meta, &nodes, &assets).unwrap();
 
         assert_eq!(
             sequence,
             Sequence {
+                meta: meta.clone(),
                 target_node_name: "test-node-1".to_owned(),
                 subs: [(
                     "sub1".to_owned(),
                     vec![
                         InputLine {
                             labels: vec![],
-                            input_op: InputOp::Wait(10)
+                            input_op: InputOp::Wait { updates: 10 }
                         },
                         InputLine {
                             labels: vec![],
@@ -733,7 +852,7 @@ mod tests {
                 .into(),
                 script: vec![
                     InputLine {
-                        labels: vec!["start".to_owned()],
+                        labels: vec!["main-l-start".to_owned()],
                         input_op: InputOp::Set {
                             field: Field {
                                 path: vec![FieldPathSegment::Property(
@@ -747,14 +866,18 @@ mod tests {
                     },
                     InputLine {
                         labels: vec![],
-                        input_op: InputOp::CallSub("sub1".to_owned())
+                        input_op: InputOp::CallSub {
+                            sub: "sub1".to_owned()
+                        }
                     },
                     InputLine {
-                        labels: vec!["-".to_owned()],
-                        input_op: InputOp::RunCustom("custom-fn".to_owned())
+                        labels: vec!["main-b-0".to_owned()],
+                        input_op: InputOp::RunCustom {
+                            id: "custom-fn".to_owned()
+                        }
                     },
                     InputLine {
-                        labels: vec![],
+                        labels: vec!["main-b-1".to_owned()],
                         input_op: InputOp::Branch {
                             condition: BranchCondition::IfTrue(Field {
                                 path: vec![FieldPathSegment::Property(
@@ -763,7 +886,7 @@ mod tests {
                                 )],
                                 typename: Type::Bool
                             }),
-                            label: "-".to_owned()
+                            label: "main-b-0".to_owned()
                         }
                     },
                     InputLine {
@@ -798,23 +921,25 @@ mod tests {
                                 },
                                 TypedValue::U8(10)
                             ),
-                            label: "-".to_owned()
+                            label: "main-b-1".to_owned()
                         }
                     },
                     InputLine {
                         labels: vec![],
                         input_op: InputOp::BranchCustom {
-                            branch_fn: "branch-fn".to_owned(),
-                            label: "end".to_owned()
+                            id: "branch-fn".to_owned(),
+                            label: "main-l-end".to_owned()
                         }
                     },
                     InputLine {
                         labels: vec![],
-                        input_op: InputOp::Jump("start".to_owned())
+                        input_op: InputOp::Jump {
+                            label: "main-l-start".to_owned()
+                        }
                     },
                     InputLine {
-                        labels: vec!["end".to_owned()],
-                        input_op: InputOp::Wait(0)
+                        labels: vec!["main-l-end".to_owned()],
+                        input_op: InputOp::Wait { updates: 0 }
                     }
                 ]
             }
