@@ -122,7 +122,7 @@ const OP_WAIT: u8 = 0x34;
 const OP_RUN_CUSTOM: u8 = 0x35;
 const OP_BRANCH_CUSTOM: u8 = 0x36;
 
-fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder) -> Op {
+fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder, data: &mut Vec<u8>) -> Op {
     let target = u32::deserialize(decoder);
     let branch_op = op_id & 0xf;
     if branch_op == BRANCH_IF_TRUE {
@@ -130,16 +130,26 @@ fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder) -> Op {
     } else if branch_op == BRANCH_IF_FALSE {
         Op::BranchIfFalse { target }
     } else {
-        let rhs_idx = u32::deserialize(decoder);
         let comparison = Comparison::decode(decoder);
+        let rhs_idx = data.len() as u32;
 
         if branch_op == BRANCH_COMPARE_F32 {
+            // Copy serialized f32
+            for _ in 0..4 {
+                data.push(u8::deserialize(decoder));
+            }
+
             Op::BranchF32 {
                 comparison,
                 rhs_idx,
                 target,
             }
         } else if branch_op == BRANCH_COMPARE_F64 {
+            // Copy serialized f64
+            for _ in 0..8 {
+                data.push(u8::deserialize(decoder));
+            }
+
             Op::BranchF64 {
                 comparison,
                 rhs_idx,
@@ -147,6 +157,11 @@ fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder) -> Op {
             }
         } else if branch_op < BRANCH_COMPARE_SIGNED {
             let rhs_len = branch_op;
+            // Copy serialized data
+            for _ in 0..rhs_len {
+                data.push(u8::deserialize(decoder));
+            }
+
             Op::BranchUInt {
                 comparison,
                 rhs_idx,
@@ -155,6 +170,11 @@ fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder) -> Op {
             }
         } else {
             let rhs_len = branch_op & 0x7;
+            // Copy serialized data
+            for _ in 0..rhs_len {
+                data.push(u8::deserialize(decoder));
+            }
+
             Op::BranchSInt {
                 comparison,
                 rhs_idx,
@@ -166,30 +186,51 @@ fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder) -> Op {
 }
 
 impl Op {
-    fn decode<P: SkyliteProject>(decoder: &mut dyn Decoder) -> Op {
+    fn decode<P: SkyliteProject>(decoder: &mut dyn Decoder, data: &mut Vec<u8>) -> Op {
         let op_id = u8::deserialize(decoder);
         match op_id & 0xf0 {
             OP_SET_FIELD => {
-                let data_idx = u32::deserialize(decoder);
+                let data_idx = data.len() as u32;
                 if op_id == OP_SET_FIELD_STRING {
+                    let str_len = read_varint(decoder) as u16;
+                    for b in str_len.to_ne_bytes() {
+                        data.push(b);
+                    }
+
+                    for _ in 0..str_len {
+                        data.push(u8::deserialize(decoder));
+                    }
+
                     Op::SetFieldString(data_idx)
                 } else {
                     let len = 1 << (op_id & 0xf);
+                    for _ in 0..len {
+                        data.push(u8::deserialize(decoder));
+                    }
                     Op::SetField { data_idx, len }
                 }
             }
             OP_MODIFY_FIELD => {
-                let data_idx = u32::deserialize(decoder);
+                let data_idx = data.len() as u32;
                 if op_id == OP_MODIFY_FIELD_F32 {
+                    for _ in 0..4 {
+                        data.push(u8::deserialize(decoder));
+                    }
                     Op::ModifyFieldF32(data_idx)
                 } else if op_id == OP_MODIFY_FIELD_F64 {
+                    for _ in 0..8 {
+                        data.push(u8::deserialize(decoder));
+                    }
                     Op::ModifyFieldF64(data_idx)
                 } else {
                     let len = 1 << (op_id & 0xf);
+                    for _ in 0..len {
+                        data.push(u8::deserialize(decoder));
+                    }
                     Op::ModifyFieldInt { data_idx, len }
                 }
             }
-            OP_BRANCH_FIELD => decode_branch_op(op_id, decoder),
+            OP_BRANCH_FIELD => decode_branch_op(op_id, decoder, data),
             _ => match op_id {
                 OP_PUSH_OFFSET => {
                     let field_id = u32::deserialize(decoder) as usize;
@@ -230,13 +271,11 @@ impl<P: SkyliteProject> GenSequence<P> {
         let compressed = <P as SkyliteProject>::_private_get_sequence_data(id);
         let mut decoder = make_decoder(compressed);
 
+        let mut data = Vec::new();
+
         let sequence_len = read_varint(decoder.as_mut());
         let mut script = Vec::with_capacity(sequence_len);
-        (0..sequence_len).for_each(|_| script.push(Op::decode::<P>(decoder.as_mut())));
-
-        let data_len = read_varint(decoder.as_mut());
-        let mut data = Vec::with_capacity(sequence_len);
-        (0..data_len).for_each(|_| data.push(u8::deserialize(decoder.as_mut())));
+        (0..sequence_len).for_each(|_| script.push(Op::decode::<P>(decoder.as_mut(), &mut data)));
 
         GenSequence {
             script: script.into_boxed_slice(),
@@ -256,17 +295,9 @@ pub trait Sequence {
     fn _private_get_generic_sequence(&self) -> &GenSequence<Self::P>;
 }
 
-fn read_string(data: &[u8], mut offset: u32) -> String {
-    // Read varint -> len
-    let mut len = 0;
-    loop {
-        let byte = data[offset as usize];
-        offset += 1;
-        len = (len << 7) + (byte & 0x7f) as usize;
-        if byte < 0x80 {
-            break;
-        }
-    }
+fn read_string(data: &[u8], mut offset: usize) -> String {
+    let len = u16::from_ne_bytes([data[offset], data[offset + 1]]) as usize;
+    offset += 2;
 
     let bytes = data[offset as usize..offset as usize + len].to_owned();
     unsafe { String::from_utf8_unchecked(bytes) }
@@ -389,7 +420,7 @@ impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
                 self.offset = 0;
             },
             Op::SetFieldString(data_idx) => unsafe {
-                let v = read_string(&self.data, data_idx);
+                let v = read_string(&self.data, data_idx as usize);
                 *(node_mem.add(self.offset) as *mut String) = v;
                 self.offset = 0;
             },
