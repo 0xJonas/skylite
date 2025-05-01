@@ -3,6 +3,7 @@ use quote::{format_ident, quote};
 use syn::{Item, ItemFn};
 
 use super::node_lists::generate_node_list_ids;
+use super::sequences::generate_sequence_data;
 use crate::generate::node_lists::{
     generate_decode_node_list_fn, generate_node_list_data, node_list_ids_type,
 };
@@ -189,11 +190,11 @@ fn generate_project_trait_impl(
             #decode_node_list_fn
 
             fn _private_get_offset(field_id: usize) -> u32 {
-                todo!()
+                _private_get_offset(field_id)
             }
 
             fn _private_get_sequence_data(sequence_id: usize) -> &'static [u8] {
-                todo!()
+                _PRIVATE_SEQUENCE_DATA[sequence_id]
             }
         }
     }
@@ -209,6 +210,7 @@ impl SkyliteProject {
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
             Item::Verbatim(generate_node_list_data(&self.node_lists)),
             Item::Verbatim(generate_node_list_ids(&self.node_lists, &self.name)),
+            Item::Verbatim(generate_sequence_data(&self.sequences)),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
             Item::Verbatim(generate_project_impl(&self.name)),
             Item::Verbatim(generate_project_trait_impl(self, &target_type, items)),
@@ -317,7 +319,7 @@ mod tests {
                 }
 
                 fn _private_decode_node_list(id: usize) -> ::skylite_core::nodes::NodeList<Test1> {
-                    let data = crate::test1::gen::NODE_LIST_DATA[id as usize];
+                    let data = crate::test1::generated::NODE_LIST_DATA[id as usize];
                     let mut decoder = ::skylite_compress::make_decoder(data);
                     let len = ::skylite_core::decode::read_varint(decoder.as_mut());
                     let nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=Test1>>> = (0 .. len)
@@ -327,11 +329,11 @@ mod tests {
                 }
 
                 fn _private_get_offset(field_id: usize) -> u32 {
-                    todo!()
+                    _private_get_offset(field_id)
                 }
 
                 fn _private_get_sequence_data(sequence_id: usize) -> &'static [u8] {
-                    todo!()
+                    _PRIVATE_SEQUENCE_DATA[sequence_id]
                 }
             }
         };

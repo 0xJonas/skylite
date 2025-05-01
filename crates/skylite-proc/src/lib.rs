@@ -2,11 +2,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use generate::nodes::generate_node_definition;
+use generate::sequences::generate_sequence_definition;
 use generate::util::get_macro_item;
 use parse::guile::SCM;
 use parse::nodes::Node;
 use parse::project::{SkyliteProject, SkyliteProjectStub};
 use parse::scheme_util::form_to_string;
+use parse::sequences::SequenceStub;
 use parse::util::{change_case, IdentCase};
 use proc_macro2::{TokenStream, TokenTree};
 use quote::{format_ident, quote};
@@ -156,7 +158,7 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
         #endianness_check
 
         mod #module_name {
-            pub mod gen {
+            pub mod generated {
                 use ::skylite_core::prelude::*;
                 use super::*;
 
@@ -165,13 +167,13 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
             }
 
             use ::skylite_core::prelude::*;
-            use gen::*;
+            use generated::*;
 
             #(#items)
             *
         }
 
-        pub use #module_name::gen::*;
+        pub use #module_name::generated::*;
     };
 
     #[cfg(debug_assertions)]
@@ -264,6 +266,30 @@ fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skylit
     Ok(out)
 }
 
+fn sequence_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
+    let items = parse2::<File>(body_raw.clone())
+        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
+        .items;
+
+    let args = get_macro_item("skylite_proc::asset_file", &items)?
+        .ok_or(data_err!("Missing required macro asset_file!"))?;
+    let (project_stub, name) = extract_asset_file(args)?;
+    let meta = project_stub
+        .assets
+        .sequences
+        .get(&name)
+        .ok_or(data_err!("Sequence not found: {name}"))?;
+
+    let sequence_stub = SequenceStub::from_meta(meta)?;
+
+    let out = generate_sequence_definition(&sequence_stub, &project_stub.name, &items, &body_raw)?;
+
+    #[cfg(debug_assertions)]
+    process_debug_output(&out, &items)?;
+
+    Ok(out)
+}
+
 fn skylite_project_impl(body_raw: TokenStream) -> TokenStream {
     match skylite_project_impl_fallible(body_raw) {
         Ok(t) => t,
@@ -278,6 +304,13 @@ fn node_definition_impl(body_raw: TokenStream) -> TokenStream {
     }
 }
 
+fn sequence_definition_impl(body_raw: TokenStream) -> TokenStream {
+    match sequence_definition_fallible(body_raw) {
+        Ok(stream) => stream,
+        Err(err) => err.into(),
+    }
+}
+
 #[proc_macro]
 pub fn skylite_project(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     skylite_project_impl(body.into()).into()
@@ -286,6 +319,11 @@ pub fn skylite_project(body: proc_macro::TokenStream) -> proc_macro::TokenStream
 #[proc_macro]
 pub fn node_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     node_definition_impl(body.into()).into()
+}
+
+#[proc_macro]
+pub fn sequence_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    sequence_definition_impl(body.into()).into()
 }
 
 #[proc_macro]
@@ -428,25 +466,25 @@ pub fn asset_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     proc_macro::TokenStream::new()
 }
 
-/// Defines properties for a node. These properties are converted into
-/// a separate type and can be accessed through the `properties`-member on
-/// nodes.
+/// Defines additional properties for a node. These properties are added to the
+/// properties defined in the asset file. The properties should be defined as a
+/// list of struct fields.
 ///
 /// **This macro must always be used with an absolute path:
-/// `skylite_proc::properties!`.**
+/// `skylite_proc::extra_properties!`.**
 ///
 /// ## Example
 ///
 /// ```ignore
 /// node_definition! {
-///     skylite_proc::properties! {
-///         val1: u8,
-///         val2: u8
+///     skylite_proc::extra_properties! {
+///         pub val1: u8,
+///         pub val2: u8
 ///     }
 /// }
 /// ```
 #[proc_macro]
-pub fn properties(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn extra_properties(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
     proc_macro::TokenStream::new()
 }
 

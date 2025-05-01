@@ -1,6 +1,6 @@
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote, ToTokens};
-use syn::{parse_str, Item, ItemFn, Meta, Path};
+use syn::{parse_str, Item, ItemFn, Meta};
 
 use super::project::project_ident;
 use crate::parse::util::{change_case, IdentCase};
@@ -12,19 +12,13 @@ use crate::SkyliteProcError;
 ///
 /// The attribute must be of the form `#[attribute-name]`.
 pub(crate) fn get_annotated_function<'a>(items: &'a [Item], attribute: &str) -> Option<&'a ItemFn> {
-    let attribute_path = syn::parse_str::<Path>(attribute).unwrap();
+    let meta = syn::parse_str::<Meta>(attribute).unwrap();
     items
         .iter()
         // Find item with matching attribute
         .find(|item| {
             if let Item::Fn(fun) = item {
-                fun.attrs.iter().any(|attr| {
-                    if let Meta::Path(ref p) = attr.meta {
-                        *p == attribute_path
-                    } else {
-                        false
-                    }
-                })
+                fun.attrs.iter().any(|attr| attr.meta == meta)
             } else {
                 false
             }

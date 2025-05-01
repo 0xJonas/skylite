@@ -123,7 +123,7 @@ const OP_RUN_CUSTOM: u8 = 0x35;
 const OP_BRANCH_CUSTOM: u8 = 0x36;
 
 fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder, data: &mut Vec<u8>) -> Op {
-    let target = u32::deserialize(decoder);
+    let target = read_varint(decoder) as u32;
     let branch_op = op_id & 0xf;
     if branch_op == BRANCH_IF_TRUE {
         Op::BranchIfTrue { target }
@@ -156,7 +156,7 @@ fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder, data: &mut Vec<u8>) ->
                 target,
             }
         } else if branch_op < BRANCH_COMPARE_SIGNED {
-            let rhs_len = branch_op;
+            let rhs_len = 1 << branch_op;
             // Copy serialized data
             for _ in 0..rhs_len {
                 data.push(u8::deserialize(decoder));
@@ -169,7 +169,7 @@ fn decode_branch_op(op_id: u8, decoder: &mut dyn Decoder, data: &mut Vec<u8>) ->
                 target,
             }
         } else {
-            let rhs_len = branch_op & 0x7;
+            let rhs_len = 1 << (branch_op & 0x7);
             // Copy serialized data
             for _ in 0..rhs_len {
                 data.push(u8::deserialize(decoder));
@@ -192,14 +192,13 @@ impl Op {
             OP_SET_FIELD => {
                 let data_idx = data.len() as u32;
                 if op_id == OP_SET_FIELD_STRING {
-                    let str_len = read_varint(decoder) as u16;
+                    let val = String::deserialize(decoder);
+                    let str_len = val.len() as u16;
                     for b in str_len.to_ne_bytes() {
                         data.push(b);
                     }
 
-                    for _ in 0..str_len {
-                        data.push(u8::deserialize(decoder));
-                    }
+                    data.append(&mut val.into_bytes());
 
                     Op::SetFieldString(data_idx)
                 } else {
@@ -233,25 +232,25 @@ impl Op {
             OP_BRANCH_FIELD => decode_branch_op(op_id, decoder, data),
             _ => match op_id {
                 OP_PUSH_OFFSET => {
-                    let field_id = u32::deserialize(decoder) as usize;
+                    let field_id = u16::deserialize(decoder) as usize;
                     Op::PushOffset(P::_private_get_offset(field_id))
                 }
                 OP_JUMP => Op::Jump {
-                    target: u32::deserialize(decoder),
+                    target: read_varint(decoder) as u32,
                 },
                 OP_CALL_SUB => Op::CallSub {
-                    target: u32::deserialize(decoder),
+                    target: read_varint(decoder) as u32,
                 },
                 OP_RETURN => Op::Return,
                 OP_WAIT => Op::Wait {
-                    num_updates: u16::deserialize(decoder),
+                    num_updates: read_varint(decoder) as u16,
                 },
                 OP_RUN_CUSTOM => Op::RunCustom {
-                    id: u16::deserialize(decoder),
+                    id: read_varint(decoder) as u16,
                 },
                 OP_BRANCH_CUSTOM => {
-                    let id = u16::deserialize(decoder);
-                    let target = u32::deserialize(decoder);
+                    let id = read_varint(decoder) as u16;
+                    let target = read_varint(decoder) as u32;
                     Op::BranchCustom { id, target }
                 }
                 _ => unreachable!(),
@@ -260,39 +259,26 @@ impl Op {
     }
 }
 
-pub struct GenSequence<P: SkyliteProject> {
-    script: Box<[Op]>,
-    data: Box<[u8]>,
-    _project: PhantomData<P>,
+fn decode_sequence_data<P: SkyliteProject>(id: usize) -> (Box<[Op]>, Box<[u8]>) {
+    let compressed = <P as SkyliteProject>::_private_get_sequence_data(id);
+    let mut decoder = make_decoder(compressed);
+
+    let mut data = Vec::new();
+
+    let sequence_len = read_varint(decoder.as_mut());
+    let mut script = Vec::with_capacity(sequence_len);
+    (0..sequence_len).for_each(|_| script.push(Op::decode::<P>(decoder.as_mut(), &mut data)));
+
+    (script.into_boxed_slice(), data.into_boxed_slice())
 }
 
-impl<P: SkyliteProject> GenSequence<P> {
-    pub fn _private_decode_from_id(id: usize) -> GenSequence<P> {
-        let compressed = <P as SkyliteProject>::_private_get_sequence_data(id);
-        let mut decoder = make_decoder(compressed);
-
-        let mut data = Vec::new();
-
-        let sequence_len = read_varint(decoder.as_mut());
-        let mut script = Vec::with_capacity(sequence_len);
-        (0..sequence_len).for_each(|_| script.push(Op::decode::<P>(decoder.as_mut(), &mut data)));
-
-        GenSequence {
-            script: script.into_boxed_slice(),
-            data: data.into_boxed_slice(),
-            _project: PhantomData,
-        }
-    }
-}
-
-pub trait Sequence {
+pub trait SequenceHandle {
+    const ID: usize;
     type P: SkyliteProject;
     type Target: Node<P = Self::P>;
 
-    fn load() -> Self;
     fn _private_run_custom(node: &mut Self::Target, id: u16);
     fn _private_branch_custom(node: &Self::Target, id: u16) -> bool;
-    fn _private_get_generic_sequence(&self) -> &GenSequence<Self::P>;
 }
 
 fn read_string(data: &[u8], mut offset: usize) -> String {
@@ -343,19 +329,19 @@ fn compare_field_int(
 ) -> bool {
     if signed {
         #[cfg(target_endian = "little")]
-        let adjust = 0x80 << (len - 1);
+        let adjust = 0x80 << (len - 1) * 8;
         #[cfg(not(target_endian = "little"))]
         let adjust = 0x8000_0000_0000_0000;
-        lhs = lhs.wrapping_add(adjust);
-        rhs = rhs.wrapping_add(adjust);
+        lhs = lhs.wrapping_sub(adjust);
+        rhs = rhs.wrapping_sub(adjust);
     }
 
     test_comparison(lhs, comparison, rhs)
 }
 
-struct GenSequencer<'sequence, P: SkyliteProject> {
-    script: &'sequence [Op],
-    data: &'sequence [u8],
+struct GenSequencer<P: SkyliteProject> {
+    script: Box<[Op]>,
+    data: Box<[u8]>,
     position: usize,
     call_stack: Vec<usize>,
     wait_timer: u16,
@@ -363,14 +349,15 @@ struct GenSequencer<'sequence, P: SkyliteProject> {
     _project: PhantomData<P>,
 }
 
-impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
-    fn new<'s>(gen_sequence: &'s GenSequence<P>) -> GenSequencer<'s, P> {
+impl<P: SkyliteProject> GenSequencer<P> {
+    fn new(script: Box<[Op]>, data: Box<[u8]>) -> GenSequencer<P> {
+        let return_addr = script.len();
         GenSequencer {
-            script: &gen_sequence.script,
-            data: &gen_sequence.data,
+            script,
+            data,
             position: 0,
             // This means that returning from the main script will end the sequence.
-            call_stack: vec![gen_sequence.script.len()],
+            call_stack: vec![return_addr],
             wait_timer: 0,
             offset: 0,
             _project: PhantomData,
@@ -449,7 +436,7 @@ impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
             },
             Op::Jump { target } => self.position = target as usize,
             Op::CallSub { target } => {
-                self.call_stack.push(self.position + 1);
+                self.call_stack.push(self.position);
                 self.position = target as usize;
             }
             Op::Return => self.position = self.call_stack.pop().unwrap() as usize,
@@ -459,12 +446,14 @@ impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
                 if v {
                     self.position = target as usize;
                 }
+                self.offset = 0;
             }
             Op::BranchIfFalse { target } => {
                 let v = unsafe { *(node_mem.add(self.offset) as *const bool) };
                 if !v {
                     self.position = target as usize;
                 }
+                self.offset = 0;
             }
             Op::BranchUInt {
                 comparison,
@@ -533,26 +522,31 @@ impl<'sequence, P: SkyliteProject> GenSequencer<'sequence, P> {
 /// function. This function should be called exactly once during a Node's update
 /// cycle, either in the `pre_update` or the `post_update`. The sequencer will
 /// make the modifications to the Node that are defined in the sequence.
-pub struct Sequencer<'sequence, S: Sequence> {
-    gen_sequencer: GenSequencer<'sequence, S::P>,
+pub struct Sequencer<N: Node> {
+    gen_sequencer: GenSequencer<N::P>,
+    run_custom: fn(&mut N, u16),
+    branch_custom: fn(&N, u16) -> bool,
 }
 
-impl<'sequence, S: Sequence> Sequencer<'sequence, S> {
+impl<N: Node> Sequencer<N> {
     /// Creates a new `Sequencer` for a `Sequence`.
-    pub fn new<'s>(sequence: &'s mut S) -> Sequencer<'s, S> {
+    pub fn new<Handle: SequenceHandle<Target = N>>(_handle: Handle) -> Sequencer<Handle::Target> {
+        let (script, data) = decode_sequence_data::<Handle::P>(Handle::ID);
         Sequencer {
-            gen_sequencer: GenSequencer::new(sequence._private_get_generic_sequence()),
+            gen_sequencer: GenSequencer::new(script, data),
+            run_custom: Handle::_private_run_custom,
+            branch_custom: Handle::_private_branch_custom,
         }
     }
 
     /// Updates the `Sequencer`. This will run the commands from the Sequence
     /// until either a 'wait' command or the end of the Sequence is reached.
-    pub fn update(&mut self, node: &mut S::Target) {
+    pub fn update(&mut self, node: &mut N) {
         while let Some(op) = self.gen_sequencer.fetch_next() {
             match op {
-                Op::RunCustom { id } => <S as Sequence>::_private_run_custom(node, id),
+                Op::RunCustom { id } => (self.run_custom)(node, id),
                 Op::BranchCustom { id, target } => {
-                    if <S as Sequence>::_private_branch_custom(node, id) {
+                    if (self.branch_custom)(node, id) {
                         self.gen_sequencer.position = target as usize;
                     }
                 }

@@ -45,9 +45,14 @@ pub(crate) fn generate_node_list_ids(node_lists: &[NodeList], project_name: &str
         )
     });
     let ids = node_lists.iter().map(|list| list.meta.id);
+    let repr = if node_lists.len() > 0 {
+        quote!(#[repr(usize)])
+    } else {
+        TokenStream::new()
+    };
 
     quote! {
-        #[repr(usize)]
+        #repr
         #[derive(Clone, Copy)]
         pub enum #node_list_ids_type {
             #(#names = #ids),*
@@ -71,7 +76,7 @@ pub(crate) fn generate_decode_node_list_fn(project_name: &str) -> TokenStream {
 
     quote! {
         fn _private_decode_node_list(id: usize) -> ::skylite_core::nodes::NodeList<#project_ident> {
-            let data = crate::#project_crate::gen::NODE_LIST_DATA[id as usize];
+            let data = crate::#project_crate::generated::NODE_LIST_DATA[id as usize];
             let mut decoder = ::skylite_compress::make_decoder(data);
             let len = ::skylite_core::decode::read_varint(decoder.as_mut());
             let nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=#project_ident>>> = (0..len)

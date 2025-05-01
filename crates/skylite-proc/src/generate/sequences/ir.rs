@@ -1,20 +1,18 @@
-use std::collections::HashMap;
-
-use crate::generate::nodes::node_type_name;
 use crate::parse::sequences::{
     BranchCondition, Field, FieldPathSegment, InputLine, InputOp, Sequence,
 };
 use crate::parse::values::TypedValue;
 use crate::{change_case, IdentCase};
 
-#[derive(Debug, PartialEq)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Comparison {
-    Equals,
-    NotEquals,
-    LessThan,
-    GreaterThan,
-    LessEquals,
-    GreaterEquals,
+    Equals = 0,
+    NotEquals = 1,
+    LessThan = 2,
+    GreaterThan = 3,
+    LessEquals = 4,
+    GreaterEquals = 5,
 }
 
 /// Intermediate representation. Each OpIR is compiled into exactly one Op.
@@ -59,8 +57,8 @@ pub(super) enum OpIR {
 
 #[derive(Debug, PartialEq)]
 pub(super) struct OpIRLine {
-    labels: Vec<String>,
-    op_ir: OpIR,
+    pub labels: Vec<String>,
+    pub op_ir: OpIR,
 }
 
 fn push_offset_ops_for_field(field: &Field) -> Vec<OpIR> {
@@ -71,7 +69,7 @@ fn push_offset_ops_for_field(field: &Field) -> Vec<OpIR> {
             FieldPathSegment::StaticNode(node, static_node) => {
                 let node_name = change_case(node, IdentCase::UpperCamelCase);
                 [
-                    OpIR::PushOffset(node.clone(), "static_nodes".to_owned()),
+                    OpIR::PushOffset(node_name.clone(), "static_nodes".to_owned()),
                     OpIR::PushOffset(
                         format!("{node_name}StaticNodes"),
                         change_case(static_node, IdentCase::LowerSnakeCase),

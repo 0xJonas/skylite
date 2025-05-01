@@ -218,8 +218,8 @@ impl InputOpStub {
 
 /// Partially parsed InputLine.
 pub(crate) struct InputLineStub {
-    op: InputOpStub,
-    labels: Vec<String>,
+    pub op: InputOpStub,
+    pub labels: Vec<String>,
 }
 
 fn parse_script(definition: SCM) -> Result<Vec<InputLineStub>, SkyliteProcError> {
@@ -249,10 +249,10 @@ fn parse_script(definition: SCM) -> Result<Vec<InputLineStub>, SkyliteProcError>
 /// alone, but no information that would require Node information, such as field
 /// types.
 pub(crate) struct SequenceStub {
-    meta: AssetMetaData,
-    target_node_name: String,
-    subs: HashMap<String, Vec<InputLineStub>>,
-    script: Vec<InputLineStub>,
+    pub meta: AssetMetaData,
+    pub target_node_name: String,
+    pub subs: HashMap<String, Vec<InputLineStub>>,
+    pub script: Vec<InputLineStub>,
 }
 
 impl SequenceStub {
@@ -624,6 +624,8 @@ fn validate_labels(script: &[InputLine]) -> Result<(), SkyliteProcError> {
                 .iter()
                 .find(|l| l.labels.contains(label))
                 .ok_or(data_err!("Jump target {label} not found"))?;
+
+            // TODO: Prevent the same named label to refer to different indices
         }
     }
 
@@ -672,7 +674,7 @@ fn rename_labels(input: &mut [InputLine], name: &str) {
             if is_backward_label(label) {
                 // Entry must exist, otherwise the validation during parsing would have failed.
                 let idx = anonymous_labels.get(*label).unwrap();
-                **label = format!("{name}-b-{idx}");
+                **label = format!("{name}-b-{label}-{idx}");
             } else if !is_forward_label(label) {
                 **label = format!("{name}-l-{label}");
             }
@@ -687,12 +689,12 @@ fn rename_labels(input: &mut [InputLine], name: &str) {
                 };
                 anonymous_labels.insert(label.to_owned(), idx);
 
-                *label = format!("{name}-b-{idx}");
+                *label = format!("{name}-b-{label}-{idx}");
             } else if is_forward_label(label) {
-                // Entry must exist, otherwise the validation during parsing would have failed.
-                let idx = anonymous_labels.get(label).unwrap();
-                *label = format!("{name}-f-{idx}");
-                anonymous_labels.insert(label.to_owned(), idx + 1);
+                let idx = anonymous_labels.get(label).unwrap_or(&0);
+                let org_label = label.clone();
+                *label = format!("{name}-f-{label}-{idx}");
+                anonymous_labels.insert(org_label, *idx + 1);
             } else {
                 *label = format!("{name}-l-{label}");
             }
@@ -701,7 +703,7 @@ fn rename_labels(input: &mut [InputLine], name: &str) {
         if let Some(label) = target {
             if is_forward_label(label) {
                 let idx = anonymous_labels.entry(label.to_owned()).or_insert(0);
-                *label = format!("{name}-f-{idx}");
+                *label = format!("{name}-f-{label}-{idx}");
             }
         }
     }
@@ -871,13 +873,13 @@ mod tests {
                         }
                     },
                     InputLine {
-                        labels: vec!["main-b-0".to_owned()],
+                        labels: vec!["main-b---0".to_owned()],
                         input_op: InputOp::RunCustom {
                             id: "custom-fn".to_owned()
                         }
                     },
                     InputLine {
-                        labels: vec!["main-b-1".to_owned()],
+                        labels: vec!["main-b---1".to_owned()],
                         input_op: InputOp::Branch {
                             condition: BranchCondition::IfTrue(Field {
                                 path: vec![FieldPathSegment::Property(
@@ -886,7 +888,7 @@ mod tests {
                                 )],
                                 typename: Type::Bool
                             }),
-                            label: "main-b-0".to_owned()
+                            label: "main-b---0".to_owned()
                         }
                     },
                     InputLine {
@@ -921,7 +923,7 @@ mod tests {
                                 },
                                 TypedValue::U8(10)
                             ),
-                            label: "main-b-1".to_owned()
+                            label: "main-b---1".to_owned()
                         }
                     },
                     InputLine {

@@ -30,7 +30,7 @@ impl CompressionBuffer {
         }
 
         let mut writes = val.ilog2() / 7;
-        while writes > 1 {
+        while writes >= 1 {
             self.write_byte(((val >> (writes * 7)) & 0x7f | 0x80) as u8);
             writes -= 1;
         }

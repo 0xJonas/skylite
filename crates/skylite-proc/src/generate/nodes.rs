@@ -89,6 +89,11 @@ fn gen_properties_type(node: &Node, items: &[Item]) -> Result<TokenStream, Skyli
         Some(tokens) => tokens.clone(),
         None => TokenStream::new(),
     };
+    let delimiter = if !extra_properties.is_empty() && !asset_properties.is_empty() {
+        quote!(,)
+    } else {
+        TokenStream::new()
+    };
 
     let create_properties_call = if !asset_properties.is_empty() || !extra_properties.is_empty() {
         get_annotated_function(items, "skylite_proc::create_properties")
@@ -101,7 +106,8 @@ fn gen_properties_type(node: &Node, items: &[Item]) -> Result<TokenStream, Skyli
 
     Ok(quote! {
         pub struct #properties_type_name {
-            #asset_properties,
+            #asset_properties
+            #delimiter
             #extra_properties
         }
 
@@ -344,18 +350,16 @@ pub(crate) fn generate_node_definition(
 
     // This module arrangement has the following goals:
     // - Non-public members inside the generated Node type are not accessible by
-    //   user code, since they are only visible in the gen module.
+    //   user code, since they are only visible in the `generated` module.
     // - The node_definition! macro opens a new scope, so that multiple
     //   node_definitions in the same enclosing module can use the same name for
     //   their callbacks.
     Ok(quote! {
         mod #node_module_name {
-            mod gen {
+            pub mod generated {
                 #![allow(unused_imports)]
                 use ::skylite_core::prelude::*;
-                #(
-                    #imports
-                )*
+                #(#imports)*
 
                 #properties_type
 
@@ -377,12 +381,12 @@ pub(crate) fn generate_node_definition(
             }
 
             use ::skylite_core::prelude::*;
-            pub use gen::*;
+            use generated::*;
 
             #body_raw
         }
 
-        pub use #node_module_name::*;
+        pub use #node_module_name::generated::*;
     })
 }
 
