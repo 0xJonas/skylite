@@ -47,7 +47,7 @@ fn generate_project_type(project_name: &str, target_type: &TokenStream) -> Token
         pub struct #project_ident {
             target: #target_type,
             root_node: ::std::boxed::Box<dyn ::skylite_core::nodes::Node<P=Self>>,
-            graphics_cache: ::std::vec::Vec<::std::rc::Weak<u8>>,
+            graphics_cache: ::std::vec::Vec<::std::sync::Weak<u8>>,
             focus_x: i32,
             focus_y: i32
         }

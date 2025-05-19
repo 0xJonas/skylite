@@ -106,7 +106,7 @@ pub struct DrawContext<'project, P: SkyliteProject> {
     #[doc(hidden)]
     pub target: &'project mut P::Target,
     #[doc(hidden)]
-    pub graphics_cache: &'project mut Vec<std::rc::Weak<u8>>,
+    pub graphics_cache: &'project mut Vec<std::sync::Weak<u8>>,
     #[doc(hidden)]
     pub focus_x: i32,
     #[doc(hidden)]

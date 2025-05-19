@@ -2,7 +2,7 @@ mod wasm4;
 pub mod w4alloc;
 
 use skylite_core::SkyliteTarget;
-use wasm4::{blit_sub, diskr, diskw, BLIT_FLIP_X, BLIT_FLIP_Y, BLIT_ROTATE, SCREEN_SIZE};
+pub use wasm4::*;
 
 pub struct Wasm4Target {
     disk_used: u32
@@ -21,7 +21,8 @@ impl SkyliteTarget for Wasm4Target {
         let atlas_width = u16::from_le_bytes([data[data.len() - 2], data[data.len() - 1]]) as u32;
         let flags = (if flip_h { BLIT_FLIP_X } else { 0 })
             + (if flip_v { BLIT_FLIP_Y } else { 0 })
-            + (if rotate { BLIT_ROTATE } else { 0 });
+            + (if rotate { BLIT_ROTATE } else { 0 })
+            + BLIT_2BPP;
         blit_sub(data, x as i32, y as i32, src_w as u32, src_h as u32, src_x as u32, src_y as u32, atlas_width, flags);
     }
 

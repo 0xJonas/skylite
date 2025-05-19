@@ -84,7 +84,7 @@ pub fn form_to_string(obj: SCM) -> String {
 
 /// Returns the value associated with `key` in `alist`.
 pub(crate) unsafe fn assq_str(key: &str, alist: SCM) -> Result<Option<SCM>, SkyliteProcError> {
-    if scm_is_false(scm_pair_p(alist)) {
+    if scm_is_false(scm_pair_p(alist)) && !scm_is_null(alist) {
         return Err(data_err!("Not an alist: {}", form_to_string(alist)));
     }
 

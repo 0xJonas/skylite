@@ -373,7 +373,7 @@ pub(crate) fn generate_node_definition(
 
                 impl ::skylite_core::nodes::TypeId for #node_name {
                     fn get_id() -> usize {
-                        Self::get_id as usize
+                        <Self as ::skylite_core::nodes::TypeId>::get_id as usize
                     }
                 }
 

@@ -29,6 +29,24 @@ impl<T: TypeId> InstanceId for T {
     }
 }
 
+/// Attempts to convert a trait object to a concrete type.
+pub fn try_as_type<T: TypeId + InstanceId>(node: &dyn InstanceId) -> Option<&T> {
+    if node.get_id() == <T as TypeId>::get_id() {
+        Some(unsafe { &*(node as *const dyn InstanceId as *const T) })
+    } else {
+        None
+    }
+}
+
+/// Attempts to convert a trait object to a concrete type.
+pub fn try_as_type_mut<T: TypeId + InstanceId>(node: &mut dyn InstanceId) -> Option<&mut T> {
+    if node.get_id() == <T as TypeId>::get_id() {
+        Some(unsafe { &mut *(node as *mut dyn InstanceId as *mut T) })
+    } else {
+        None
+    }
+}
+
 /// Nodes are the primary elements from which a Skylite project is constructed.
 ///
 /// Each node contains two sets of children:
@@ -199,6 +217,7 @@ pub mod _private {
         let mut z_sorted: Vec<&dyn Node<P = P>> = Vec::new();
 
         insert_nodes_by_z_order_rec(&mut z_sorted, node, ctx);
+        insert_by_z_order(&mut z_sorted, node);
 
         z_sorted.iter().for_each(|a| a._private_render(ctx));
     }

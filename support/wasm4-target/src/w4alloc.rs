@@ -119,8 +119,8 @@ impl Chunk {
 #[cfg(target_arch = "wasm32")]
 extern "C" {
     // These are supplied by the linker.
-    static __heap_base: usize;
-    static __heap_end: usize;
+    static __heap_base: u8;
+    static __heap_end: u8;
 }
 
 pub struct W4Alloc {
@@ -132,8 +132,8 @@ impl W4Alloc {
         W4Alloc { start: RefCell::new(null_mut()) }
     }
 
-    unsafe fn init_heap(&self, heap_base: u16, heap_end: u16) {
-        let start_chunk_addr = (heap_base + 3) & !0x3;
+    unsafe fn init_heap(&self, heap_base: usize, heap_end: usize) {
+        let start_chunk_addr = ((heap_base + 3) & !0x3) as u16;
         let start_chunk = address_to_pointer(start_chunk_addr);
         let terminator_chunk_addr = ((heap_end as usize - size_of::<Chunk>()) & !0x3) as u16;
         let terminator_chunk = address_to_pointer(terminator_chunk_addr);
@@ -150,7 +150,7 @@ impl W4Alloc {
 
     #[cfg(target_arch = "wasm32")]
     pub unsafe fn init(&self) {
-        self.init_heap(__heap_base as u16, __heap_end as u16);
+        self.init_heap(&raw const __heap_base as usize, &raw const __heap_end as usize);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -159,7 +159,7 @@ impl W4Alloc {
     }
 
     #[cfg(test)]
-    pub unsafe fn init_test(&self, heap_base: u16, heap_end: u16) {
+    pub unsafe fn init_test(&self, heap_base: usize, heap_end: usize) {
         self.init_heap(heap_base, heap_end);
     }
 }
@@ -240,7 +240,7 @@ mod test {
     fn initialization() {
         unsafe {
             let alloc = W4Alloc::new();
-            alloc.init_test(0x2000_u16, 0x4000_u16);
+            alloc.init_test(0x2000, 0x4000);
 
             let start_chunk = chunk_at(0x2000);
             assert_eq!((*start_chunk).next_with_status, 0x3ffc);
@@ -256,7 +256,7 @@ mod test {
     fn alloc() {
         unsafe {
             let alloc = W4Alloc::new();
-            alloc.init_test(0x4000_u16, 0x6000_u16);
+            alloc.init_test(0x4000, 0x6000);
 
             let ptr = alloc.alloc(Layout::from_size_align(0x100, 1).unwrap());
             assert!(!ptr.is_null());
@@ -287,7 +287,7 @@ mod test {
     fn dealloc() {
         unsafe {
             let alloc = W4Alloc::new();
-            alloc.init_test(0x6000_u16, 0x8000_u16);
+            alloc.init_test(0x6000, 0x8000);
 
             let layout = Layout::from_size_align(0x100, 1).unwrap();
             let ptr1 = alloc.alloc(layout);

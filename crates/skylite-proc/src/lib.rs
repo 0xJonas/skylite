@@ -501,6 +501,14 @@ pub fn z_order(
     body
 }
 
+#[proc_macro_attribute]
+pub fn is_visible(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
+}
+
 #[cfg(debug_assertions)]
 #[proc_macro]
 pub fn debug_output(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {

@@ -35,7 +35,7 @@ fn calc_ring_buffer_init(data: &[u8]) -> [u8; 4] {
 
 /// Encode `data` using range coding.
 pub fn encode_rc<'a>(data: &[u8]) -> Vec<u8> {
-    assert!(data.len() > 0);
+    debug_assert!(data.len() > 0);
 
     let mut out = Vec::new();
 
@@ -194,7 +194,7 @@ impl<'a> Decoder for RCDecoder<'a> {
             // println!("start = {:x}, width = {:x}, x = {:x} ... adjusting", self.start,
             // self.width, self.x);
             self.adjust_range();
-            assert_ne!(self.width, 0);
+            debug_assert_ne!(self.width, 0);
         }
 
         // Update counts
