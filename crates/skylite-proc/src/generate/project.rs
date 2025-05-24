@@ -47,9 +47,9 @@ fn generate_project_type(project_name: &str, target_type: &TokenStream) -> Token
         pub struct #project_ident {
             target: #target_type,
             root_node: ::std::boxed::Box<dyn ::skylite_core::nodes::Node<P=Self>>,
-            graphics_cache: ::std::vec::Vec<::std::sync::Weak<u8>>,
             focus_x: i32,
-            focus_y: i32
+            focus_y: i32,
+            update_count: u32
         }
     }
 }
@@ -72,9 +72,9 @@ fn generate_project_new_method(
             let mut out = #project_ident {
                 target,
                 root_node: ::std::boxed::Box::new(#root_node_name::new(#(#root_node_params),*)),
-                graphics_cache: ::std::vec::Vec::new(),
                 focus_x: w as i32 / 2,
-                focus_y: h as i32 / 2
+                focus_y: h as i32 / 2,
+                update_count: 0
             };
 
             #init_call
@@ -96,6 +96,39 @@ fn generate_project_impl(project_name: &str) -> TokenStream {
     }
 }
 
+fn gen_new_draw_context() -> TokenStream {
+    quote! {
+        ::skylite_core::RenderControls::_private_new(
+            &mut self.target,
+            self.focus_x,
+            self.focus_y,
+            self.update_count
+        )
+    }
+}
+
+fn gen_new_project_controls() -> TokenStream {
+    quote! {
+        ::skylite_core::ProjectControls::_private_new(draw_context)
+    }
+}
+
+fn gen_apply_project_controls() -> TokenStream {
+    quote! {
+        {
+            let (focus_x, focus_y) = controls.get_focus();
+            self.focus_x = focus_x;
+            self.focus_y = focus_y;
+
+            self.update_count += 1;
+
+            if let Some(get_fn) = controls.pending_root_node.take() {
+                self.set_root_node(get_fn);
+            }
+        }
+    }
+}
+
 fn generate_project_trait_impl(
     project: &SkyliteProject,
     target_type: &TokenStream,
@@ -108,6 +141,10 @@ fn generate_project_trait_impl(
     let project_ident = project_ident(&project.name);
     let tile_type_name = tile_type_name(&project.name);
     let node_list_ids_type = node_list_ids_type(&project.name);
+
+    let new_draw_context = gen_new_draw_context();
+    let new_project_controls = gen_new_project_controls();
+    let apply_project_controls = gen_apply_project_controls();
 
     let init = get_annotated_function(items, "skylite_proc::init")
         .map(get_name)
@@ -149,12 +186,8 @@ fn generate_project_trait_impl(
             #new_method
 
             fn render(&mut self) {
-                let mut draw_context = ::skylite_core::DrawContext {
-                    target: &mut self.target,
-                    graphics_cache: &mut self.graphics_cache,
-                    focus_x: self.focus_x,
-                    focus_y: self.focus_y
-                };
+                let mut draw_context = #new_draw_context;
+
                 #pre_render
 
                 // Main rendering
@@ -164,10 +197,8 @@ fn generate_project_trait_impl(
             }
 
             fn update(&mut self) {
-                let mut controls = ::skylite_core::ProjectControls {
-                    target: &mut self.target,
-                    pending_root_node: None
-                };
+                let draw_context = #new_draw_context;
+                let mut controls = #new_project_controls;
 
                 #pre_update
 
@@ -176,9 +207,7 @@ fn generate_project_trait_impl(
 
                 #post_update
 
-                if let Some(get_fn) = controls.pending_root_node.take() {
-                    self.set_root_node(get_fn);
-                }
+                #apply_project_controls
             }
 
             fn set_root_node(&mut self, get_fn: Box<dyn FnOnce() -> Box<dyn ::skylite_core::nodes::Node<P=Self>>>) {
@@ -249,7 +278,7 @@ mod tests {
             fn pre_update(project: &mut Test1) {}
 
             #[skylite_proc::post_render]
-            fn post_render(project: &mut skylite_core::DrawContext<'static, Test1>) {}
+            fn post_render(project: &mut skylite_core::RenderControls<'static, Test1>) {}
         };
 
         let project = SkyliteProject::from_stub(
@@ -269,9 +298,9 @@ mod tests {
                     let mut out = Test1 {
                         target,
                         root_node: ::std::boxed::Box::new(TestNode::new(false, 5u8)),
-                        graphics_cache: ::std::vec::Vec::new(),
                         focus_x: w as i32 / 2,
-                        focus_y: h as i32 / 2
+                        focus_y: h as i32 / 2,
+                        update_count: 0
                     };
 
                     init(&mut out);
@@ -279,30 +308,41 @@ mod tests {
                 }
 
                 fn render(&mut self) {
-                    let mut draw_context = ::skylite_core::DrawContext {
-                        target: &mut self.target,
-                        graphics_cache: &mut self.graphics_cache,
-                        focus_x: self.focus_x,
-                        focus_y: self.focus_y
-                    };
+                    let mut draw_context = ::skylite_core::RenderControls::_private_new(
+                        &mut self.target,
+                        self.focus_x,
+                        self.focus_y,
+                        self.update_count
+                    );
 
                     ::skylite_core::nodes::_private::render_node(self.root_node.as_ref(), &mut draw_context);
                     post_render(&mut draw_context);
                 }
 
                 fn update(&mut self) {
-                    let mut controls = ::skylite_core::ProjectControls {
-                        target: &mut self.target,
-                        pending_root_node: None
-                    };
+                    let draw_context = ::skylite_core::RenderControls::_private_new(
+                        &mut self.target,
+                        self.focus_x,
+                        self.focus_y,
+                        self.update_count
+                    );
+                    let mut controls = ::skylite_core::ProjectControls::_private_new(draw_context);
 
                     pre_update(&mut controls);
 
                     // Main update
                     self.root_node._private_update(&mut controls);
 
-                    if let Some(get_fn) = controls.pending_root_node.take() {
-                        self.set_root_node(get_fn);
+                    {
+                        let (focus_x, focus_y) = controls.get_focus();
+                        self.focus_x = focus_x;
+                        self.focus_y = focus_y;
+
+                        self.update_count += 1;
+
+                        if let Some(get_fn) = controls.pending_root_node.take() {
+                            self.set_root_node(get_fn);
+                        }
                     }
                 }
 

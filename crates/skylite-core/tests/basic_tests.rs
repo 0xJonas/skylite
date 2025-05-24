@@ -17,14 +17,14 @@ node_definition! {
 
     #[skylite_proc::pre_update]
     fn pre_update(node: &BasicNode1, controls: &mut ProjectControls<TestProject1>) {
-        controls.target.push_tag(&node.properties.id);
-        controls.target.log("basic-node-1::pre_update");
+        controls.get_target_instance_mut().push_tag(&node.properties.id);
+        controls.get_target_instance_mut().log("basic-node-1::pre_update");
     }
 
     #[skylite_proc::post_update]
     fn post_update(_node: &BasicNode1, controls: &mut ProjectControls<TestProject1>) {
-        controls.target.log("basic-node-1::post_update");
-        controls.target.pop_tag();
+        controls.get_target_instance_mut().log("basic-node-1::post_update");
+        controls.get_target_instance_mut().pop_tag();
     }
 }
 
@@ -41,14 +41,14 @@ node_definition! {
 
     #[skylite_proc::update]
     fn update(node: &BasicNode2, controls: &mut ProjectControls<TestProject1>) {
-        controls.target.push_tag(&node.properties.id);
-        controls.target.log("basic-node-2::update");
-        controls.target.pop_tag();
+        controls.get_target_instance_mut().push_tag(&node.properties.id);
+        controls.get_target_instance_mut().log("basic-node-2::update");
+        controls.get_target_instance_mut().pop_tag();
     }
 }
 
 node_definition! {
-    use skylite_core::{DrawContext, ProjectControls};
+    use skylite_core::{RenderControls, ProjectControls};
     use super::TestProject1;
 
     skylite_proc::asset_file!("./tests/test-project-1/project.scm", "z-order-node");
@@ -64,17 +64,17 @@ node_definition! {
     }
 
     #[skylite_proc::render]
-    fn render(node: &ZOrderNode, ctx: &mut DrawContext<TestProject1>) {
-        ctx.target.push_tag(&node.properties.id);
-        ctx.target.log(&format!("z-order-node::render@{}", node.properties.z_order));
-        ctx.target.pop_tag();
+    fn render(node: &ZOrderNode, ctx: &mut RenderControls<TestProject1>) {
+        ctx.get_target_instance_mut().push_tag(&node.properties.id);
+        ctx.get_target_instance_mut().log(&format!("z-order-node::render@{}", node.properties.z_order));
+        ctx.get_target_instance_mut().pop_tag();
     }
 
     #[skylite_proc::update]
     fn update(node: &ZOrderNode, controls: &mut ProjectControls<TestProject1>) {
-        controls.target.push_tag(&node.properties.id);
-        controls.target.log("z-order-node::update");
-        controls.target.pop_tag();
+        controls.get_target_instance_mut().push_tag(&node.properties.id);
+        controls.get_target_instance_mut().log("z-order-node::update");
+        controls.get_target_instance_mut().pop_tag();
     }
 }
 
@@ -89,26 +89,26 @@ skylite_project! {
 
     #[skylite_proc::pre_update]
     fn pre_update(controls: &mut ProjectControls<TestProject1>) {
-        controls.target.push_tag("root");
-        controls.target.log("pre_update");
+        controls.get_target_instance_mut().push_tag("root");
+        controls.get_target_instance_mut().log("pre_update");
     }
 
     #[skylite_proc::post_update]
     fn post_update(controls: &mut ProjectControls<TestProject1>) {
-        controls.target.log("post_update");
-        controls.target.pop_tag();
+        controls.get_target_instance_mut().log("post_update");
+        controls.get_target_instance_mut().pop_tag();
     }
 
     #[skylite_proc::pre_render]
-    fn pre_render(ctx: &mut DrawContext<TestProject1>) {
-        ctx.target.push_tag("root");
-        ctx.target.log("pre_render");
+    fn pre_render(ctx: &mut RenderControls<TestProject1>) {
+        ctx.get_target_instance_mut().push_tag("root");
+        ctx.get_target_instance_mut().log("pre_render");
     }
 
     #[skylite_proc::post_render]
-    fn post_render(ctx: &mut DrawContext<TestProject1>) {
-        ctx.target.log("post_render");
-        ctx.target.pop_tag();
+    fn post_render(ctx: &mut RenderControls<TestProject1>) {
+        ctx.get_target_instance_mut().log("post_render");
+        ctx.get_target_instance_mut().pop_tag();
     }
 }
 

@@ -285,7 +285,7 @@ fn gen_node_impl(
                 #post_update_call;
             }
 
-            fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
+            fn _private_render(&self, ctx: &mut ::skylite_core::RenderControls<Self::P>) {
                 #render_call;
             }
 
@@ -293,7 +293,7 @@ fn gen_node_impl(
                 #z_order_call
             }
 
-            fn is_visible(&self, ctx: &::skylite_core::DrawContext<Self::P>) -> bool {
+            fn is_visible(&self, ctx: &::skylite_core::RenderControls<Self::P>) -> bool {
                 #is_visible_call
             }
 
@@ -469,7 +469,7 @@ mod tests {
             fn update(&mut self, controls: &mut ProjectControls<MyProject>) {}
 
             #[skylite_proc::render]
-            fn render(&self, ctx: &mut DrawContext<MyProject>) {}
+            fn render(&self, ctx: &mut RenderControls<MyProject>) {}
         };
         file.items
     }
@@ -530,7 +530,7 @@ mod tests {
                     super::update(self, controls);
                 }
 
-                fn _private_render(&self, ctx: &mut ::skylite_core::DrawContext<Self::P>) {
+                fn _private_render(&self, ctx: &mut ::skylite_core::RenderControls<Self::P>) {
                     super::render(self, ctx);
                 }
 
@@ -538,7 +538,7 @@ mod tests {
                     1
                 }
 
-                fn is_visible(&self, ctx: &::skylite_core::DrawContext<Self::P>) -> bool {
+                fn is_visible(&self, ctx: &::skylite_core::RenderControls<Self::P>) -> bool {
                     true
                 }
 

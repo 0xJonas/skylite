@@ -1,6 +1,6 @@
 use skylite_compress::Decoder;
 
-use crate::{DrawContext, Ids, ProjectControls, SkyliteProject};
+use crate::{Ids, ProjectControls, RenderControls, SkyliteProject};
 
 mod list;
 
@@ -64,11 +64,11 @@ pub trait Node: TypeId + InstanceId {
 
     fn _private_update(&mut self, controls: &mut ProjectControls<Self::P>);
 
-    fn _private_render(&self, ctx: &mut DrawContext<Self::P>);
+    fn _private_render(&self, ctx: &mut RenderControls<Self::P>);
 
     fn z_order(&self) -> i32;
 
-    fn is_visible(&self, ctx: &DrawContext<Self::P>) -> bool;
+    fn is_visible(&self, ctx: &RenderControls<Self::P>) -> bool;
 
     /// Returns a shared references to the list of this node's static children.
     fn get_static_nodes(&self) -> Box<[&dyn Node<P = Self::P>]>;
@@ -166,7 +166,7 @@ pub mod _private {
     use skylite_compress::Decoder;
 
     use super::{Node, TypeId};
-    use crate::{DrawContext, ProjectControls, SkyliteProject};
+    use crate::{ProjectControls, RenderControls, SkyliteProject};
 
     pub fn update_node_rec<P: SkyliteProject>(
         node: &mut dyn Node<P = P>,
@@ -196,7 +196,7 @@ pub mod _private {
     fn insert_nodes_by_z_order_rec<'nodes, P: SkyliteProject>(
         list: &mut Vec<&'nodes dyn Node<P = P>>,
         node: &'nodes dyn Node<P = P>,
-        ctx: &DrawContext<P>,
+        ctx: &RenderControls<P>,
     ) {
         for n in node.get_static_nodes().iter() {
             if n.is_visible(ctx) {
@@ -213,7 +213,7 @@ pub mod _private {
         }
     }
 
-    pub fn render_node<P: SkyliteProject>(node: &dyn Node<P = P>, ctx: &mut DrawContext<P>) {
+    pub fn render_node<P: SkyliteProject>(node: &dyn Node<P = P>, ctx: &mut RenderControls<P>) {
         let mut z_sorted: Vec<&dyn Node<P = P>> = Vec::new();
 
         insert_nodes_by_z_order_rec(&mut z_sorted, node, ctx);
@@ -247,7 +247,7 @@ pub mod _private {
             unimplemented!()
         }
 
-        fn _private_render(&self, _ctx: &mut DrawContext<Self::P>) {
+        fn _private_render(&self, _ctx: &mut RenderControls<Self::P>) {
             unimplemented!()
         }
 
@@ -255,7 +255,7 @@ pub mod _private {
             unimplemented!()
         }
 
-        fn is_visible(&self, _ctx: &DrawContext<Self::P>) -> bool {
+        fn is_visible(&self, _ctx: &RenderControls<Self::P>) -> bool {
             unimplemented!()
         }
 

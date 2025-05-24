@@ -49,8 +49,8 @@ node_definition! {
     }
 
     #[skylite_proc::update]
-    fn update(node: &mut FizzBuzz, _controls: &mut ProjectControls<SequenceTest>) {
-        _controls.target.log(&format!("Counter: {}, Status: {}", node.properties.counter, node.properties.status));
+    fn update(node: &mut FizzBuzz, controls: &mut skylite_core::ProjectControls<SequenceTest>) {
+        controls.get_target_instance_mut().log(&format!("Counter: {}, Status: {}", node.properties.counter, node.properties.status));
     }
 }
 

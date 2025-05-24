@@ -97,32 +97,101 @@ pub trait SkyliteProject {
     fn _private_get_sequence_data(sequence_id: usize) -> &'static [u8];
 }
 
-/// Holds the rendering state.
-///
-/// The `DrawContext` contains all information required for graphics
-/// rendering, such as a handle of the current [`SkyliteTarget`],
-/// the cache for the currently loaded graphics, or the current camera focus.
-pub struct DrawContext<'project, P: SkyliteProject> {
+/// Controls used for rendering tasks. An instance of this type is available to
+/// nodes in their `render` method.
+pub struct RenderControls<'project, P: SkyliteProject> {
+    target: &'project mut P::Target,
+    focus_x: i32,
+    focus_y: i32,
+    update_count: u32,
+}
+
+impl<'project, P: SkyliteProject> RenderControls<'project, P> {
     #[doc(hidden)]
-    pub target: &'project mut P::Target,
-    #[doc(hidden)]
-    pub graphics_cache: &'project mut Vec<std::sync::Weak<u8>>,
-    #[doc(hidden)]
-    pub focus_x: i32,
-    #[doc(hidden)]
-    pub focus_y: i32,
+    pub fn _private_new(
+        target: &'project mut P::Target,
+        focus_x: i32,
+        focus_y: i32,
+        update_count: u32,
+    ) -> RenderControls<'project, P> {
+        RenderControls {
+            target,
+            focus_x,
+            focus_y,
+            update_count,
+        }
+    }
+
+    /// Returns a shared reference to the project's instance of `SkyliteTarget`.
+    pub fn get_target_instance(&self) -> &P::Target {
+        self.target
+    }
+
+    /// Returns a mutable reference to the project's instance of
+    /// `SkyliteTarget`.
+    pub fn get_target_instance_mut(&mut self) -> &mut P::Target {
+        self.target
+    }
+
+    /// Returns the current focus as `(x-offset, y-offset)`.
+    pub fn get_focus(&self) -> (i32, i32) {
+        (self.focus_x, self.focus_y)
+    }
+
+    /// Returns the number of times `update()` was called on the project
+    /// instance.
+    pub fn get_update_count(&self) -> u32 {
+        self.update_count
+    }
 }
 
 /// Type used to change various parts of a `SkyliteProject` instance.
 ///
 /// This is the main type that nodes have access to in their update methods.
 pub struct ProjectControls<'project, P: SkyliteProject> {
-    pub target: &'project mut P::Target,
+    draw_context: RenderControls<'project, P>,
     #[doc(hidden)]
     pub pending_root_node: Option<Box<dyn FnOnce() -> Box<dyn Node<P = P>>>>,
 }
 
 impl<'project, P: SkyliteProject> ProjectControls<'project, P> {
+    #[doc(hidden)]
+    pub fn _private_new(draw_context: RenderControls<'project, P>) -> ProjectControls<'project, P> {
+        ProjectControls {
+            draw_context,
+            pending_root_node: None,
+        }
+    }
+
+    /// Returns a shared reference to the project's instance of `SkyliteTarget`.
+    pub fn get_target_instance(&self) -> &P::Target {
+        self.draw_context.get_target_instance()
+    }
+
+    /// Returns a mutable reference to the project's instance of
+    /// `SkyliteTarget`.
+    pub fn get_target_instance_mut(&mut self) -> &mut P::Target {
+        self.draw_context.get_target_instance_mut()
+    }
+
+    /// Sets the camera focus. The focus is used by various built-in nodes to
+    /// handle scrolling.
+    pub fn set_focus(&mut self, x: i32, y: i32) {
+        self.draw_context.focus_x = x;
+        self.draw_context.focus_y = y;
+    }
+
+    /// Returns the current focus as `(x-offset, y-offset)`.
+    pub fn get_focus(&self) -> (i32, i32) {
+        (self.draw_context.focus_x, self.draw_context.focus_y)
+    }
+
+    /// Returns the number of times `update()` was called on the project
+    /// instance.
+    pub fn get_update_count(&self) -> u32 {
+        self.draw_context.update_count
+    }
+
     /// Schedules a root node change. When this method is called from a
     /// node's update method, the current update cycle is run to completion
     /// and only after that is the new root node set.

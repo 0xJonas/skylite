@@ -43,13 +43,13 @@ impl<P: SkyliteProject> Node for SList<P> {
         }
     }
 
-    fn _private_render(&self, _ctx: &mut crate::DrawContext<Self::P>) {}
+    fn _private_render(&self, _ctx: &mut crate::RenderControls<Self::P>) {}
 
     fn z_order(&self) -> i32 {
         1
     }
 
-    fn is_visible(&self, _ctx: &crate::DrawContext<Self::P>) -> bool {
+    fn is_visible(&self, _ctx: &crate::RenderControls<Self::P>) -> bool {
         false
     }
 
