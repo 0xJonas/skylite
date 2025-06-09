@@ -68,12 +68,11 @@ fn generate_project_new_method(
         .map(|arg| typed_value_to_rust(arg, project_name));
     quote! {
         fn new(target: #target_type) -> #project_ident {
-            let (w, h) = target.get_screen_size();
             let mut out = #project_ident {
                 target,
                 root_node: ::std::boxed::Box::new(#root_node_name::new(#(#root_node_params),*)),
-                focus_x: w as i32 / 2,
-                focus_y: h as i32 / 2,
+                focus_x: 0,
+                focus_y: 0,
                 update_count: 0
             };
 
@@ -294,12 +293,11 @@ mod tests {
                 type NodeListIds = Test1NodeListIds;
 
                 fn new(target: MockTarget) -> Test1 {
-                    let (w, h) = target.get_screen_size();
                     let mut out = Test1 {
                         target,
                         root_node: ::std::boxed::Box::new(TestNode::new(false, 5u8)),
-                        focus_x: w as i32 / 2,
-                        focus_y: h as i32 / 2,
+                        focus_x: 0,
+                        focus_y: 0,
                         update_count: 0
                     };
 

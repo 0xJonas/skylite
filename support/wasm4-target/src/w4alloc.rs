@@ -1,4 +1,5 @@
 use std::{alloc::{GlobalAlloc, Layout}, mem::size_of, ptr::null_mut, cell::RefCell};
+use crate::wasm4::trace;
 
 struct Chunk {
     next_with_status: u16,
@@ -70,11 +71,15 @@ impl Chunk {
         debug_assert_eq!(offset & 0x3, 0, "Offset must have an alignment of at least 4 bytes.");
 
         let address_self = pointer_to_address(self as *const Self);
+        let next_chunk = &mut *address_to_pointer(self.next_with_status & !0x3);
+
         debug_assert!(self.next_with_status < address_self || address_self + offset < self.next_with_status, "Offset is not between the given chunks.");
 
         let address_new = address_self + offset;
         let new_ptr = address_to_pointer(address_new);
         new_ptr.write(Self { next_with_status: self.next_with_status, prev: address_self });
+
+        next_chunk.prev = address_new;
 
         self.next_with_status = address_new;
 
@@ -189,6 +194,7 @@ unsafe impl GlobalAlloc for W4Alloc {
                     let _ = current_chunk.split((size + size_of::<Chunk>()) as u16);
                 }
 
+                debug_assert!(current_chunk.can_hold_layout(size, align), "Trimmed chunk no longer fulfills layout request");
                 current_chunk.set_used(true);
                 return current_chunk.body();
             } else {
@@ -204,7 +210,7 @@ unsafe impl GlobalAlloc for W4Alloc {
         let chunk_ptr = ptr.offset(-(size_of::<Chunk>() as isize)) as *mut Chunk;
         let chunk = &mut *chunk_ptr;
         debug_assert!(chunk.is_used(), "Attempted to free an unused chunk.");
-        chunk.next_with_status &= !0x3;
+        chunk.set_used(false);
 
         let prev_chunk = &mut *address_to_pointer(chunk.prev);
         if !prev_chunk.is_used() {
