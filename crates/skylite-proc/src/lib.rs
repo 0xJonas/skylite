@@ -10,11 +10,11 @@ use parse::project::{SkyliteProject, SkyliteProjectStub};
 use parse::scheme_util::form_to_string;
 use parse::sequences::SequenceStub;
 use parse::util::{change_case, IdentCase};
-use proc_macro2::{TokenStream, TokenTree};
-use quote::{format_ident, quote};
+use proc_macro2::TokenStream;
+use quote::{quote, ToTokens};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
-use syn::{parse2, File, Item, LitStr, Token};
+use syn::{parse2, Expr, ExprLit, File, Item, ItemMod, Token};
 
 macro_rules! syntax_err {
     ($msg:literal $(,$args:expr)*) => {
@@ -63,10 +63,23 @@ impl Into<TokenStream> for SkyliteProcError {
     }
 }
 
-fn parse_project_file(tokens: &TokenStream) -> Result<PathBuf, SkyliteProcError> {
-    let path_raw = parse2::<LitStr>(tokens.clone())
-        .map(|lit| lit.value())
-        .map_err(|err| syntax_err!("Illegal arguments to project_file!: {}", err))?;
+fn string_from_expr(expr: &Expr, err: SkyliteProcError) -> Result<String, SkyliteProcError> {
+    if let Expr::Lit(ExprLit {
+        lit: syn::Lit::Str(s),
+        ..
+    }) = expr
+    {
+        Ok(s.value())
+    } else {
+        Err(err)
+    }
+}
+
+fn parse_project_file(expr: &Expr) -> Result<PathBuf, SkyliteProcError> {
+    let path_raw = string_from_expr(
+        expr,
+        syntax_err!("Expected a string literal for project path"),
+    )?;
 
     let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
     let relative_path =
@@ -127,28 +140,52 @@ fn get_endianness_check() -> TokenStream {
     }
 }
 
-fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
-    let items = parse2::<File>(body_raw)
-        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
-        .items;
+fn skylite_project_impl_fallible(
+    args_raw: TokenStream,
+    body_raw: TokenStream,
+) -> Result<TokenStream, SkyliteProcError> {
+    let args = Punctuated::<Expr, Token![,]>::parse_separated_nonempty.parse2(args_raw).map_err(|err| {
+        syntax_err!(
+            "Failed to parse #[skylite_project(...)] arguments: {err}. Expected (\"project-path\", target_type)"
+        )
+    })?;
 
-    let project_file_mac = get_macro_item("skylite_proc::project_file", &items)?.ok_or(
-        data_err!("Missing required macro skylite_proc::project_file!"),
-    )?;
-    let path = parse_project_file(project_file_mac)?;
+    if args.len() != 2 {
+        return Err(syntax_err!(
+            "Wrong number of arguments to #[skylite_project(...)], expected (\"project-path\", target_type)"
+        ));
+    }
 
-    let target_type_mac = get_macro_item("skylite_proc::target_type", &items)?.ok_or(data_err!(
-        "Missing required macro skylite_proc::target_type!"
-    ))?;
-    // Verify that the content of target_type is actually a valid path.
-    parse2::<syn::Path>(target_type_mac.clone())
+    let path = parse_project_file(&args[0])?;
+
+    let mut module = parse2::<ItemMod>(body_raw)
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
+
+    let items = &module
+        .content
+        .as_ref()
+        .ok_or(data_err!("skylite_project! module must have a body"))?
+        .1;
+
+    // Verify that the content of target_type is actually a valid path.
+    let target_type = match &args[1] {
+        Expr::Path(path) => &path.path,
+        _ => {
+            return Err(syntax_err!("target_type must be a type."));
+        }
+    };
 
     let project_stub = SkyliteProjectStub::from_file(&path)?;
     let project = SkyliteProject::from_stub(project_stub)?;
 
-    let module_name = format_ident!("{}", change_case(&project.name, IdentCase::LowerSnakeCase));
-    let project_items = project.generate(&target_type_mac, &items)?;
+    let mut project_items = project.generate(target_type, &items)?;
+
+    module
+        .content
+        .as_mut()
+        .unwrap()
+        .1
+        .append(&mut project_items);
 
     let crate_root_check = get_crate_root_check();
     let endianness_check = get_endianness_check();
@@ -157,29 +194,8 @@ fn skylite_project_impl_fallible(body_raw: TokenStream) -> Result<TokenStream, S
         #crate_root_check
         #endianness_check
 
-        mod #module_name {
-            pub mod generated {
-                use ::skylite_core::prelude::*;
-                use super::*;
-
-                #(#project_items)
-                *
-            }
-
-            use ::skylite_core::prelude::*;
-            use generated::*;
-
-            #(#items)
-            *
-        }
-
-        pub use #module_name::generated::*;
+        #module
     };
-
-    #[cfg(debug_assertions)]
-    {
-        process_debug_output(&out, &items)?;
-    }
 
     Ok(out)
 }
@@ -188,7 +204,7 @@ fn extract_asset_file(
     asset_file: &TokenStream,
 ) -> Result<(SkyliteProjectStub, String), SkyliteProcError> {
     let args = Parser::parse2(
-        Punctuated::<LitStr, Token![,]>::parse_separated_nonempty,
+        Punctuated::<Expr, Token![,]>::parse_separated_nonempty,
         asset_file.clone(),
     )
     .map_err(|err| {
@@ -203,53 +219,30 @@ fn extract_asset_file(
         ));
     }
 
-    let relative_path = PathBuf::try_from(args[0].value())
-        .map_err(|_| data_err!("Not a valid project path: {}", args[0].value()))?;
+    let project_root = parse_project_file(&args[0])?;
+    let stub = SkyliteProjectStub::from_file(&project_root)?;
 
-    let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
-    let stub = SkyliteProjectStub::from_file(&base_dir.join(relative_path))?;
+    let asset_name = string_from_expr(
+        &args[1],
+        syntax_err!("Expected a string literal for asset name"),
+    )?;
 
-    return Ok((stub, args[1].value()));
+    return Ok((stub, asset_name));
 }
 
-/// Implements the `skylite_proc::debug_output!` macro. This macro takes a
-/// string literal representing a file as an argument and writes the generated
-/// code to that file.
-#[cfg(debug_assertions)]
-fn process_debug_output(out: &TokenStream, items: &[Item]) -> Result<(), SkyliteProcError> {
-    let tokens = match get_macro_item("skylite_proc::debug_output", &items)? {
-        Some(m) => m,
-        None => return Ok(()),
-    };
+fn node_definition_fallible(
+    args_raw: TokenStream,
+    body_raw: TokenStream,
+) -> Result<TokenStream, SkyliteProcError> {
+    let mut module = parse2::<ItemMod>(body_raw.clone())
+        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
+    let items = &module
+        .content
+        .as_ref()
+        .ok_or(data_err!("Node definition module must have a body"))?
+        .1;
 
-    let path = match tokens.clone().into_iter().next() {
-        Some(TokenTree::Literal(lit)) => {
-            let path_str = lit.to_string();
-            // Strip quotes from string literal
-            PathBuf::try_from(&path_str[1..path_str.len() - 1])
-                .map_err(|e| SkyliteProcError::SyntaxError(e.to_string()))?
-        }
-        _ => {
-            return Err(syntax_err!(
-                "Wrong argument for debug_output!, expected string literal"
-            ))
-        }
-    };
-
-    let base_dir = PathBuf::from_str(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
-    std::fs::write(base_dir.join(path), out.to_string()).unwrap();
-
-    Ok(())
-}
-
-fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
-    let items = parse2::<File>(body_raw.clone())
-        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
-        .items;
-
-    let args = get_macro_item("skylite_proc::asset_file", &items)?
-        .ok_or(data_err!("Missing required macro asset_file!"))?;
-    let (project_stub, name) = extract_asset_file(args)?;
+    let (project_stub, name) = extract_asset_file(&args_raw)?;
     let meta = project_stub
         .assets
         .nodes
@@ -258,22 +251,28 @@ fn node_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Skylit
 
     let node = Node::from_meta(meta.clone(), &project_stub.assets)?;
 
-    let out = generate_node_definition(&node, &project_stub.name, &items, &body_raw)?;
+    generate_node_definition(&node, &project_stub.name, items)?;
 
-    #[cfg(debug_assertions)]
-    process_debug_output(&out, &items)?;
+    let tokens = Item::Verbatim(generate_node_definition(&node, &project_stub.name, items)?);
 
-    Ok(out)
+    module.content.as_mut().unwrap().1.push(tokens);
+
+    Ok(module.into_token_stream())
 }
 
-fn sequence_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, SkyliteProcError> {
-    let items = parse2::<File>(body_raw.clone())
-        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?
-        .items;
+fn sequence_definition_fallible(
+    args_raw: TokenStream,
+    body_raw: TokenStream,
+) -> Result<TokenStream, SkyliteProcError> {
+    let mut module = parse2::<ItemMod>(body_raw.clone())
+        .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
+    let items = &module
+        .content
+        .as_ref()
+        .ok_or(data_err!("Node definition module must have a body"))?
+        .1;
 
-    let args = get_macro_item("skylite_proc::asset_file", &items)?
-        .ok_or(data_err!("Missing required macro asset_file!"))?;
-    let (project_stub, name) = extract_asset_file(args)?;
+    let (project_stub, name) = extract_asset_file(&args_raw)?;
     let meta = project_stub
         .assets
         .sequences
@@ -282,63 +281,65 @@ fn sequence_definition_fallible(body_raw: TokenStream) -> Result<TokenStream, Sk
 
     let sequence_stub = SequenceStub::from_meta(meta)?;
 
-    let out = generate_sequence_definition(&sequence_stub, &project_stub.name, &items, &body_raw)?;
+    let tokens = Item::Verbatim(generate_sequence_definition(
+        &sequence_stub,
+        &project_stub.name,
+        &items,
+    )?);
 
-    #[cfg(debug_assertions)]
-    process_debug_output(&out, &items)?;
+    module.content.as_mut().unwrap().1.push(tokens);
 
-    Ok(out)
+    Ok(module.into_token_stream())
 }
 
-fn skylite_project_impl(body_raw: TokenStream) -> TokenStream {
-    match skylite_project_impl_fallible(body_raw) {
+fn skylite_project_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenStream {
+    match skylite_project_impl_fallible(args_raw, body_raw) {
         Ok(t) => t,
         Err(err) => err.into(),
     }
 }
 
-fn node_definition_impl(body_raw: TokenStream) -> TokenStream {
-    match node_definition_fallible(body_raw) {
+fn node_definition_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenStream {
+    match node_definition_fallible(args_raw, body_raw) {
         Ok(stream) => stream,
         Err(err) => err.into(),
     }
 }
 
-fn sequence_definition_impl(body_raw: TokenStream) -> TokenStream {
-    match sequence_definition_fallible(body_raw) {
+fn sequence_definition_impl(args_raw: TokenStream, body_raw: TokenStream) -> TokenStream {
+    match sequence_definition_fallible(args_raw, body_raw) {
         Ok(stream) => stream,
         Err(err) => err.into(),
     }
 }
 
-#[proc_macro]
-pub fn skylite_project(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    skylite_project_impl(body.into()).into()
+#[proc_macro_attribute]
+pub fn skylite_project(
+    args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    skylite_project_impl(args.into(), body.into()).into()
 }
 
-#[proc_macro]
-pub fn node_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    node_definition_impl(body.into()).into()
+#[proc_macro_attribute]
+pub fn node_definition(
+    args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    node_definition_impl(args.into(), body.into()).into()
 }
 
-#[proc_macro]
-pub fn sequence_definition(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    sequence_definition_impl(body.into()).into()
+#[proc_macro_attribute]
+pub fn sequence_definition(
+    args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    sequence_definition_impl(args.into(), body.into()).into()
 }
 
 #[proc_macro]
 pub fn system(args: proc_macro::TokenStream) -> proc_macro::TokenStream {
     system_impl(args.into()).into()
-}
-
-#[proc_macro]
-pub fn project_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    proc_macro::TokenStream::new()
-}
-
-#[proc_macro]
-pub fn target_type(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    proc_macro::TokenStream::new()
 }
 
 /// Marks a function to initialize something. Used for `node_definition!` and
@@ -507,10 +508,4 @@ pub fn is_visible(
     body: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     body
-}
-
-#[cfg(debug_assertions)]
-#[proc_macro]
-pub fn debug_output(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    proc_macro::TokenStream::new()
 }

@@ -410,24 +410,11 @@ pub(crate) fn generate_sequence_definition(
     sequence: &SequenceStub,
     project_name: &str,
     items: &[Item],
-    body_raw: &TokenStream,
 ) -> Result<TokenStream, SkyliteProcError> {
-    let mod_name = format_ident!(
-        "{}",
-        change_case(&sequence.meta.name, IdentCase::LowerSnakeCase)
-    );
     let sequence_handle_name = format_ident!(
         "{}Handle",
         change_case(&sequence.meta.name, IdentCase::UpperCamelCase)
     );
-
-    let imports = items.iter().filter_map(|item| {
-        if let Item::Use(import) = item {
-            Some(import.to_owned())
-        } else {
-            None
-        }
-    });
 
     let id = sequence.meta.id;
     let project_ident = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
@@ -440,29 +427,17 @@ pub(crate) fn generate_sequence_definition(
     let branch_custom = gen_branch_custom(sequence, items)?;
 
     Ok(quote! {
-        mod #mod_name {
-            pub mod generated {
-                use ::skylite_core::sequences::SequenceHandle;
+        use ::skylite_core::sequences::SequenceHandle;
 
-                #(#imports)*
+        pub struct #sequence_handle_name;
 
-                pub struct #sequence_handle_name;
+        impl SequenceHandle for #sequence_handle_name {
+            const ID: usize = #id;
+            type P = #project_ident;
+            type Target = #target_node_ident;
 
-                impl SequenceHandle for #sequence_handle_name {
-                    const ID: usize = #id;
-                    type P = #project_ident;
-                    type Target = #target_node_ident;
-
-                    #run_custom
-                    #branch_custom
-                }
-            }
-
-            use generated::*;
-            use ::skylite_core::prelude::*;
-            #body_raw
+            #run_custom
+            #branch_custom
         }
-
-        use #mod_name::generated::*;
     })
 }

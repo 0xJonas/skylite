@@ -1,20 +1,20 @@
 use skylite_core::SkyliteProject;
 use skylite_mock::{Call, MockTarget};
-use skylite_proc::{node_definition, skylite_project};
+use skylite_proc::{node_definition, sequence_definition, skylite_project};
 
-skylite_proc::sequence_definition! {
-    use super::SequenceTest;
-    use super::FizzBuzz;
-
-    skylite_proc::asset_file!("./tests/test-project-2/project.scm", "fizz-buzz-seq");
+#[sequence_definition("./tests/test-project-2/project.scm", "fizz-buzz-seq")]
+mod fizz_buzz_seq {
+    use crate::fizz_buzz::FizzBuzz;
+    use crate::project::SequenceTest;
 }
 
-skylite_proc::node_definition! {
+#[node_definition("./tests/test-project-2/project.scm", "wrapper")]
+mod wrapper {
     use skylite_core::sequences::Sequencer;
-    use super::FizzBuzz;
-    use super::SequenceTest;
+    use skylite_core::ProjectControls;
 
-    skylite_proc::asset_file!("./tests/test-project-2/project.scm", "wrapper");
+    use super::fizz_buzz::FizzBuzz;
+    use crate::project::SequenceTest;
 
     skylite_proc::extra_properties! {
         pub sequencer: Sequencer<FizzBuzz>
@@ -23,54 +23,62 @@ skylite_proc::node_definition! {
     #[skylite_proc::create_properties]
     fn create_properties() -> WrapperProperties {
         WrapperProperties {
-            sequencer: Sequencer::new(super::FizzBuzzSeqHandle)
+            sequencer: Sequencer::new(crate::fizz_buzz_seq::FizzBuzzSeqHandle),
         }
     }
 
     #[skylite_proc::update]
     fn update(node: &mut Wrapper, _controls: &mut ProjectControls<SequenceTest>) {
-        node.properties.sequencer.update(&mut node.static_nodes.content);
+        node.properties
+            .sequencer
+            .update(&mut node.static_nodes.content);
     }
 }
 
-node_definition! {
-    use super::SequenceTest;
-    use super::FizzBuzzScratch;
-
-    skylite_proc::asset_file!("./tests/test-project-2/project.scm", "fizz-buzz");
+#[node_definition("./tests/test-project-2/project.scm", "fizz-buzz")]
+mod fizz_buzz {
+    use super::fizz_buzz_scratch::FizzBuzzScratch;
+    use crate::project::SequenceTest;
 
     #[skylite_proc::create_properties]
     fn create_properties() -> FizzBuzzProperties {
         FizzBuzzProperties {
             counter: 0,
             status: String::new(),
-            stop: false
+            stop: false,
         }
     }
 
     #[skylite_proc::update]
     fn update(node: &mut FizzBuzz, controls: &mut skylite_core::ProjectControls<SequenceTest>) {
-        controls.get_target_instance_mut().log(&format!("Counter: {}, Status: {}", node.properties.counter, node.properties.status));
+        controls.get_target_instance_mut().log(&format!(
+            "Counter: {}, Status: {}",
+            node.properties.counter, node.properties.status
+        ));
     }
 }
 
-node_definition! {
-    use super::SequenceTest;
-
-    skylite_proc::asset_file!("./tests/test-project-2/project.scm", "fizz-buzz-scratch");
+#[node_definition("./tests/test-project-2/project.scm", "fizz-buzz-scratch")]
+mod fizz_buzz_scratch {
+    use crate::project::SequenceTest;
 
     #[skylite_proc::create_properties]
     fn create_properties() -> FizzBuzzScratchProperties {
-        FizzBuzzScratchProperties { check_counter: 0, is_fizz: false, is_buzz: false }
+        FizzBuzzScratchProperties {
+            check_counter: 0,
+            is_fizz: false,
+            is_buzz: false,
+        }
     }
 }
 
-skylite_project! {
+#[skylite_project("./tests/test-project-2/project.scm", MockTarget)]
+mod project {
     use skylite_mock::MockTarget;
-    use super::{FizzBuzz, FizzBuzzProperties, FizzBuzzStaticNodes, FizzBuzzScratch, FizzBuzzScratchProperties, Wrapper};
 
-    skylite_proc::target_type!(MockTarget);
-    skylite_proc::project_file!("./tests/test-project-2/project.scm");
+    use super::fizz_buzz::{FizzBuzz, FizzBuzzProperties, FizzBuzzStaticNodes};
+    use super::fizz_buzz_scratch::{FizzBuzzScratch, FizzBuzzScratchProperties};
+    use super::wrapper::Wrapper;
 }
 
 fn match_call(call: &Call, expected: &str) -> bool {
@@ -85,7 +93,7 @@ fn match_call(call: &Call, expected: &str) -> bool {
 fn test_sequence() {
     let mut target = MockTarget::new();
     target.push_tag("test");
-    let mut project = SequenceTest::new(target);
+    let mut project = project::SequenceTest::new(target);
     for _ in 0..20 {
         project.update();
     }

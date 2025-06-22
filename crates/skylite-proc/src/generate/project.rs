@@ -41,7 +41,7 @@ pub(crate) fn project_ident(project_name: &str) -> Ident {
     format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase))
 }
 
-fn generate_project_type(project_name: &str, target_type: &TokenStream) -> TokenStream {
+fn generate_project_type(project_name: &str, target_type: &syn::Path) -> TokenStream {
     let project_ident = project_ident(project_name);
     quote! {
         pub struct #project_ident {
@@ -56,7 +56,7 @@ fn generate_project_type(project_name: &str, target_type: &TokenStream) -> Token
 
 fn generate_project_new_method(
     project_name: &str,
-    target_type: &TokenStream,
+    target_type: &syn::Path,
     init_call: &TokenStream,
     root_node: &NodeInstance,
 ) -> TokenStream {
@@ -130,7 +130,7 @@ fn gen_apply_project_controls() -> TokenStream {
 
 fn generate_project_trait_impl(
     project: &SkyliteProject,
-    target_type: &TokenStream,
+    target_type: &syn::Path,
     items: &[Item],
 ) -> TokenStream {
     fn get_name(fun: &ItemFn) -> Ident {
@@ -231,7 +231,7 @@ fn generate_project_trait_impl(
 impl SkyliteProject {
     pub(crate) fn generate(
         &self,
-        target_type: &TokenStream,
+        target_type: &syn::Path,
         items: &[Item],
     ) -> Result<Vec<Item>, SkyliteProcError> {
         Ok(vec![
@@ -285,7 +285,8 @@ mod tests {
         )
         .unwrap();
 
-        let actual = generate_project_trait_impl(&project, &quote!(MockTarget), &body_parsed.items);
+        let actual =
+            generate_project_trait_impl(&project, &parse_quote!(MockTarget), &body_parsed.items);
         let expectation = quote! {
             impl skylite_core::SkyliteProject for Test1 {
                 type Target = MockTarget;
@@ -357,7 +358,7 @@ mod tests {
                 }
 
                 fn _private_decode_node_list(id: usize) -> ::skylite_core::nodes::NodeList<Test1> {
-                    let data = crate::test1::generated::NODE_LIST_DATA[id as usize];
+                    let data = _PRIVATE_NODE_LIST_DATA[id as usize];
                     let mut decoder = ::skylite_compress::make_decoder(data);
                     let len = ::skylite_core::decode::read_varint(decoder.as_mut());
                     let nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=Test1>>> = (0 .. len)
