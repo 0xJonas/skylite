@@ -1,5 +1,5 @@
-use super::{Node, NodeList, TypeId};
 use crate::decode::read_varint;
+use crate::nodes::{Node, NodeIterator, NodeIteratorMut, NodeList, TypeId};
 use crate::SkyliteProject;
 
 /// A Node that integrates the contents of a `NodeList` into the Node tree
@@ -53,21 +53,18 @@ impl<P: SkyliteProject> Node for SList<P> {
         false
     }
 
-    fn get_static_nodes(&self) -> Box<[&dyn Node<P = Self::P>]> {
-        let out: Vec<&dyn Node<P = Self::P>> = Vec::new();
-        out.into_boxed_slice()
+    fn iter_nodes<'node>(&'node self) -> NodeIterator<'node, Self::P> {
+        use crate::nodes::NodeIterable;
+        let mut iter = NodeIterator::new();
+        iter._private_push_sub_iterator(self.nodes.0.get_iterator());
+        iter
     }
 
-    fn get_dynamic_nodes(&self) -> &Vec<Box<dyn Node<P = Self::P>>> {
-        self.nodes.get_nodes()
-    }
+    fn iter_nodes_mut<'node>(&'node mut self) -> super::NodeIteratorMut<'node, Self::P> {
+        use crate::nodes::NodeIterableMut;
 
-    fn get_static_nodes_mut(&mut self) -> Box<[&mut dyn Node<P = Self::P>]> {
-        let out: Vec<&mut dyn Node<P = Self::P>> = Vec::new();
-        out.into_boxed_slice()
-    }
-
-    fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>> {
-        self.nodes.get_nodes_mut()
+        let mut iter = NodeIteratorMut::new();
+        iter._private_push_sub_iterator(self.nodes.0.get_iterator_mut());
+        iter
     }
 }

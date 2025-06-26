@@ -14,7 +14,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
-use syn::{parse2, Expr, ExprLit, File, Item, ItemMod, Token};
+use syn::{parse2, Expr, ExprLit, Item, ItemMod, Token};
 
 macro_rules! syntax_err {
     ($msg:literal $(,$args:expr)*) => {

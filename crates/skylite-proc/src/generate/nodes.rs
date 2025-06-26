@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_quote, Ident, Item, ItemFn};
+use syn::{Ident, Item, ItemFn};
 
 use super::encode::{CompressionBuffer, Serialize};
 use crate::assets::AssetSource;
@@ -213,11 +213,14 @@ fn gen_node_impl(
 ) -> Result<TokenStream, SkyliteProcError> {
     let node_name = node_type_name(&node.meta.name);
     let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
-    let static_node_names: Vec<Ident> = node
+    let mut static_node_names: Vec<Ident> = node
         .static_nodes
         .iter()
         .map(|(n, _)| format_ident!("{}", change_case(n, IdentCase::LowerSnakeCase)))
         .collect();
+    // Sub-nodes need to be added in reverse order to the NodeIterator in iter_nodes
+    // and iter_nodes_mut, because NodeIterator again reverses the order.
+    static_node_names.reverse();
 
     let decode_statements = generate_deserialize_statements(&node.parameters);
     let args = generate_argument_list(&node.parameters);
@@ -294,26 +297,24 @@ fn gen_node_impl(
                 #is_visible_call
             }
 
-            fn get_static_nodes(&self) -> Box<[&dyn ::skylite_core::nodes::Node<P = Self::P>]> {
-                let out: Vec<&dyn ::skylite_core::nodes::Node<P = Self::P>> = vec![
-                    #(&self.static_nodes.#static_node_names),*
-                ];
-                out.into_boxed_slice()
+            fn iter_nodes<'node>(&'node self) -> ::skylite_core::nodes::NodeIterator<'node, Self::P> {
+                use ::skylite_core::nodes::NodeIterable;
+                let mut iter = ::skylite_core::nodes::NodeIterator::new();
+                iter._private_push_sub_iterator(self.dynamic_nodes.get_iterator());
+                #(
+                    iter._private_push_single(&self.static_nodes.#static_node_names);
+                )*
+                iter
             }
 
-            fn get_dynamic_nodes(&self) -> &Vec<Box<dyn ::skylite_core::nodes::Node<P = Self::P>>> {
-                &self.dynamic_nodes
-            }
-
-            fn get_static_nodes_mut(&mut self) -> Box<[&mut dyn ::skylite_core::nodes::Node<P = Self::P>]> {
-                let out: Vec<&mut dyn ::skylite_core::nodes::Node<P = Self::P>> = vec![
-                    #(&mut self.static_nodes.#static_node_names),*
-                ];
-                out.into_boxed_slice()
-            }
-
-            fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn ::skylite_core::nodes::Node<P = Self::P>>> {
-                &mut self.dynamic_nodes
+            fn iter_nodes_mut<'node>(&'node mut self) -> ::skylite_core::nodes::NodeIteratorMut<'node, Self::P> {
+                use ::skylite_core::nodes::NodeIterableMut;
+                let mut iter = ::skylite_core::nodes::NodeIteratorMut::new();
+                iter._private_push_sub_iterator(self.dynamic_nodes.get_iterator_mut());
+                #(
+                    iter._private_push_single(&mut self.static_nodes.#static_node_names);
+                )*
+                iter
             }
         }
     })
@@ -504,26 +505,20 @@ mod tests {
                     true
                 }
 
-                fn get_static_nodes(&self) -> Box<[&dyn ::skylite_core::nodes::Node<P = Self::P>]> {
-                    let out: Vec<&dyn ::skylite_core::nodes::Node<P = Self::P>> = vec![
-                        &self.static_nodes.static1
-                    ];
-                    out.into_boxed_slice()
+                fn iter_nodes<'node>(&'node self) -> ::skylite_core::nodes::NodeIterator<'node, Self::P> {
+                    use ::skylite_core::nodes::NodeIterable;
+                    let mut iter = ::skylite_core::nodes::NodeIterator::new();
+                    iter._private_push_sub_iterator(self.dynamic_nodes.get_iterator());
+                    iter._private_push_single(&self.static_nodes.static1);
+                    iter
                 }
 
-                fn get_dynamic_nodes(&self) -> &Vec<Box<dyn ::skylite_core::nodes::Node<P = Self::P>>> {
-                    &self.dynamic_nodes
-                }
-
-                fn get_static_nodes_mut(&mut self) -> Box<[&mut dyn ::skylite_core::nodes::Node<P = Self::P>]> {
-                    let out: Vec<&mut dyn ::skylite_core::nodes::Node<P = Self::P>> = vec![
-                        &mut self.static_nodes.static1
-                    ];
-                    out.into_boxed_slice()
-                }
-
-                fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn ::skylite_core::nodes::Node<P = Self::P>>> {
-                    &mut self.dynamic_nodes
+                fn iter_nodes_mut<'node>(&'node mut self) -> ::skylite_core::nodes::NodeIteratorMut<'node, Self::P> {
+                    use ::skylite_core::nodes::NodeIterableMut;
+                    let mut iter = ::skylite_core::nodes::NodeIteratorMut::new();
+                    iter._private_push_sub_iterator(self.dynamic_nodes.get_iterator_mut());
+                    iter._private_push_single(&mut self.static_nodes.static1);
+                    iter
                 }
             }
         };

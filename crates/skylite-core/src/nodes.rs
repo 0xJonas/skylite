@@ -47,6 +47,161 @@ pub fn try_as_type_mut<T: TypeId + InstanceId>(node: &mut dyn InstanceId) -> Opt
     }
 }
 
+/// Trait for types that iterate over a list of nodes.
+/// Produces an iterator that returns shared references with lifetime `'items`.
+pub trait NodeIterable<'nodes, P: SkyliteProject> {
+    fn get_iterator(self) -> Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes>;
+}
+
+impl<'nodes, P: SkyliteProject> NodeIterable<'nodes, P> for &'nodes [Box<dyn Node<P = P>>] {
+    fn get_iterator(self) -> Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes> {
+        Box::new(self.iter().map(|n| n.as_ref()))
+    }
+}
+
+impl<'nodes, P: SkyliteProject> NodeIterable<'nodes, P> for &'nodes Vec<Box<dyn Node<P = P>>> {
+    fn get_iterator(self) -> Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes> {
+        self.as_slice().get_iterator()
+    }
+}
+
+enum NodeRef<'nodes, P: SkyliteProject> {
+    Single(&'nodes dyn Node<P = P>),
+    SubIterator(Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes>),
+}
+
+pub struct NodeIterator<'nodes, P: SkyliteProject> {
+    refs: Vec<NodeRef<'nodes, P>>,
+    current_sub_iter: Option<Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes>>,
+}
+
+impl<'nodes, P: SkyliteProject> NodeIterator<'nodes, P> {
+    pub fn new() -> NodeIterator<'nodes, P> {
+        NodeIterator {
+            refs: Vec::new(),
+            current_sub_iter: None,
+        }
+    }
+
+    pub fn _private_push_single(&mut self, node: &'nodes dyn Node<P = P>) {
+        self.refs.push(NodeRef::Single(node));
+    }
+
+    pub fn _private_push_sub_iterator(
+        &mut self,
+        iter: Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes>,
+    ) {
+        self.refs.push(NodeRef::SubIterator(iter));
+    }
+}
+
+impl<'nodes, P: SkyliteProject> Iterator for NodeIterator<'nodes, P> {
+    type Item = &'nodes dyn Node<P = P>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(iter) = &mut self.current_sub_iter {
+                if let Some(node) = iter.next() {
+                    return Some(node);
+                } else {
+                    self.current_sub_iter = None;
+                }
+            }
+
+            match self.refs.pop() {
+                Some(NodeRef::Single(node)) => return Some(node),
+                Some(NodeRef::SubIterator(iter)) => self.current_sub_iter = Some(iter),
+                None => return None,
+            }
+        }
+    }
+}
+
+/// Trait for types that iterate mutably over a list of nodes.
+/// Produces an iterator that returns mutable references with lifetime `'items`.
+pub trait NodeIterableMut<'nodes, P: SkyliteProject> {
+    fn get_iterator_mut(
+        self,
+    ) -> Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes>;
+}
+
+impl<'nodes, P: SkyliteProject> NodeIterableMut<'nodes, P>
+    for &'nodes mut [Box<dyn Node<P = P>>]
+{
+    fn get_iterator_mut(
+        self,
+    ) -> Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes> {
+        Box::new(
+            self.iter_mut()
+                .map(|n| n.as_mut() as &mut (dyn Node<P = P> + 'nodes)),
+        )
+    }
+}
+
+impl<'nodes, P: SkyliteProject> NodeIterableMut<'nodes, P>
+    for &'nodes mut Vec<Box<dyn Node<P = P>>>
+{
+    fn get_iterator_mut(
+        self,
+    ) -> Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes> {
+        self.as_mut_slice().get_iterator_mut()
+    }
+}
+
+enum NodeMut<'nodes, P: SkyliteProject> {
+    Single(&'nodes mut dyn Node<P = P>),
+    SubIterator(Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes>),
+}
+
+/// Iterator that returns mutable references to Nodes.
+pub struct NodeIteratorMut<'nodes, P: SkyliteProject> {
+    refs: Vec<NodeMut<'nodes, P>>,
+    current_sub_iter:
+        Option<Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes>>,
+}
+
+impl<'nodes, P: SkyliteProject> NodeIteratorMut<'nodes, P> {
+    pub fn new() -> NodeIteratorMut<'nodes, P> {
+        NodeIteratorMut {
+            refs: Vec::new(),
+            current_sub_iter: None,
+        }
+    }
+
+    pub fn _private_push_single(&mut self, node: &'nodes mut dyn Node<P = P>) {
+        self.refs.push(NodeMut::Single(node));
+    }
+
+    pub fn _private_push_sub_iterator(
+        &mut self,
+        iter: Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes>,
+    ) {
+        self.refs.push(NodeMut::SubIterator(iter));
+    }
+}
+
+impl<'nodes, P: SkyliteProject> Iterator for NodeIteratorMut<'nodes, P> {
+    type Item = &'nodes mut dyn Node<P = P>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(iter) = &mut self.current_sub_iter {
+                if let Some(node) = iter.next() {
+                    return Some(node);
+                } else {
+                    self.current_sub_iter = None;
+                }
+            }
+
+            match self.refs.pop() {
+                Some(NodeMut::Single(node)) => return Some(node),
+                Some(NodeMut::SubIterator(iter)) => self.current_sub_iter = Some(iter),
+                None => return None,
+            }
+        }
+    }
+}
+
 /// Nodes are the primary elements from which a Skylite project is constructed.
 ///
 /// Each node contains two sets of children:
@@ -70,19 +225,8 @@ pub trait Node: TypeId + InstanceId {
 
     fn is_visible(&self, ctx: &RenderControls<Self::P>) -> bool;
 
-    /// Returns a shared references to the list of this node's static children.
-    fn get_static_nodes(&self) -> Box<[&dyn Node<P = Self::P>]>;
-
-    /// Returns a shared references to the list of this node's dynamic children.
-    fn get_dynamic_nodes(&self) -> &Vec<Box<dyn Node<P = Self::P>>>;
-
-    /// Returns a mutable references to the list of this node's static children.
-    fn get_static_nodes_mut(&mut self) -> Box<[&mut dyn Node<P = Self::P>]>;
-
-    /// Returns a mutable references to the list of this node's dynamic
-    /// children. This result of this method can be used to add or remove
-    /// dynamic nodes.
-    fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>>;
+    fn iter_nodes<'node>(&'node self) -> NodeIterator<'node, Self::P>;
+    fn iter_nodes_mut<'node>(&'node mut self) -> NodeIteratorMut<'node, Self::P>;
 }
 
 /// A collection of `Nodes`.
@@ -120,27 +264,15 @@ macro_rules! system_fn {
                 let mut $vars: Option<&mut $types> = None;
             )+
 
-            // Iterate over the static child nodes and fill the references as matching
-            // nodes are found. Also invoke the system on each child node recursively.
-            for n in node.get_static_nodes_mut().iter_mut() {
-                $(
-                    if n.get_id() == <$types as TypeId>::get_id() {
-                        $vars = Some(unsafe {&mut *((*n) as *mut dyn Node<P=P> as *mut $types) })
-                    }
-                )+
-
-                $name::<P, $($types),+>(*n, func);
-            }
-
             // Same as above, but for the dynamic nodes.
-            for n in node.get_dynamic_nodes_mut() {
+            for n in node.iter_nodes_mut() {
                 $(
                     if n.get_id() == <$types as TypeId>::get_id() {
-                        $vars = Some( unsafe { &mut *(n.as_mut() as *mut dyn Node<P=P> as *mut $types) })
+                        $vars = Some( unsafe { &mut *(n as *mut dyn Node<P=P> as *mut $types) })
                     }
                 )+
 
-                $name::<P, $($types),+>(n.as_mut(), func);
+                $name::<P, $($types),+>(n, func);
             }
 
             // If a node for each parameter type of the system function was found, call the system.
@@ -172,11 +304,7 @@ pub mod _private {
         node: &mut dyn Node<P = P>,
         controls: &mut ProjectControls<P>,
     ) {
-        node.get_static_nodes_mut()
-            .iter_mut()
-            .for_each(|sub| sub._private_update(controls));
-        node.get_dynamic_nodes_mut()
-            .iter_mut()
+        node.iter_nodes_mut()
             .for_each(|sub| sub._private_update(controls));
     }
 
@@ -198,18 +326,11 @@ pub mod _private {
         node: &'nodes dyn Node<P = P>,
         ctx: &RenderControls<P>,
     ) {
-        for n in node.get_static_nodes().iter() {
+        for n in node.iter_nodes() {
             if n.is_visible(ctx) {
-                insert_by_z_order(list, *n);
+                insert_by_z_order(list, n);
             }
-            insert_nodes_by_z_order_rec(list, *n, ctx);
-        }
-
-        for n in node.get_dynamic_nodes() {
-            if n.is_visible(ctx) {
-                insert_by_z_order(list, n.as_ref());
-            }
-            insert_nodes_by_z_order_rec(list, n.as_ref(), ctx);
+            insert_nodes_by_z_order_rec(list, n, ctx);
         }
     }
 
@@ -259,19 +380,11 @@ pub mod _private {
             unimplemented!()
         }
 
-        fn get_static_nodes(&self) -> Box<[&dyn Node<P = Self::P>]> {
+        fn iter_nodes<'node>(&'node self) -> super::NodeIterator<'node, Self::P> {
             unimplemented!()
         }
 
-        fn get_dynamic_nodes(&self) -> &Vec<Box<dyn Node<P = Self::P>>> {
-            unimplemented!()
-        }
-
-        fn get_static_nodes_mut(&mut self) -> Box<[&mut dyn Node<P = Self::P>]> {
-            unimplemented!()
-        }
-
-        fn get_dynamic_nodes_mut(&mut self) -> &mut Vec<Box<dyn Node<P = Self::P>>> {
+        fn iter_nodes_mut<'node>(&'node mut self) -> super::NodeIteratorMut<'node, Self::P> {
             unimplemented!()
         }
     }
