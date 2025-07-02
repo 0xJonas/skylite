@@ -26,8 +26,8 @@ pub(crate) fn encode_node_instance(instance: &NodeInstance, buffer: &mut Compres
 
 pub(crate) fn generate_decode_node_fn(
     project_name: &str,
-    nodes: &[Node],
-    node_lists: &[NodeList],
+    nodes: &[&Node],
+    node_lists: &[&NodeList],
 ) -> TokenStream {
     // Only include nodes which are actually encoded,
     // i.e. those which appear as NodeInstances in NodeLists or Node properties.
@@ -363,9 +363,8 @@ mod tests {
     use super::gen_node_new_fn;
     use crate::assets::{AssetMetaData, AssetSource, AssetType};
     use crate::generate::nodes::gen_node_impl;
-    use crate::parse::nodes::NodeInstance;
+    use crate::parse::nodes::{Node, NodeInstance};
     use crate::parse::values::{Type, TypedValue, Variable};
-    use crate::Node;
 
     fn create_test_node() -> Node {
         Node {

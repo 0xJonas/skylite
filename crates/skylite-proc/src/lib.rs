@@ -5,10 +5,8 @@ use generate::nodes::generate_node_definition;
 use generate::sequences::generate_sequence_definition;
 use generate::util::get_macro_item;
 use parse::guile::SCM;
-use parse::nodes::Node;
-use parse::project::{SkyliteProject, SkyliteProjectStub};
+use parse::project::SkyliteProject;
 use parse::scheme_util::form_to_string;
-use parse::sequences::SequenceStub;
 use parse::util::{change_case, IdentCase};
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
@@ -175,8 +173,7 @@ fn skylite_project_impl_fallible(
         }
     };
 
-    let project_stub = SkyliteProjectStub::from_file(&path)?;
-    let project = SkyliteProject::from_stub(project_stub)?;
+    let mut project = SkyliteProject::from_file(&path, true)?;
 
     let mut project_items = project.generate(target_type, &items)?;
 
@@ -202,7 +199,7 @@ fn skylite_project_impl_fallible(
 
 fn extract_asset_file(
     asset_file: &TokenStream,
-) -> Result<(SkyliteProjectStub, String), SkyliteProcError> {
+) -> Result<(SkyliteProject, String), SkyliteProcError> {
     let args = Parser::parse2(
         Punctuated::<Expr, Token![,]>::parse_separated_nonempty,
         asset_file.clone(),
@@ -220,7 +217,7 @@ fn extract_asset_file(
     }
 
     let project_root = parse_project_file(&args[0])?;
-    let stub = SkyliteProjectStub::from_file(&project_root)?;
+    let stub = SkyliteProject::from_file(&project_root, false)?;
 
     let asset_name = string_from_expr(
         &args[1],
@@ -242,18 +239,12 @@ fn node_definition_fallible(
         .ok_or(data_err!("Node definition module must have a body"))?
         .1;
 
-    let (project_stub, name) = extract_asset_file(&args_raw)?;
-    let meta = project_stub
-        .assets
-        .nodes
-        .get(&name)
-        .ok_or(data_err!("Node not found: {name}"))?;
+    let (mut project, name) = extract_asset_file(&args_raw)?;
+    let node = project.assets.load_node(&name)?;
 
-    let node = Node::from_meta(meta.clone(), &project_stub.assets)?;
+    generate_node_definition(&node, &project.name, items)?;
 
-    generate_node_definition(&node, &project_stub.name, items)?;
-
-    let tokens = Item::Verbatim(generate_node_definition(&node, &project_stub.name, items)?);
+    let tokens = Item::Verbatim(generate_node_definition(&node, &project.name, items)?);
 
     module.content.as_mut().unwrap().1.push(tokens);
 
@@ -272,18 +263,12 @@ fn sequence_definition_fallible(
         .ok_or(data_err!("Node definition module must have a body"))?
         .1;
 
-    let (project_stub, name) = extract_asset_file(&args_raw)?;
-    let meta = project_stub
-        .assets
-        .sequences
-        .get(&name)
-        .ok_or(data_err!("Sequence not found: {name}"))?;
-
-    let sequence_stub = SequenceStub::from_meta(meta)?;
+    let (mut project, name) = extract_asset_file(&args_raw)?;
+    let sequence = project.assets.load_sequence(&name)?;
 
     let tokens = Item::Verbatim(generate_sequence_definition(
-        &sequence_stub,
-        &project_stub.name,
+        &sequence,
+        &project.name,
         &items,
     )?);
 

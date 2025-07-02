@@ -7,7 +7,7 @@ use super::scheme_util::{
     cxr, form_to_string, iter_list, parse_bool, parse_f32, parse_f64, parse_int, parse_string,
     parse_symbol,
 };
-use crate::assets::Assets;
+use crate::assets::AssetIndex;
 use crate::SkyliteProcError;
 
 /// Type of a Skylite variable or parameter.
@@ -103,7 +103,7 @@ pub(crate) enum TypedValue {
 pub(crate) unsafe fn parse_typed_value(
     typename: &Type,
     data: SCM,
-    assets: &Assets,
+    assets: &AssetIndex,
 ) -> Result<TypedValue, SkyliteProcError> {
     match typename {
         Type::U8 => Ok(TypedValue::U8(parse_int(data)?)),
@@ -140,7 +140,7 @@ pub(crate) unsafe fn parse_typed_value(
 unsafe fn parse_typed_value_tuple(
     types: &[Type],
     values: SCM,
-    assets: &Assets,
+    assets: &AssetIndex,
 ) -> Result<TypedValue, SkyliteProcError> {
     if types.len() as i64 != scm_to_int64(scm_length(values)) {
         return Err(data_err!(
@@ -164,7 +164,7 @@ pub(crate) struct Variable {
 
 pub(crate) unsafe fn parse_variable_definition(
     def: SCM,
-    assets: &Assets,
+    assets: &AssetIndex,
 ) -> Result<Variable, SkyliteProcError> {
     if scm_is_false(scm_list_p(def)) {
         return Err(data_err!(
@@ -220,7 +220,7 @@ pub(crate) unsafe fn parse_variable_definition(
 pub(crate) unsafe fn parse_argument_list(
     args_raw: SCM,
     parameters: &[Variable],
-    assets: &Assets,
+    assets: &AssetIndex,
 ) -> Result<Vec<TypedValue>, SkyliteProcError> {
     // Pad with empty values. If there are any empty values left after the argument
     // list has been parsed, replace with the corresponding default values. If
@@ -277,15 +277,15 @@ mod tests {
     use std::collections::HashMap;
 
     use super::parse_argument_list;
-    use crate::assets::Assets;
+    use crate::assets::AssetIndex;
     use crate::parse::guile::{scm_from_bool, scm_from_double, scm_from_int32};
     use crate::parse::scheme_util::{eval_str, with_guile};
     use crate::parse::values::{
         parse_type, parse_typed_value, parse_variable_definition, Type, TypedValue, Variable,
     };
 
-    fn empty_assets() -> Assets {
-        Assets {
+    fn empty_assets() -> AssetIndex {
+        AssetIndex {
             nodes: HashMap::new(),
             node_lists: HashMap::new(),
             sequences: HashMap::new(),

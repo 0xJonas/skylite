@@ -7,9 +7,9 @@ use syn::Item;
 
 use super::util::get_annotated_function;
 use crate::generate::encode::{CompressionBuffer, Serialize};
-use crate::parse::sequences::{InputOpStub, Sequence};
+use crate::parse::sequences::{InputOp, Sequence};
 use crate::parse::values::TypedValue;
-use crate::{change_case, IdentCase, SequenceStub, SkyliteProcError};
+use crate::{change_case, IdentCase, SkyliteProcError};
 
 mod ir;
 
@@ -246,7 +246,7 @@ fn ir_to_compiled_sequence(
     buffer.encode()
 }
 
-fn compile_sequences(sequences: &[Sequence]) -> CompilationResult {
+fn compile_sequences(sequences: &[&Sequence]) -> CompilationResult {
     let mut required_offsets_map = HashMap::new();
     let compiled_data: Vec<Vec<u8>> = sequences
         .iter()
@@ -274,7 +274,7 @@ fn compile_sequences(sequences: &[Sequence]) -> CompilationResult {
     }
 }
 
-pub(crate) fn generate_sequence_data(sequences: &[Sequence]) -> TokenStream {
+pub(crate) fn generate_sequence_data(sequences: &[&Sequence]) -> TokenStream {
     let res = compile_sequences(sequences);
 
     let num_sequences = res.compiled_data.len();
@@ -313,8 +313,8 @@ pub(crate) fn generate_sequence_data(sequences: &[Sequence]) -> TokenStream {
     }
 }
 
-fn collect_ids<IdFun: Fn(&InputOpStub) -> Option<String>>(
-    sequence: &SequenceStub,
+fn collect_ids<IdFun: Fn(&InputOp) -> Option<String>>(
+    sequence: &Sequence,
     id_fun: IdFun,
 ) -> Vec<String> {
     let mut ids: Vec<String> = sequence
@@ -322,7 +322,7 @@ fn collect_ids<IdFun: Fn(&InputOpStub) -> Option<String>>(
         .values()
         .flat_map(|sub| sub.iter())
         .chain(sequence.script.iter())
-        .filter_map(|line| id_fun(&line.op))
+        .filter_map(|line| id_fun(&line.input_op))
         .collect();
 
     ids.sort();
@@ -330,12 +330,9 @@ fn collect_ids<IdFun: Fn(&InputOpStub) -> Option<String>>(
     ids
 }
 
-fn gen_run_custom(
-    sequence: &SequenceStub,
-    items: &[Item],
-) -> Result<TokenStream, SkyliteProcError> {
+fn gen_run_custom(sequence: &Sequence, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     let ids = collect_ids(sequence, |op| {
-        if let InputOpStub::RunCustom(id) = op {
+        if let InputOp::RunCustom { id } = op {
             Some(id.clone())
         } else {
             None
@@ -367,13 +364,10 @@ fn gen_run_custom(
     })
 }
 
-fn gen_branch_custom(
-    sequence: &SequenceStub,
-    items: &[Item],
-) -> Result<TokenStream, SkyliteProcError> {
+fn gen_branch_custom(sequence: &Sequence, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
     let ids = collect_ids(sequence, |op| {
-        if let InputOpStub::BranchCustom { branch_fn, .. } = op {
-            Some(branch_fn.clone())
+        if let InputOp::BranchCustom { id, .. } = op {
+            Some(id.clone())
         } else {
             None
         }
@@ -407,7 +401,7 @@ fn gen_branch_custom(
 }
 
 pub(crate) fn generate_sequence_definition(
-    sequence: &SequenceStub,
+    sequence: &Sequence,
     project_name: &str,
     items: &[Item],
 ) -> Result<TokenStream, SkyliteProcError> {

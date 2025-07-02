@@ -10,7 +10,7 @@ use crate::parse::scheme_util::{
     parse_symbol, with_guile,
 };
 use crate::parse::values::{parse_typed_value, Type, TypedValue};
-use crate::{Node, SkyliteProcError};
+use crate::SkyliteProcError;
 
 fn parse_field(field_path: &str) -> Vec<String> {
     field_path.split('.').map(ToOwned::to_owned).collect()
@@ -27,24 +27,35 @@ fn expect_args(items: &[SCM], num: usize, context: &str) -> Result<(), SkylitePr
     }
 }
 
-/// Partially parsed `BranchCondition`.
-pub(crate) enum BranchConditionStub {
-    IfTrue(Vec<String>),
-    IfFalse(Vec<String>),
-    Equals(Vec<String>, SCM),
-    NotEquals(Vec<String>, SCM),
-    LessThan(Vec<String>, SCM),
-    GreaterThan(Vec<String>, SCM),
-    LessEquals(Vec<String>, SCM),
-    GreaterEquals(Vec<String>, SCM),
+/// Condition of a branch operation.
+#[derive(Debug, PartialEq, Clone)]
+pub(crate) enum BranchCondition {
+    IfTrue(Field),
+    IfFalse(Field),
+    Equals(Field, TypedValue),
+    NotEquals(Field, TypedValue),
+    LessThan(Field, TypedValue),
+    GreaterThan(Field, TypedValue),
+    LessEquals(Field, TypedValue),
+    GreaterEquals(Field, TypedValue),
 }
 
-impl BranchConditionStub {
-    fn from_scheme(definition: SCM) -> Result<BranchConditionStub, SkyliteProcError> {
+impl BranchCondition {
+    /// Directly parses a BranchCondition from an SCM value.
+    pub(crate) fn from_scheme(
+        definition: SCM,
+        target_node_name: &str,
+        assets: &mut Assets,
+    ) -> Result<BranchCondition, SkyliteProcError> {
         unsafe {
             if scm_is_true(scm_symbol_p(definition)) {
                 let field = parse_field(&parse_symbol(definition).unwrap());
-                return Ok(BranchConditionStub::IfTrue(field));
+                let field = resolve_field(&field, target_node_name, assets)?;
+                if let Type::Bool = field.typename {
+                    return Ok(BranchCondition::IfTrue(field));
+                } else {
+                    return Err(data_err!("Expected bool for branch condition."));
+                }
             }
 
             let items: Vec<SCM> = iter_list(definition)?.collect();
@@ -52,264 +63,85 @@ impl BranchConditionStub {
                 // (! field)
                 "!" => {
                     expect_args(&items, 1, "branch if false")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    Ok(BranchConditionStub::IfFalse(field))
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    if let Type::Bool = field.typename {
+                        Ok(BranchCondition::IfFalse(field))
+                    } else {
+                        Err(data_err!("Expected bool for branch condition."))
+                    }
                 }
-
                 // (= field 5)
                 "=" | "==" => {
                     expect_args(&items, 2, "branch if equals (=)")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    Ok(BranchConditionStub::Equals(field, items[2]))
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    let value = parse_typed_value_for_primitive(&field.typename, items[2])?;
+                    Ok(BranchCondition::Equals(field, value))
                 }
 
                 // (!= field 5)
                 "!=" => {
                     expect_args(&items, 2, "branch if not equals (!=)")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    Ok(BranchConditionStub::NotEquals(field, items[2]))
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    let value = parse_typed_value_for_primitive(&field.typename, items[2])?;
+                    Ok(BranchCondition::NotEquals(field, value))
                 }
 
                 // (< field 5)
                 "<" => {
                     expect_args(&items, 2, "branch if less than (<)")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    Ok(BranchConditionStub::LessThan(field, items[2]))
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    expect_numeric_type(&field.typename)?;
+                    let value = parse_typed_value_for_primitive(&field.typename, items[2])?;
+                    Ok(BranchCondition::LessThan(field, value))
                 }
 
                 // (> field 5)
                 ">" => {
                     expect_args(&items, 2, "branch if greater than (>)")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    Ok(BranchConditionStub::GreaterThan(field, items[2]))
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    expect_numeric_type(&field.typename)?;
+                    let value = parse_typed_value_for_primitive(&field.typename, items[2])?;
+                    Ok(BranchCondition::GreaterThan(field, value))
                 }
 
                 // (<= field 5)
                 "<=" => {
                     expect_args(&items, 2, "branch if less or equals (<=)")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    Ok(BranchConditionStub::LessEquals(field, items[2]))
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    expect_numeric_type(&field.typename)?;
+                    let value = parse_typed_value_for_primitive(&field.typename, items[2])?;
+                    Ok(BranchCondition::LessEquals(field, value))
                 }
 
                 // (>= field 5)
                 ">=" => {
                     expect_args(&items, 2, "branch if greater or equals (>=)")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    Ok(BranchConditionStub::GreaterEquals(field, items[2]))
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    expect_numeric_type(&field.typename)?;
+                    let value = parse_typed_value_for_primitive(&field.typename, items[2])?;
+                    Ok(BranchCondition::GreaterEquals(field, value))
                 }
 
                 // (field)
-                field @ _ if items.len() == 1 => {
-                    let field = parse_field(field);
-                    Ok(BranchConditionStub::IfTrue(field))
+                field if items.len() == 1 => {
+                    let field_path = parse_field(field);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    if let Type::Bool = field.typename {
+                        Ok(BranchCondition::IfTrue(field))
+                    } else {
+                        Err(data_err!("Expected bool for branch condition."))
+                    }
                 }
-                op @ _ => Err(syntax_err!("Unknown operator {op}")),
+                op => Err(syntax_err!("Unknown operator {op}")),
             }
         }
-    }
-}
-
-/// Partially parsed `InputOp`.
-pub(crate) enum InputOpStub {
-    Set {
-        field: Vec<String>,
-        val: SCM,
-    },
-    Modify {
-        field: Vec<String>,
-        delta: SCM,
-    },
-    Branch {
-        condition: BranchConditionStub,
-        label: String,
-    },
-    Jump(String),
-    CallSub(String),
-    Return,
-    Wait(u16),
-    RunCustom(String),
-    BranchCustom {
-        branch_fn: String,
-        label: String,
-    },
-}
-
-impl InputOpStub {
-    fn from_scheme(definition: SCM) -> Result<InputOpStub, SkyliteProcError> {
-        unsafe {
-            let items: Vec<SCM> = iter_list(definition)?.collect();
-            if items.len() == 0 {
-                return Err(syntax_err!("Expected sequence directive, got empty list"));
-            }
-            let mnemonic = parse_symbol(items[0])?;
-            match mnemonic.as_str() {
-                // (set field 5)
-                "set" => {
-                    expect_args(&items, 2, "set")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    let val = items[2];
-                    Ok(InputOpStub::Set { field, val })
-                }
-
-                // (modify field 5)
-                "modify" => {
-                    expect_args(&items, 2, "modify")?;
-                    let field = parse_field(&parse_symbol(items[1])?);
-                    let delta = items[2];
-                    Ok(InputOpStub::Modify { field, delta })
-                }
-
-                // (branch condition label)
-                "branch" => {
-                    expect_args(&items, 2, "branch")?;
-                    let condition = BranchConditionStub::from_scheme(items[1])?;
-                    let label = parse_symbol(items[2])?;
-                    Ok(InputOpStub::Branch { condition, label })
-                }
-
-                // (jump label)
-                "jump" => {
-                    expect_args(&items, 1, "jump")?;
-                    let label = parse_symbol(items[1])?;
-                    Ok(InputOpStub::Jump(label))
-                }
-
-                // (call sub)
-                "call" => {
-                    expect_args(&items, 1, "call")?;
-                    let sub = parse_symbol(items[1])?;
-                    Ok(InputOpStub::CallSub(sub))
-                }
-
-                // (return)
-                "return" => {
-                    expect_args(&items, 0, "return")?;
-                    Ok(InputOpStub::Return)
-                }
-
-                // (wait 5)
-                "wait" => {
-                    expect_args(&items, 1, "wait")?;
-                    let updates = parse_int(items[1])?;
-                    Ok(InputOpStub::Wait(updates))
-                }
-
-                // (run-custom name)
-                "run-custom" => {
-                    expect_args(&items, 1, "run-custom")?;
-                    let name = parse_symbol(items[1])?;
-                    Ok(InputOpStub::RunCustom(name))
-                }
-
-                // (branch-custom branch_fn label)
-                "branch-custom" => {
-                    expect_args(&items, 2, "branch-custom")?;
-                    let branch_fn = parse_symbol(items[1])?;
-                    let label = parse_symbol(items[2])?;
-                    Ok(InputOpStub::BranchCustom { branch_fn, label })
-                }
-                _ => {
-                    return Err(syntax_err!("Illegal sequence directive '{mnemonic}'"));
-                }
-            }
-        }
-    }
-}
-
-/// Partially parsed InputLine.
-pub(crate) struct InputLineStub {
-    pub op: InputOpStub,
-    pub labels: Vec<String>,
-}
-
-fn parse_script(definition: SCM) -> Result<Vec<InputLineStub>, SkyliteProcError> {
-    let mut labels = Vec::new();
-    let mut lines = Vec::new();
-
-    unsafe {
-        for item in iter_list(definition)? {
-            if scm_is_symbol(item) {
-                labels.push(parse_symbol(item).unwrap());
-            } else if scm_is_true(scm_list_p(item)) {
-                let op = InputOpStub::from_scheme(item)?;
-                lines.push(InputLineStub {
-                    op,
-                    labels: std::mem::take(&mut labels),
-                })
-            } else {
-                return Err(syntax_err!("Expected symbol or list"));
-            }
-        }
-    }
-    Ok(lines)
-}
-
-/// Partially parsed Sequence.
-/// Contains all information that can be retrieved from the sequence asset
-/// alone, but no information that would require Node information, such as field
-/// types.
-pub(crate) struct SequenceStub {
-    pub meta: AssetMetaData,
-    pub target_node_name: String,
-    pub subs: HashMap<String, Vec<InputLineStub>>,
-    pub script: Vec<InputLineStub>,
-}
-
-impl SequenceStub {
-    fn from_meta_with_guile(meta: &AssetMetaData) -> Result<SequenceStub, SkyliteProcError> {
-        unsafe {
-            let definition = meta.source.load_with_guile()?;
-            if scm_is_false(scm_list_p(definition)) {
-                return Err(syntax_err!(
-                    "Expected alist for sequence definition, got {}",
-                    form_to_string(definition)
-                ));
-            }
-
-            let target_node_scm = assq_str("node", definition)?.ok_or(syntax_err!(
-                "Missing required key 'node' for sequence definition."
-            ))?;
-            let target_node = parse_symbol(target_node_scm)?;
-
-            let subs = match assq_str("subs", definition)? {
-                Some(scm) => iter_list(scm)?
-                    .map(|pair| {
-                        if scm_is_false(scm_pair_p(pair)) {
-                            return Err(syntax_err!("Expected alist for key 'subs'."));
-                        }
-
-                        let sub_name = parse_symbol(scm_car(pair))?;
-                        let script = parse_script(scm_cdr(pair))?;
-                        return Ok((sub_name, script));
-                    })
-                    .collect::<Result<HashMap<String, Vec<InputLineStub>>, SkyliteProcError>>()?,
-                None => HashMap::new(),
-            };
-
-            let script = parse_script(assq_str("script", definition)?.ok_or(syntax_err!(
-                "Missing required key 'script' for sequence definition"
-            ))?)?;
-
-            Ok(SequenceStub {
-                meta: meta.clone(),
-                target_node_name: target_node,
-                subs,
-                script,
-            })
-        }
-    }
-
-    pub(crate) fn from_meta(meta: &AssetMetaData) -> Result<SequenceStub, SkyliteProcError> {
-        // Since we are not actually accessing anything from this signature from C,
-        // we can get away with ignoring the missing C representations.
-        #[allow(improper_ctypes_definitions)]
-        extern "C" fn from_meta_with_guile(
-            meta: &AssetMetaData,
-        ) -> Result<SequenceStub, SkyliteProcError> {
-            SequenceStub::from_meta_with_guile(meta)
-        }
-
-        with_guile(from_meta_with_guile, &meta)
     }
 }
 
@@ -317,14 +149,14 @@ impl SequenceStub {
 /// a chain of static node and property references. Each segment
 /// contains the Node for which it applies as well as either the
 /// static node or property it is referencing.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) enum FieldPathSegment {
     StaticNode(String, String),
     Property(String, String),
 }
 
 /// Information on a field used in an `InputOp`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) struct Field {
     pub path: Vec<FieldPathSegment>,
     pub typename: Type,
@@ -332,34 +164,34 @@ pub(crate) struct Field {
 
 fn resolve_field(
     path: &[String],
-    target_node: &Node,
-    nodes: &[Node],
+    target_node_name: &str,
+    assets: &mut Assets,
 ) -> Result<Field, SkyliteProcError> {
     let field_name = path[path.len() - 1].as_str();
-    let mut current_node = target_node;
+    let mut current_node_name = target_node_name.to_owned();
     let mut segments = Vec::new();
     for segment in path[..path.len() - 1].iter() {
-        let next_node_name = current_node
+        let node = assets.load_node(&current_node_name).unwrap();
+        let next_node_name = node
             .static_nodes
             .iter()
             .find(|(name, _)| name == segment)
             .ok_or(data_err!("Static node not found on node: {segment}"))?
             .1
             .name
-            .as_str();
+            .clone();
 
         segments.push(FieldPathSegment::StaticNode(
-            current_node.meta.name.clone(),
+            node.meta.name.clone(),
             segment.clone(),
         ));
 
-        current_node = nodes
-            .iter()
-            .find(|n| n.meta.name == next_node_name)
-            .unwrap()
+        current_node_name = next_node_name;
     }
 
-    let typename = current_node
+    let bottom_node = assets.load_node(&current_node_name).unwrap();
+
+    let typename = bottom_node
         .properties
         .iter()
         .find(|v| v.name == field_name)
@@ -368,7 +200,7 @@ fn resolve_field(
         .clone();
 
     segments.push(FieldPathSegment::Property(
-        current_node.meta.name.clone(),
+        bottom_node.meta.name.clone(),
         field_name.to_owned(),
     ));
 
@@ -419,84 +251,10 @@ fn expect_numeric_type(typename: &Type) -> Result<(), SkyliteProcError> {
     }
 }
 
-/// Condition of a branch operation.
-#[derive(Debug, PartialEq)]
-pub(crate) enum BranchCondition {
-    IfTrue(Field),
-    IfFalse(Field),
-    Equals(Field, TypedValue),
-    NotEquals(Field, TypedValue),
-    LessThan(Field, TypedValue),
-    GreaterThan(Field, TypedValue),
-    LessEquals(Field, TypedValue),
-    GreaterEquals(Field, TypedValue),
-}
-
-impl BranchCondition {
-    fn from_stub(
-        stub: BranchConditionStub,
-        target_node: &Node,
-        nodes: &[Node],
-    ) -> Result<BranchCondition, SkyliteProcError> {
-        match stub {
-            BranchConditionStub::IfTrue(field_raw) => {
-                let field = resolve_field(&field_raw, target_node, nodes)?;
-                if let Type::Bool = field.typename {
-                    Ok(BranchCondition::IfTrue(field))
-                } else {
-                    Err(data_err!("Expected bool for branch condition."))
-                }
-            }
-            BranchConditionStub::IfFalse(field_raw) => {
-                let field = resolve_field(&field_raw, target_node, nodes)?;
-                if let Type::Bool = field.typename {
-                    Ok(BranchCondition::IfFalse(field))
-                } else {
-                    Err(data_err!("Expected bool for branch condition."))
-                }
-            }
-            BranchConditionStub::Equals(field_raw, value_scm) => {
-                let field = resolve_field(&field_raw, target_node, nodes)?;
-                let value = unsafe { parse_typed_value_for_primitive(&field.typename, value_scm)? };
-                Ok(BranchCondition::Equals(field, value))
-            }
-            BranchConditionStub::NotEquals(field_raw, value_scm) => {
-                let field = resolve_field(&field_raw, target_node, nodes)?;
-                let value = unsafe { parse_typed_value_for_primitive(&field.typename, value_scm)? };
-                Ok(BranchCondition::NotEquals(field, value))
-            }
-            BranchConditionStub::LessThan(field_raw, value_scm) => {
-                let field = resolve_field(&field_raw, target_node, nodes)?;
-                expect_numeric_type(&field.typename)?;
-                let value = unsafe { parse_typed_value_for_primitive(&field.typename, value_scm)? };
-                Ok(BranchCondition::LessThan(field, value))
-            }
-            BranchConditionStub::GreaterThan(field_raw, value_scm) => {
-                let field = resolve_field(&field_raw, target_node, nodes)?;
-                expect_numeric_type(&field.typename)?;
-                let value = unsafe { parse_typed_value_for_primitive(&field.typename, value_scm)? };
-                Ok(BranchCondition::GreaterThan(field, value))
-            }
-            BranchConditionStub::LessEquals(field_raw, value_scm) => {
-                let field = resolve_field(&field_raw, target_node, nodes)?;
-                expect_numeric_type(&field.typename)?;
-                let value = unsafe { parse_typed_value_for_primitive(&field.typename, value_scm)? };
-                Ok(BranchCondition::LessEquals(field, value))
-            }
-            BranchConditionStub::GreaterEquals(field_raw, value_scm) => {
-                let field = resolve_field(&field_raw, target_node, nodes)?;
-                expect_numeric_type(&field.typename)?;
-                let value = unsafe { parse_typed_value_for_primitive(&field.typename, value_scm)? };
-                Ok(BranchCondition::GreaterEquals(field, value))
-            }
-        }
-    }
-}
-
 /// Single operation in a `Sequence` script. The set of input operations
 /// are those available to sequence assets and differ slightly from the
 /// lower-level operations used by skylite_core.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) enum InputOp {
     /// Sets a field to the specified value.
     Set { field: Field, val: TypedValue },
@@ -532,69 +290,100 @@ pub(crate) enum InputOp {
 }
 
 impl InputOp {
-    fn from_stub(
-        stub: InputOpStub,
-        target_node: &Node,
-        nodes: &[Node],
-        assets: &Assets,
+    fn from_scheme(
+        definition: SCM,
+        target_node_name: &str,
+        assets: &mut Assets,
     ) -> Result<InputOp, SkyliteProcError> {
-        match stub {
-            InputOpStub::Set {
-                field,
-                val: val_scm,
-            } => {
-                let field = resolve_field(&field, target_node, nodes)?;
-                let val = unsafe { parse_typed_value(&field.typename, val_scm, assets)? };
-                Ok(InputOp::Set { field, val })
+        unsafe {
+            let items: Vec<SCM> = iter_list(definition)?.collect();
+            if items.len() == 0 {
+                return Err(syntax_err!("Expected sequence directive, got empty list"));
             }
-            InputOpStub::Modify {
-                field,
-                delta: delta_scm,
-            } => {
-                let field = resolve_field(&field, target_node, nodes)?;
-                let delta = unsafe { parse_typed_value_for_primitive(&field.typename, delta_scm)? };
-                Ok(InputOp::Modify { field, delta })
+            let mnemonic = parse_symbol(items[0])?;
+
+            match mnemonic.as_str() {
+                // (set field 5)
+                "set" => {
+                    expect_args(&items, 2, "set")?;
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    let val = parse_typed_value(&field.typename, items[2], &assets.index)?;
+                    Ok(InputOp::Set { field, val })
+                }
+
+                // (modify field 5)
+                "modify" => {
+                    expect_args(&items, 2, "modify")?;
+                    let field_path = parse_field(&parse_symbol(items[1])?);
+                    let field = resolve_field(&field_path, target_node_name, assets)?;
+                    let delta = parse_typed_value_for_primitive(&field.typename, items[2])?;
+                    Ok(InputOp::Modify { field, delta })
+                }
+
+                // (branch condition label)
+                "branch" => {
+                    expect_args(&items, 2, "branch")?;
+                    let condition =
+                        BranchCondition::from_scheme(items[1], target_node_name, assets)?;
+                    let label = parse_symbol(items[2])?;
+                    Ok(InputOp::Branch { condition, label })
+                }
+                // (jump label)
+                "jump" => {
+                    expect_args(&items, 1, "jump")?;
+                    let label = parse_symbol(items[1])?;
+                    Ok(InputOp::Jump { label })
+                }
+
+                // (call sub)
+                "call" => {
+                    expect_args(&items, 1, "call")?;
+                    let sub = parse_symbol(items[1])?;
+                    Ok(InputOp::CallSub { sub })
+                }
+
+                // (return)
+                "return" => {
+                    expect_args(&items, 0, "return")?;
+                    Ok(InputOp::Return)
+                }
+
+                // (wait 5)
+                "wait" => {
+                    expect_args(&items, 1, "wait")?;
+                    let updates = parse_int(items[1])?;
+                    Ok(InputOp::Wait { updates })
+                }
+
+                // (run-custom name)
+                "run-custom" => {
+                    expect_args(&items, 1, "run-custom")?;
+                    let id = parse_symbol(items[1])?;
+                    Ok(InputOp::RunCustom { id })
+                }
+
+                // (branch-custom branch_fn label)
+                "branch-custom" => {
+                    expect_args(&items, 2, "branch-custom")?;
+                    let id = parse_symbol(items[1])?;
+                    let label = parse_symbol(items[2])?;
+                    Ok(InputOp::BranchCustom { id, label })
+                }
+                _ => {
+                    return Err(syntax_err!("Illegal sequence directive '{mnemonic}'"));
+                }
             }
-            InputOpStub::Branch {
-                condition: condition_stub,
-                label,
-            } => {
-                let condition = BranchCondition::from_stub(condition_stub, target_node, nodes)?;
-                Ok(InputOp::Branch { condition, label })
-            }
-            InputOpStub::Jump(label) => Ok(InputOp::Jump { label }),
-            InputOpStub::CallSub(sub) => Ok(InputOp::CallSub { sub }),
-            InputOpStub::Return => Ok(InputOp::Return),
-            InputOpStub::Wait(updates) => Ok(InputOp::Wait { updates }),
-            InputOpStub::RunCustom(id) => Ok(InputOp::RunCustom { id }),
-            InputOpStub::BranchCustom { branch_fn, label } => Ok(InputOp::BranchCustom {
-                id: branch_fn,
-                label,
-            }),
         }
     }
 }
 
 /// Single line in a Sequence's script, consisting of a single operation
 /// and optional labels.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) struct InputLine {
     pub labels: Vec<String>,
     pub input_op: InputOp,
-}
-
-impl InputLine {
-    fn from_stub(
-        stub: InputLineStub,
-        target_node: &Node,
-        nodes: &[Node],
-        assets: &Assets,
-    ) -> Result<InputLine, SkyliteProcError> {
-        Ok(InputLine {
-            labels: stub.labels,
-            input_op: InputOp::from_stub(stub.op, target_node, nodes, assets)?,
-        })
-    }
 }
 
 fn validate_labels(script: &[InputLine]) -> Result<(), SkyliteProcError> {
@@ -709,8 +498,38 @@ fn rename_labels(input: &mut [InputLine], name: &str) {
     }
 }
 
+fn parse_script(
+    definition: SCM,
+    script_name: &str,
+    target_node_name: &str,
+    assets: &mut Assets,
+) -> Result<Vec<InputLine>, SkyliteProcError> {
+    let mut labels = Vec::new();
+    let mut script = Vec::new();
+
+    unsafe {
+        for item in iter_list(definition)? {
+            if scm_is_symbol(item) {
+                labels.push(parse_symbol(item).unwrap());
+            } else if scm_is_true(scm_list_p(item)) {
+                let input_op = InputOp::from_scheme(item, target_node_name, assets)?;
+                script.push(InputLine {
+                    input_op,
+                    labels: std::mem::take(&mut labels),
+                })
+            } else {
+                return Err(syntax_err!("Expected symbol or list"));
+            }
+        }
+    }
+
+    validate_labels(&script)?;
+    rename_labels(&mut script, script_name);
+    Ok(script)
+}
+
 /// Fully parsed Sequence asset.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) struct Sequence {
     pub meta: AssetMetaData,
     pub target_node_name: String,
@@ -719,65 +538,77 @@ pub(crate) struct Sequence {
 }
 
 impl Sequence {
-    fn from_stub(
-        stub: SequenceStub,
-        nodes: &[Node],
-        assets: &Assets,
+    fn from_meta_with_guile(
+        meta: AssetMetaData,
+        assets: &mut Assets,
     ) -> Result<Sequence, SkyliteProcError> {
-        let target_node = nodes
-            .iter()
-            .find(|n| n.meta.name == stub.target_node_name)
-            .ok_or(data_err!("Node not found: {}", stub.target_node_name))?;
+        let def = meta.source.load_with_guile()?;
+        unsafe {
+            if scm_is_false(scm_list_p(def)) {
+                return Err(syntax_err!(
+                    "Expected alist for sequence definition, got {}",
+                    form_to_string(def)
+                ));
+            }
 
-        let subs = stub
-            .subs
-            .into_iter()
-            .map(|(name, script)| {
-                let mut resolved = script
-                    .into_iter()
-                    .map(|s| InputLine::from_stub(s, target_node, nodes, assets))
-                    .collect::<Result<Vec<InputLine>, SkyliteProcError>>()?;
+            let target_node_scm = assq_str("node", def)?.ok_or(syntax_err!(
+                "Missing required key 'node' for sequence definition."
+            ))?;
+            let target_node_name = parse_symbol(target_node_scm)?;
 
-                validate_labels(&resolved)?;
-                rename_labels(&mut resolved, &format!("sub-{name}"));
-                Ok((name, resolved))
+            let subs = match assq_str("subs", def)? {
+                Some(scm) => iter_list(scm)?
+                    .map(|pair| {
+                        if scm_is_false(scm_pair_p(pair)) {
+                            return Err(syntax_err!("Expected alist for key 'subs'."));
+                        }
+
+                        let sub_name = parse_symbol(scm_car(pair))?;
+                        let script = parse_script(
+                            scm_cdr(pair),
+                            &format!("sub-{sub_name}"),
+                            &target_node_name,
+                            assets,
+                        )?;
+                        return Ok((sub_name, script));
+                    })
+                    .collect::<Result<HashMap<String, Vec<InputLine>>, SkyliteProcError>>()?,
+                None => HashMap::new(),
+            };
+
+            let script = parse_script(
+                assq_str("script", def)?.ok_or(syntax_err!(
+                    "Missing required key 'script' for sequence definition"
+                ))?,
+                "main",
+                &target_node_name,
+                assets,
+            )?;
+
+            Ok(Sequence {
+                meta,
+                target_node_name,
+                subs,
+                script,
             })
-            .collect::<Result<HashMap<String, Vec<InputLine>>, SkyliteProcError>>()?;
-
-        let mut script = stub
-            .script
-            .into_iter()
-            .map(|s| InputLine::from_stub(s, target_node, nodes, assets))
-            .collect::<Result<Vec<InputLine>, SkyliteProcError>>()?;
-
-        validate_labels(&script)?;
-        rename_labels(&mut script, "main");
-
-        Ok(Sequence {
-            meta: stub.meta,
-            target_node_name: stub.target_node_name,
-            subs,
-            script,
-        })
+        }
     }
 
     pub(crate) fn from_meta(
-        meta: &AssetMetaData,
-        nodes: &[Node],
-        assets: &Assets,
+        meta: AssetMetaData,
+        assets: &mut Assets,
     ) -> Result<Sequence, SkyliteProcError> {
         // Since we are not actually accessing anything from this signature from C,
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
-        extern "C" fn from_meta_with_guile(
-            args: &(&AssetMetaData, &[Node], &Assets),
+        extern "C" fn from_meta_inner(
+            args: (AssetMetaData, &mut Assets),
         ) -> Result<Sequence, SkyliteProcError> {
-            let (meta, nodes, assets) = *args;
-            let stub = SequenceStub::from_meta_with_guile(meta)?;
-            Sequence::from_stub(stub, nodes, assets)
+            let (meta, assets) = args;
+            Sequence::from_meta_with_guile(meta, assets)
         }
 
-        with_guile(from_meta_with_guile, &(meta, nodes, assets))
+        with_guile(from_meta_inner, (meta, assets))
     }
 }
 
@@ -790,7 +621,6 @@ mod tests {
     use crate::parse::scheme_util::with_guile;
     use crate::parse::sequences::{BranchCondition, Field, FieldPathSegment, InputLine, InputOp};
     use crate::parse::values::{Type, TypedValue};
-    use crate::Node;
 
     extern "C" fn test_parse_sequence_impl(_: &()) {
         let tmp_fs = create_tmp_fs(&[
@@ -825,18 +655,13 @@ mod tests {
         ])
         .unwrap();
 
-        let assets = Assets::from_scheme_with_guile(None, tmp_fs.path()).unwrap();
-        let nodes: Vec<Node> = Node::parse_all_nodes(&assets)
-            .unwrap()
-            .into_values()
-            .collect();
-        let meta = assets.sequences.get("test-sequence").unwrap();
-        let sequence = Sequence::from_meta(meta, &nodes, &assets).unwrap();
+        let mut assets = Assets::from_scheme_with_guile(None, tmp_fs.path()).unwrap();
+        let sequence = assets.load_sequence("test-sequence").unwrap();
 
         assert_eq!(
             sequence,
-            Sequence {
-                meta: meta.clone(),
+            &Sequence {
+                meta: sequence.meta.clone(),
                 target_node_name: "test-node-1".to_owned(),
                 subs: [(
                     "sub1".to_owned(),

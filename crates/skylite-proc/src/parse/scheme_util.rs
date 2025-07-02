@@ -13,15 +13,15 @@ use crate::SkyliteProcError;
 
 static GUILE_INIT_LOCK: Mutex<()> = Mutex::new(());
 
-struct CallInfo<'a, P: ?Sized, R> {
-    func: extern "C" fn(&P) -> R,
-    params: &'a P,
+struct CallInfo<P, R> {
+    func: extern "C" fn(P) -> R,
+    params: Option<P>,
     res: Option<R>,
     guard: Option<MutexGuard<'static, ()>>,
 }
 
 /// Runs code with access to Guile.
-pub(crate) fn with_guile<P: ?Sized, R>(func: extern "C" fn(&P) -> R, params: &P) -> R {
+pub(crate) fn with_guile<P, R>(func: extern "C" fn(P) -> R, params: P) -> R {
     // This function has to jump a few hoops to deal with some of
     // libguile's shenanigans:
     // - Any Guile function can do a nonlocal exit (via longjmp), which is crazy
@@ -37,14 +37,14 @@ pub(crate) fn with_guile<P: ?Sized, R>(func: extern "C" fn(&P) -> R, params: &P)
     //   calling scm_with_guile until actually running the user code must happen
     //   while holding a lock.
 
-    unsafe extern "C" fn wrapper<P: ?Sized, R>(user_data: *mut c_void) -> *mut c_void {
+    unsafe extern "C" fn wrapper<P, R>(user_data: *mut c_void) -> *mut c_void {
         let call = user_data as *mut CallInfo<P, R>;
         // Unlocks guile_init_lock
         drop((*call).guard.take().unwrap());
 
         // Guile might do a nonlocal return on this line, causing res to not be set.
         // TODO: catch_unwind
-        (*call).res = Some(((*call).func)(&(*call).params));
+        (*call).res = Some(((*call).func)((*call).params.take().unwrap()));
         null_mut()
     }
 
@@ -53,7 +53,7 @@ pub(crate) fn with_guile<P: ?Sized, R>(func: extern "C" fn(&P) -> R, params: &P)
     let guard = GUILE_INIT_LOCK.lock().unwrap();
     let call = CallInfo {
         func,
-        params,
+        params: Some(params),
         res: None,
         guard: Some(guard),
     };

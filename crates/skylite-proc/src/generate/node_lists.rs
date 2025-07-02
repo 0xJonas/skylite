@@ -18,8 +18,8 @@ fn encode_node_list(list: &NodeList) -> TokenStream {
     quote!(&[#(#data),*])
 }
 
-pub(crate) fn generate_node_list_data(node_lists: &[NodeList]) -> TokenStream {
-    let node_list_data = node_lists.iter().map(encode_node_list);
+pub(crate) fn generate_node_list_data(node_lists: &[&NodeList]) -> TokenStream {
+    let node_list_data = node_lists.iter().map(|&n| encode_node_list(n));
     let num_node_lists = node_lists.len();
 
     quote! {
@@ -36,7 +36,7 @@ pub(crate) fn node_list_ids_type(project_name: &str) -> Ident {
     )
 }
 
-pub(crate) fn generate_node_list_ids(node_lists: &[NodeList], project_name: &str) -> TokenStream {
+pub(crate) fn generate_node_list_ids(node_lists: &[&NodeList], project_name: &str) -> TokenStream {
     let node_list_ids_type = node_list_ids_type(project_name);
     let names = node_lists.iter().map(|list| {
         format_ident!(

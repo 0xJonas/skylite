@@ -170,10 +170,16 @@ fn generate_project_trait_impl(
         .map(|name| quote!(#name(&mut draw_context);))
         .unwrap_or(TokenStream::new());
 
-    let new_method =
-        generate_project_new_method(&project.name, target_type, &init, &project.root_node);
-    let decode_node_fn =
-        generate_decode_node_fn(&project.name, &project.nodes, &project.node_lists);
+    let new_method = generate_project_new_method(
+        &project.name,
+        target_type,
+        &init,
+        project.root_node.as_ref().unwrap(),
+    );
+
+    let nodes = project.assets.get_all_nodes();
+    let node_lists = project.assets.get_all_node_lists();
+    let decode_node_fn = generate_decode_node_fn(&project.name, &nodes, &node_lists);
     let decode_node_list_fn = generate_decode_node_list_fn(&project.name);
 
     quote! {
@@ -229,16 +235,27 @@ fn generate_project_trait_impl(
 }
 
 impl SkyliteProject {
+    pub(crate) fn initialize_assets(&mut self) -> Result<(), SkyliteProcError> {
+        self.assets.load_all_nodes()?;
+        self.assets.load_all_node_lists()?;
+        self.assets.load_all_sequences()?;
+        Ok(())
+    }
+
     pub(crate) fn generate(
-        &self,
+        &mut self,
         target_type: &syn::Path,
         items: &[Item],
     ) -> Result<Vec<Item>, SkyliteProcError> {
+        self.initialize_assets()?;
+
+        let node_lists = self.assets.get_all_node_lists();
+
         Ok(vec![
             Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
-            Item::Verbatim(generate_node_list_data(&self.node_lists)),
-            Item::Verbatim(generate_node_list_ids(&self.node_lists, &self.name)),
-            Item::Verbatim(generate_sequence_data(&self.sequences)),
+            Item::Verbatim(generate_node_list_data(&node_lists[..])),
+            Item::Verbatim(generate_node_list_ids(&node_lists[..], &self.name)),
+            Item::Verbatim(generate_sequence_data(&self.assets.get_all_sequences()[..])),
             Item::Verbatim(generate_project_type(&self.name, &target_type)),
             Item::Verbatim(generate_project_impl(&self.name)),
             Item::Verbatim(generate_project_trait_impl(self, &target_type, items)),
@@ -253,7 +270,7 @@ mod tests {
 
     use super::generate_project_trait_impl;
     use crate::assets::tests::create_tmp_fs;
-    use crate::{SkyliteProject, SkyliteProjectStub};
+    use crate::SkyliteProject;
 
     #[test]
     fn test_generate_project_implementation() {
@@ -280,10 +297,9 @@ mod tests {
             fn post_render(project: &mut skylite_core::RenderControls<'static, Test1>) {}
         };
 
-        let project = SkyliteProject::from_stub(
-            SkyliteProjectStub::from_file(&tmp_fs.path().join("project.scm")).unwrap(),
-        )
-        .unwrap();
+        let mut project =
+            SkyliteProject::from_file(&tmp_fs.path().join("project.scm"), true).unwrap();
+        project.initialize_assets().unwrap();
 
         let actual =
             generate_project_trait_impl(&project, &parse_quote!(MockTarget), &body_parsed.items);

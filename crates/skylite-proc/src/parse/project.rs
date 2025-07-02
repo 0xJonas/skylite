@@ -1,11 +1,9 @@
 use std::fs::read_to_string;
 use std::path::Path;
 
-use super::node_lists::NodeList;
-use super::nodes::{Node, NodeInstance};
-use super::sequences::Sequence;
+use super::nodes::NodeInstance;
 use super::values::{parse_type, parse_typed_value, TypedValue};
-use crate::assets::Assets;
+use crate::assets::{AssetIndex, Assets};
 use crate::parse::guile::SCM;
 use crate::parse::scheme_util::CXROp::{CAR, CDR};
 use crate::parse::scheme_util::{assq_str, cxr, eval_str, iter_list, parse_symbol, with_guile};
@@ -18,7 +16,7 @@ pub(crate) struct SaveItem {
 }
 
 impl SaveItem {
-    fn from_scheme(definition: SCM, assets: &Assets) -> Result<SaveItem, SkyliteProcError> {
+    fn from_scheme(definition: SCM, assets: &AssetIndex) -> Result<SaveItem, SkyliteProcError> {
         unsafe {
             let typename = parse_type(cxr(definition, &[CDR, CAR])?)?;
             Ok(SaveItem {
@@ -29,37 +27,45 @@ impl SaveItem {
     }
 }
 
-// Early form of `SkyliteProject`, where the assets are not yet
-// resolved and parsed. Used for contexts where the full representation
-// of the project is not required, e.g. node_definition`.
+/// Main type for managing the asset files and code generation
+/// of a Skylite project.
 #[derive(Debug)]
-pub(crate) struct SkyliteProjectStub {
+pub(crate) struct SkyliteProject {
     pub name: String,
     pub assets: Assets,
-    pub root_node_def: SCM,
+    pub root_node: Option<NodeInstance>,
     pub save_data: Vec<SaveItem>,
     pub tile_types: Vec<String>,
 }
 
-impl SkyliteProjectStub {
+impl SkyliteProject {
     fn from_scheme(
         definition: SCM,
         project_root: &Path,
-    ) -> Result<SkyliteProjectStub, SkyliteProcError> {
+        parse_root_node: bool,
+    ) -> Result<SkyliteProject, SkyliteProcError> {
         unsafe {
             let name = parse_symbol(
                 assq_str("name", definition)?.ok_or(data_err!("Missing required field 'name'"))?,
             )?;
 
-            let assets =
+            let mut assets =
                 Assets::from_scheme_with_guile(assq_str("assets", definition)?, project_root)?;
 
             let root_node_def = assq_str("root-node", definition)?
                 .ok_or(data_err!("Missing required field 'root-node'"))?;
+            let root_node = if parse_root_node {
+                Some(NodeInstance::from_scheme_with_guile(
+                    root_node_def,
+                    &mut assets,
+                )?)
+            } else {
+                None
+            };
 
             let save_data = if let Some(list) = assq_str("save-data", definition)? {
                 iter_list(list)?
-                    .map(|item| SaveItem::from_scheme(item, &assets))
+                    .map(|item| SaveItem::from_scheme(item, &assets.index))
                     .collect::<Result<Vec<SaveItem>, SkyliteProcError>>()?
             } else {
                 Vec::new()
@@ -77,10 +83,10 @@ impl SkyliteProjectStub {
                 return Err(data_err!("At least one tile-type must be defined."));
             }
 
-            Ok(SkyliteProjectStub {
+            Ok(SkyliteProject {
                 name,
                 assets,
-                root_node_def,
+                root_node,
                 save_data,
                 tile_types,
             })
@@ -91,11 +97,17 @@ impl SkyliteProjectStub {
     ///
     /// The file at the given `Path` will be evaluated as a Scheme file, and the
     /// resulting form will be parsed into an instance of `SkyliteProjectStub`.
-    pub(crate) fn from_file(path: &Path) -> Result<SkyliteProjectStub, SkyliteProcError> {
+    pub(crate) fn from_file(
+        path: &Path,
+        parse_root_node: bool,
+    ) -> Result<SkyliteProject, SkyliteProcError> {
         // Since we are not actually accessing anything from this signature from C,
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
-        extern "C" fn from_file_guile(path: &Path) -> Result<SkyliteProjectStub, SkyliteProcError> {
+        extern "C" fn from_file_guile(
+            args: (&Path, bool),
+        ) -> Result<SkyliteProject, SkyliteProcError> {
+            let (path, parse_root_node) = args;
             let resolved_path = path.canonicalize().map_err(|e| {
                 SkyliteProcError::OtherError(format!("Error resolving project path: {}", e))
             })?;
@@ -105,74 +117,26 @@ impl SkyliteProjectStub {
             let definition = unsafe { eval_str(&definition_raw)? };
 
             let project_root = resolved_path.parent().unwrap();
-            SkyliteProjectStub::from_scheme(definition, project_root)
+            SkyliteProject::from_scheme(definition, project_root, parse_root_node)
         }
-        with_guile(from_file_guile, path)
+        with_guile(from_file_guile, (path, parse_root_node))
     }
 }
 
 #[cfg(test)]
-impl PartialEq for SkyliteProjectStub {
+impl PartialEq for SkyliteProject {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
-            && self.assets == other.assets
-            // && self.root_node_def == other.root_node_def // exclude SCM type
+            && self.assets.index == other.assets.index
+            && self.root_node == other.root_node
             && self.save_data == other.save_data
             && self.tile_types == other.tile_types
     }
 }
 
-/// Main type for managing the asset files and code generation
-/// of a Skylite project.
-pub(crate) struct SkyliteProject {
-    pub name: String,
-    pub nodes: Vec<Node>,
-    pub node_lists: Vec<NodeList>,
-    pub sequences: Vec<Sequence>,
-    pub root_node: NodeInstance,
-    pub _save_data: Vec<SaveItem>,
-    pub tile_types: Vec<String>,
-}
-
-impl SkyliteProject {
-    pub(crate) fn from_stub(stub: SkyliteProjectStub) -> Result<SkyliteProject, SkyliteProcError> {
-        let nodes = Node::parse_all_nodes(&stub.assets)?;
-        let node_lists = stub
-            .assets
-            .node_lists
-            .values()
-            .map(|meta| NodeList::from_meta(meta, &nodes, &stub.assets))
-            .collect::<Result<Vec<NodeList>, SkyliteProcError>>()?;
-
-        let root_node = NodeInstance::from_scheme(stub.root_node_def, &nodes, &stub.assets)?;
-
-        let mut nodes_vec: Vec<Node> = nodes.into_values().collect();
-
-        let sequences = stub
-            .assets
-            .sequences
-            .values()
-            .map(|meta| Sequence::from_meta(meta, &nodes_vec, &stub.assets))
-            .collect::<Result<Vec<Sequence>, SkyliteProcError>>()?;
-
-        // The Asset id is later used as an index, so the Node vec must be sorted.
-        nodes_vec.sort_by_key(|node| node.meta.id);
-
-        Ok(SkyliteProject {
-            name: stub.name,
-            nodes: nodes_vec,
-            node_lists,
-            sequences,
-            root_node,
-            _save_data: stub.save_data,
-            tile_types: stub.tile_types,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::SkyliteProjectStub;
+    use super::SkyliteProject;
     use crate::assets::tests::create_tmp_fs;
     use crate::parse::project::SaveItem;
     use crate::parse::values::TypedValue;
@@ -193,7 +157,7 @@ mod tests {
         ])
         .unwrap();
 
-        let project = SkyliteProjectStub::from_file(&tmp_fs.path().join("project.scm")).unwrap();
+        let project = SkyliteProject::from_file(&tmp_fs.path().join("project.scm"), false).unwrap();
 
         assert_eq!(project.name, "TestProject1");
         assert_eq!(

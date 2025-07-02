@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 use glob::{glob, Paths};
 
 use crate::parse::guile::SCM;
+use crate::parse::node_lists::NodeList;
+use crate::parse::nodes::Node;
 use crate::parse::scheme_util::{assq_str, eval_str, iter_list, parse_string};
+use crate::parse::sequences::Sequence;
 use crate::SkyliteProcError;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,7 +130,7 @@ fn extract_raw_globs(
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct Assets {
+pub(crate) struct AssetIndex {
     pub nodes: HashMap<String, AssetMetaData>,
     pub node_lists: HashMap<String, AssetMetaData>,
     pub sequences: HashMap<String, AssetMetaData>,
@@ -150,11 +153,11 @@ fn add_builtin_nodes(nodes: &mut HashMap<String, AssetMetaData>) {
     );
 }
 
-impl Assets {
-    pub(crate) fn from_scheme_with_guile(
+impl AssetIndex {
+    fn from_scheme_with_guile(
         alist: Option<SCM>,
         base_dir: &Path,
-    ) -> Result<Assets, SkyliteProcError> {
+    ) -> Result<AssetIndex, SkyliteProcError> {
         let mut out = Self::from_scheme_with_guile_without_builtins(alist, base_dir)?;
 
         add_builtin_nodes(&mut out.nodes);
@@ -165,12 +168,12 @@ impl Assets {
     fn from_scheme_with_guile_without_builtins(
         alist: Option<SCM>,
         base_dir: &Path,
-    ) -> Result<Assets, SkyliteProcError> {
+    ) -> Result<AssetIndex, SkyliteProcError> {
         let nodes_globs_raw = extract_raw_globs(alist, "nodes", "nodes/*.scm")?;
         let node_lists_globs_raw = extract_raw_globs(alist, "node-lists", "node-lists/*.scm")?;
         let sequences_globs_raw = extract_raw_globs(alist, "sequences", "sequences/*.scm")?;
 
-        Ok(Assets {
+        Ok(AssetIndex {
             nodes: load_metas_from_raw_globs(AssetType::Node, nodes_globs_raw, base_dir)?,
             node_lists: load_metas_from_raw_globs(
                 AssetType::NodeList,
@@ -186,6 +189,151 @@ impl Assets {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct Assets {
+    pub index: AssetIndex,
+    nodes: Vec<Option<Node>>,
+    node_lists: Vec<Option<NodeList>>,
+    sequences: Vec<Option<Sequence>>,
+}
+
+impl Assets {
+    pub(crate) fn from_scheme_with_guile(
+        alist: Option<SCM>,
+        base_dir: &Path,
+    ) -> Result<Assets, SkyliteProcError> {
+        let index = AssetIndex::from_scheme_with_guile(alist, base_dir)?;
+
+        let nodes = vec![None; index.nodes.len()];
+        let node_lists = vec![None; index.node_lists.len()];
+        let sequences = vec![None; index.sequences.len()];
+
+        Ok(Assets {
+            index,
+            nodes,
+            node_lists,
+            sequences,
+        })
+    }
+
+    pub(crate) fn load_node(&mut self, name: &str) -> Result<&Node, SkyliteProcError> {
+        let meta = self
+            .index
+            .nodes
+            .get(name)
+            .ok_or(data_err!("Node {name} not found"))?;
+        if self.nodes[meta.id].is_some() {
+            return Ok(self.nodes[meta.id].as_ref().unwrap());
+        }
+
+        let node_id = meta.id;
+        let new_node = Node::from_meta(meta.clone(), self)?;
+        self.nodes[node_id] = Some(new_node);
+        Ok(self.nodes[node_id].as_ref().unwrap())
+    }
+
+    pub(crate) fn load_all_nodes(&mut self) -> Result<(), SkyliteProcError> {
+        let node_names = self
+            .index
+            .nodes
+            .keys()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        for name in node_names {
+            self.load_node(&name)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn get_all_nodes(&self) -> Vec<&Node> {
+        self.nodes
+            .iter()
+            .map(|opt| {
+                opt.as_ref()
+                    .expect("get_all_nodes called before all nodes were loaded")
+            })
+            .collect()
+    }
+
+    pub(crate) fn load_node_list(&mut self, name: &str) -> Result<&NodeList, SkyliteProcError> {
+        let meta = self
+            .index
+            .node_lists
+            .get(name)
+            .ok_or(data_err!("NodeList {name} not found"))?;
+        if self.node_lists[meta.id].is_some() {
+            return Ok(self.node_lists[meta.id].as_ref().unwrap());
+        }
+
+        let node_list_id = meta.id;
+        let new_node_list = NodeList::from_meta(meta.clone(), self)?;
+        self.node_lists[node_list_id] = Some(new_node_list);
+        Ok(self.node_lists[node_list_id].as_ref().unwrap())
+    }
+
+    pub(crate) fn load_all_node_lists(&mut self) -> Result<(), SkyliteProcError> {
+        let node_list_names = self
+            .index
+            .node_lists
+            .keys()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        for name in node_list_names {
+            self.load_node_list(&name)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn get_all_node_lists(&self) -> Vec<&NodeList> {
+        self.node_lists
+            .iter()
+            .map(|opt| {
+                opt.as_ref()
+                    .expect("get_all_node_lists called before all node lists were loaded")
+            })
+            .collect()
+    }
+
+    pub(crate) fn load_sequence(&mut self, name: &str) -> Result<&Sequence, SkyliteProcError> {
+        let meta = self
+            .index
+            .sequences
+            .get(name)
+            .ok_or(data_err!("Sequence {name} not found"))?;
+        if self.sequences[meta.id].is_some() {
+            return Ok(self.sequences[meta.id].as_ref().unwrap());
+        }
+
+        let sequence_id = meta.id;
+        let new_sequence = Sequence::from_meta(meta.clone(), self)?;
+        self.sequences[sequence_id] = Some(new_sequence);
+        Ok(self.sequences[sequence_id].as_ref().unwrap())
+    }
+
+    pub(crate) fn load_all_sequences(&mut self) -> Result<(), SkyliteProcError> {
+        let sequence_names = self
+            .index
+            .sequences
+            .keys()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        for name in sequence_names {
+            self.load_sequence(&name)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn get_all_sequences(&self) -> Vec<&Sequence> {
+        self.sequences
+            .iter()
+            .map(|opt| {
+                opt.as_ref()
+                    .expect("get_all_sequences called before all sequences were loaded")
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::collections::HashMap;
@@ -194,7 +342,7 @@ pub(crate) mod tests {
 
     use tempfile::{tempdir, TempDir};
 
-    use crate::assets::{AssetMetaData, AssetSource, AssetType, Assets};
+    use crate::assets::{AssetIndex, AssetMetaData, AssetSource, AssetType};
     use crate::parse::scheme_util::{eval_str, with_guile};
 
     pub(crate) fn create_tmp_fs(files: &[(&str, &str)]) -> Result<TempDir, std::io::Error> {
@@ -213,7 +361,7 @@ pub(crate) mod tests {
     #[test]
     fn test_from_scheme() {
         #[allow(improper_ctypes_definitions)]
-        extern "C" fn test_from_scheme_impl(base_dir: &Path) -> Assets {
+        extern "C" fn test_from_scheme_impl(base_dir: &Path) -> AssetIndex {
             let def = unsafe {
                 eval_str(
                     r#"
@@ -222,7 +370,7 @@ pub(crate) mod tests {
                 )
                 .unwrap()
             };
-            Assets::from_scheme_with_guile_without_builtins(Some(def), base_dir).unwrap()
+            AssetIndex::from_scheme_with_guile_without_builtins(Some(def), base_dir).unwrap()
         }
 
         let tmp_fs = create_tmp_fs(&[
@@ -235,7 +383,7 @@ pub(crate) mod tests {
         let assets = with_guile(test_from_scheme_impl, tmp_fs.path());
         assert_eq!(
             assets,
-            Assets {
+            AssetIndex {
                 nodes: [
                     (
                         "test-node-1".to_owned(),
