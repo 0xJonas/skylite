@@ -3,6 +3,7 @@ use quote::{format_ident, quote, ToTokens};
 use syn::{parse_str, Item, ItemFn, Meta};
 
 use super::project::project_ident;
+use crate::generate::nodes::node_type_name;
 use crate::parse::util::{change_case, IdentCase};
 use crate::parse::values::{Type, TypedValue, Variable};
 use crate::SkyliteProcError;
@@ -100,6 +101,7 @@ pub(crate) fn skylite_type_to_rust(t: &Type) -> TokenStream {
             quote!(Vec<#item_type_tokens>)
         }
         Type::NodeList => quote!(::skylite_core::nodes::NodeList),
+        Type::Node(name) => node_type_name(name.as_str()).to_token_stream(),
     }
 }
 
@@ -158,6 +160,14 @@ pub(crate) fn typed_value_to_rust(val: &TypedValue, project_name: &str) -> Token
                 .iter()
                 .map(|item| typed_value_to_rust(item, project_name));
             quote!(vec![#(#members),*])
+        }
+        TypedValue::Node(instance) => {
+            let args = instance
+                .args
+                .iter()
+                .map(|item| typed_value_to_rust(item, project_name));
+            let name = node_type_name(&instance.name);
+            quote!(#name::new(#(#args),*))
         }
         TypedValue::NodeList(id) => {
             let project_ident = project_ident(project_name);

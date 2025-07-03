@@ -3,7 +3,7 @@ use std::path::Path;
 
 use super::nodes::NodeInstance;
 use super::values::{parse_type, parse_typed_value, TypedValue};
-use crate::assets::{AssetIndex, Assets};
+use crate::assets::Assets;
 use crate::parse::guile::SCM;
 use crate::parse::scheme_util::CXROp::{CAR, CDR};
 use crate::parse::scheme_util::{assq_str, cxr, eval_str, iter_list, parse_symbol, with_guile};
@@ -16,9 +16,9 @@ pub(crate) struct SaveItem {
 }
 
 impl SaveItem {
-    fn from_scheme(definition: SCM, assets: &AssetIndex) -> Result<SaveItem, SkyliteProcError> {
+    fn from_scheme(definition: SCM, assets: &mut Assets) -> Result<SaveItem, SkyliteProcError> {
         unsafe {
-            let typename = parse_type(cxr(definition, &[CDR, CAR])?)?;
+            let typename = parse_type(cxr(definition, &[CDR, CAR])?, &assets.index)?;
             Ok(SaveItem {
                 name: parse_symbol(cxr(definition, &[CAR])?)?,
                 data: parse_typed_value(&typename, cxr(definition, &[CDR, CDR, CAR])?, assets)?,
@@ -65,7 +65,7 @@ impl SkyliteProject {
 
             let save_data = if let Some(list) = assq_str("save-data", definition)? {
                 iter_list(list)?
-                    .map(|item| SaveItem::from_scheme(item, &assets.index))
+                    .map(|item| SaveItem::from_scheme(item, &mut assets))
                     .collect::<Result<Vec<SaveItem>, SkyliteProcError>>()?
             } else {
                 Vec::new()

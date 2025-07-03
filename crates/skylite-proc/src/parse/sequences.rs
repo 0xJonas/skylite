@@ -245,9 +245,12 @@ fn expect_numeric_type(typename: &Type) -> Result<(), SkyliteProcError> {
         | Type::I64
         | Type::F32
         | Type::F64 => Ok(()),
-        Type::Bool | Type::String | Type::Tuple(_) | Type::Vec(_) | Type::NodeList => {
-            Err(data_err!("Expected numeric type"))
-        }
+        Type::Bool
+        | Type::String
+        | Type::Tuple(_)
+        | Type::Vec(_)
+        | Type::Node(_)
+        | Type::NodeList => Err(data_err!("Expected numeric type")),
     }
 }
 
@@ -308,7 +311,7 @@ impl InputOp {
                     expect_args(&items, 2, "set")?;
                     let field_path = parse_field(&parse_symbol(items[1])?);
                     let field = resolve_field(&field_path, target_node_name, assets)?;
-                    let val = parse_typed_value(&field.typename, items[2], &assets.index)?;
+                    let val = parse_typed_value(&field.typename, items[2], assets)?;
                     Ok(InputOp::Set { field, val })
                 }
 

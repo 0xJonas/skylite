@@ -33,7 +33,7 @@ impl NodeInstance {
             let node = assets.load_node(&name)?;
             let node_id = node.meta.id;
             let name = node.meta.name.clone();
-            let args = parse_argument_list(args_raw, &node.parameters.clone(), &assets.index)?;
+            let args = parse_argument_list(args_raw, &node.parameters.clone(), assets)?;
 
             Ok(NodeInstance {
                 node_id,
@@ -71,7 +71,7 @@ impl Node {
             let maybe_parameters = assq_str("parameters", def)?;
             let parameters = if let Some(parameters_scm) = maybe_parameters {
                 iter_list(parameters_scm)?
-                    .map(|p| parse_variable_definition(p, &assets.index))
+                    .map(|p| parse_variable_definition(p, assets))
                     .collect::<Result<Vec<Variable>, SkyliteProcError>>()?
             } else {
                 vec![]
@@ -80,7 +80,7 @@ impl Node {
             let maybe_properties = assq_str("properties", def)?;
             let properties = if let Some(properties_scm) = maybe_properties {
                 iter_list(properties_scm)?
-                    .map(|p| parse_variable_definition(p, &assets.index))
+                    .map(|p| parse_variable_definition(p, assets))
                     .collect::<Result<Vec<Variable>, SkyliteProcError>>()?
             } else {
                 vec![]
@@ -134,14 +134,14 @@ impl Node {
         // we can get away with ignoring the missing C representations.
         #[allow(improper_ctypes_definitions)]
         extern "C" fn from_meta_inner(
-            params: (&AssetMetaData, &mut Assets),
+            params: (AssetMetaData, &mut Assets),
         ) -> Result<Node, SkyliteProcError> {
             let (meta, assets) = params;
 
-            Node::from_meta_with_guile(meta.clone(), assets)
+            Node::from_meta_with_guile(meta, assets)
         }
 
-        with_guile(from_meta_inner, (&meta, assets))
+        with_guile(from_meta_inner, (meta, assets))
     }
 }
 

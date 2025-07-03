@@ -7,7 +7,8 @@ use super::scheme_util::{
     cxr, form_to_string, iter_list, parse_bool, parse_f32, parse_f64, parse_int, parse_string,
     parse_symbol,
 };
-use crate::assets::AssetIndex;
+use crate::assets::{AssetIndex, Assets};
+use crate::parse::nodes::NodeInstance;
 use crate::SkyliteProcError;
 
 /// Type of a Skylite variable or parameter.
@@ -27,6 +28,7 @@ pub(crate) enum Type {
     String,
     Tuple(Vec<Type>),
     Vec(Box<Type>),
+    Node(String),
     NodeList,
 }
 
@@ -43,7 +45,11 @@ pub(crate) enum Type {
 /// types:
 /// - `(<type1> <type2> ... )`: A tuple of the given types.
 /// - `(vec <type>)`: A vector of the given types.
-pub(crate) unsafe fn parse_type(typename: SCM) -> Result<Type, SkyliteProcError> {
+/// - `(node <name>)`: A node type with the given name.
+pub(crate) unsafe fn parse_type(
+    typename: SCM,
+    asset_index: &AssetIndex,
+) -> Result<Type, SkyliteProcError> {
     if scm_is_symbol(typename) {
         let type_name = parse_symbol(typename)?;
         match &type_name[..] {
@@ -66,11 +72,18 @@ pub(crate) unsafe fn parse_type(typename: SCM) -> Result<Type, SkyliteProcError>
         let car = scm_car(typename);
         if scm_is_symbol(car) && parse_symbol(car)? == "vec" {
             let item_type = cxr(typename, &[CDR, CAR])?;
-            Ok(Type::Vec(Box::new(parse_type(item_type)?)))
+            Ok(Type::Vec(Box::new(parse_type(item_type, asset_index)?)))
+        } else if scm_is_symbol(car) && parse_symbol(car)? == "node" {
+            let node_name = parse_symbol(cxr(typename, &[CDR, CAR])?)?;
+            if asset_index.nodes.contains_key(&node_name) {
+                Ok(Type::Node(node_name))
+            } else {
+                return Err(data_err!("Node not found: {node_name}"));
+            }
         } else {
             iter_list(typename)
                 .unwrap()
-                .map(|t| parse_type(t))
+                .map(|t| parse_type(t, asset_index))
                 .collect::<Result<Vec<Type>, SkyliteProcError>>()
                 .map(|ok| Type::Tuple(ok))
         }
@@ -96,6 +109,7 @@ pub(crate) enum TypedValue {
     String(String),
     Tuple(Vec<TypedValue>),
     Vec(Vec<TypedValue>),
+    Node(NodeInstance),
     NodeList(usize),
 }
 
@@ -103,7 +117,7 @@ pub(crate) enum TypedValue {
 pub(crate) unsafe fn parse_typed_value(
     typename: &Type,
     data: SCM,
-    assets: &AssetIndex,
+    assets: &mut Assets,
 ) -> Result<TypedValue, SkyliteProcError> {
     match typename {
         Type::U8 => Ok(TypedValue::U8(parse_int(data)?)),
@@ -126,9 +140,22 @@ pub(crate) unsafe fn parse_typed_value(
 
         Type::Tuple(types) => parse_typed_value_tuple(types, data, assets),
 
+        Type::Node(name) => {
+            let instance = NodeInstance::from_scheme_with_guile(data, assets)?;
+            if &instance.name == name {
+                Ok(TypedValue::Node(instance))
+            } else {
+                Err(data_err!(
+                    "Node instance has incompatible type, expected {name} got {}",
+                    instance.name
+                ))
+            }
+        }
+
         Type::NodeList => {
             let name = parse_symbol(data)?;
             let meta = assets
+                .index
                 .node_lists
                 .get(&name)
                 .ok_or(data_err!("Node list not found: {name}"))?;
@@ -140,7 +167,7 @@ pub(crate) unsafe fn parse_typed_value(
 unsafe fn parse_typed_value_tuple(
     types: &[Type],
     values: SCM,
-    assets: &AssetIndex,
+    assets: &mut Assets,
 ) -> Result<TypedValue, SkyliteProcError> {
     if types.len() as i64 != scm_to_int64(scm_length(values)) {
         return Err(data_err!(
@@ -164,7 +191,7 @@ pub(crate) struct Variable {
 
 pub(crate) unsafe fn parse_variable_definition(
     def: SCM,
-    assets: &AssetIndex,
+    assets: &mut Assets,
 ) -> Result<Variable, SkyliteProcError> {
     if scm_is_false(scm_list_p(def)) {
         return Err(data_err!(
@@ -183,7 +210,7 @@ pub(crate) unsafe fn parse_variable_definition(
     if scm_is_null(current_pair) {
         return Err(data_err!("Expected variable type"));
     }
-    let typename = parse_type(scm_car(current_pair))?;
+    let typename = parse_type(scm_car(current_pair), &assets.index)?;
 
     current_pair = scm_cdr(current_pair);
     let documentation = if scm_is_null(current_pair) {
@@ -220,7 +247,7 @@ pub(crate) unsafe fn parse_variable_definition(
 pub(crate) unsafe fn parse_argument_list(
     args_raw: SCM,
     parameters: &[Variable],
-    assets: &AssetIndex,
+    assets: &mut Assets,
 ) -> Result<Vec<TypedValue>, SkyliteProcError> {
     // Pad with empty values. If there are any empty values left after the argument
     // list has been parsed, replace with the corresponding default values. If
@@ -274,58 +301,58 @@ pub(crate) unsafe fn parse_argument_list(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::parse_argument_list;
-    use crate::assets::AssetIndex;
+    use crate::assets::tests::create_tmp_fs;
+    use crate::assets::Assets;
     use crate::parse::guile::{scm_from_bool, scm_from_double, scm_from_int32};
+    use crate::parse::nodes::NodeInstance;
     use crate::parse::scheme_util::{eval_str, with_guile};
     use crate::parse::values::{
         parse_type, parse_typed_value, parse_variable_definition, Type, TypedValue, Variable,
     };
 
-    fn empty_assets() -> AssetIndex {
-        AssetIndex {
-            nodes: HashMap::new(),
-            node_lists: HashMap::new(),
-            sequences: HashMap::new(),
-        }
+    fn empty_assets() -> Assets {
+        let tmp_fs = create_tmp_fs(&[]).unwrap();
+        Assets::from_scheme_with_guile(None, tmp_fs.path()).unwrap()
     }
 
     extern "C" fn test_typed_value_impl(_: &()) {
-        let assets = empty_assets();
+        let tmp_fs =
+            create_tmp_fs(&[("nodes/test-node.scm", "'((parameters . ((val u8))))\n")]).unwrap();
+        let mut assets = Assets::from_scheme_with_guile(None, tmp_fs.path()).unwrap();
         unsafe {
-            let type_name = parse_type(eval_str("'u8").unwrap()).unwrap();
+            let type_name = parse_type(eval_str("'u8").unwrap(), &assets.index).unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, scm_from_int32(5), &assets).unwrap(),
+                parse_typed_value(&type_name, scm_from_int32(5), &mut assets).unwrap(),
                 TypedValue::U8(5)
             );
-            assert!(parse_typed_value(&type_name, scm_from_int32(300), &assets).is_err());
+            assert!(parse_typed_value(&type_name, scm_from_int32(300), &mut assets).is_err());
 
-            let type_name = parse_type(eval_str("'f64").unwrap()).unwrap();
+            let type_name = parse_type(eval_str("'f64").unwrap(), &assets.index).unwrap();
             let value = scm_from_double(1.0);
             assert_eq!(
-                parse_typed_value(&type_name, value, &assets).unwrap(),
+                parse_typed_value(&type_name, value, &mut assets).unwrap(),
                 TypedValue::F64(1.0)
             );
 
-            let type_name = parse_type(eval_str("'string").unwrap()).unwrap();
+            let type_name = parse_type(eval_str("'string").unwrap(), &assets.index).unwrap();
             let value = eval_str("\"test123\"").unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, value, &assets).unwrap(),
+                parse_typed_value(&type_name, value, &mut assets).unwrap(),
                 TypedValue::String("test123".to_owned())
             );
 
-            let type_name = parse_type(eval_str("'bool").unwrap()).unwrap();
+            let type_name = parse_type(eval_str("'bool").unwrap(), &assets.index).unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, scm_from_bool(true), &assets).unwrap(),
+                parse_typed_value(&type_name, scm_from_bool(true), &mut assets).unwrap(),
                 TypedValue::Bool(true)
             );
 
-            let type_name = parse_type(eval_str("'(u8 bool (u16 u16))").unwrap()).unwrap();
+            let type_name =
+                parse_type(eval_str("'(u8 bool (u16 u16))").unwrap(), &assets.index).unwrap();
             let value = eval_str("'(1 #t (2 3))").unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, value, &assets).unwrap(),
+                parse_typed_value(&type_name, value, &mut assets).unwrap(),
                 TypedValue::Tuple(vec![
                     TypedValue::U8(1),
                     TypedValue::Bool(true),
@@ -333,10 +360,10 @@ mod tests {
                 ])
             );
 
-            let type_name = parse_type(eval_str("'(vec i16)").unwrap()).unwrap();
+            let type_name = parse_type(eval_str("'(vec i16)").unwrap(), &assets.index).unwrap();
             let value = eval_str("'(0 5 10 15 20 25)").unwrap();
             assert_eq!(
-                parse_typed_value(&type_name, value, &assets).unwrap(),
+                parse_typed_value(&type_name, value, &mut assets).unwrap(),
                 TypedValue::Vec(vec![
                     TypedValue::I16(0),
                     TypedValue::I16(5),
@@ -345,6 +372,18 @@ mod tests {
                     TypedValue::I16(20),
                     TypedValue::I16(25)
                 ])
+            );
+
+            let type_name =
+                parse_type(eval_str("'(node test-node)").unwrap(), &assets.index).unwrap();
+            let value = eval_str("'(test-node 5)").unwrap();
+            assert_eq!(
+                parse_typed_value(&type_name, value, &mut assets).unwrap(),
+                TypedValue::Node(NodeInstance {
+                    node_id: 0,
+                    name: "test-node".to_owned(),
+                    args: vec![TypedValue::U8(5)]
+                })
             );
         }
     }
@@ -355,11 +394,11 @@ mod tests {
     }
 
     extern "C" fn test_variable_impl(_: &()) {
-        let assets = empty_assets();
+        let mut assets = empty_assets();
         unsafe {
             let form = eval_str("'(test1 u8)").unwrap();
             assert_eq!(
-                parse_variable_definition(form, &assets).unwrap(),
+                parse_variable_definition(form, &mut assets).unwrap(),
                 Variable {
                     name: String::from("test1"),
                     typename: Type::U8,
@@ -370,7 +409,7 @@ mod tests {
 
             let form = eval_str("'(test2 i32 \"Something\")").unwrap();
             assert_eq!(
-                parse_variable_definition(form, &assets).unwrap(),
+                parse_variable_definition(form, &mut assets).unwrap(),
                 Variable {
                     name: String::from("test2"),
                     typename: Type::I32,
@@ -381,7 +420,7 @@ mod tests {
 
             let form = eval_str("'(test3 (vec u8) \"Something else\" (0 1 2 3))").unwrap();
             assert_eq!(
-                parse_variable_definition(form, &assets).unwrap(),
+                parse_variable_definition(form, &mut assets).unwrap(),
                 Variable {
                     name: String::from("test3"),
                     typename: Type::Vec(Box::new(Type::U8)),
@@ -423,35 +462,35 @@ mod tests {
                 default: Some(TypedValue::U8(10)),
             },
         ];
-        let assets = empty_assets();
+        let mut assets = empty_assets();
 
         unsafe {
             let args_raw = eval_str("'(1 2 3)").unwrap();
-            let args = parse_argument_list(args_raw, parameters, &assets).unwrap();
+            let args = parse_argument_list(args_raw, parameters, &mut assets).unwrap();
             assert_eq!(
                 args,
                 vec![TypedValue::U8(1), TypedValue::U8(2), TypedValue::U8(3)]
             );
 
             let args_raw = eval_str("'(1)").unwrap();
-            let args = parse_argument_list(args_raw, parameters, &assets).unwrap();
+            let args = parse_argument_list(args_raw, parameters, &mut assets).unwrap();
             assert_eq!(
                 args,
                 vec![TypedValue::U8(1), TypedValue::U8(5), TypedValue::U8(10)]
             );
 
             let args_raw = eval_str("'((c . 3) (a . 1) (b . 2))").unwrap();
-            let args = parse_argument_list(args_raw, parameters, &assets).unwrap();
+            let args = parse_argument_list(args_raw, parameters, &mut assets).unwrap();
             assert_eq!(
                 args,
                 vec![TypedValue::U8(1), TypedValue::U8(2), TypedValue::U8(3)]
             );
 
             let args_raw = eval_str("'((c . 3))").unwrap();
-            assert!(parse_argument_list(args_raw, parameters, &assets).is_err());
+            assert!(parse_argument_list(args_raw, parameters, &mut assets).is_err());
 
             let args_raw = eval_str("'(1 2 3 4)").unwrap();
-            assert!(parse_argument_list(args_raw, parameters, &assets).is_err());
+            assert!(parse_argument_list(args_raw, parameters, &mut assets).is_err());
         }
     }
 
