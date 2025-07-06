@@ -13,8 +13,14 @@ use crate::{change_case, IdentCase, SkyliteProcError};
 
 mod ir;
 
+// region: sequence processing within skylite_project
+
 struct CompilationResult {
+    /// The bytes representing the actual compiled sequences.
     compiled_data: Vec<Vec<u8>>,
+
+    /// The list of offsets that must be available from the generated
+    /// _private_get_offset function.
     required_offsets: Vec<(String, String)>,
 }
 
@@ -313,6 +319,10 @@ pub(crate) fn generate_sequence_data(sequences: &[&Sequence]) -> TokenStream {
     }
 }
 
+// endregion
+
+// region: sequence_definition
+
 fn collect_ids<IdFun: Fn(&InputOp) -> Option<String>>(
     sequence: &Sequence,
     id_fun: IdFun,
@@ -423,7 +433,7 @@ pub(crate) fn generate_sequence_definition(
     Ok(quote! {
         use ::skylite_core::sequences::SequenceHandle;
 
-        pub struct #sequence_handle_name;
+        pub(crate) struct #sequence_handle_name;
 
         impl SequenceHandle for #sequence_handle_name {
             const ID: usize = #id;
@@ -435,3 +445,5 @@ pub(crate) fn generate_sequence_definition(
         }
     })
 }
+
+// endregion

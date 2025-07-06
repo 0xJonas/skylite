@@ -1,1 +1,1 @@
-'((static-nodes . ((content . (fizz-buzz)))))
+'((properties . ((content (node fizz-buzz)))))

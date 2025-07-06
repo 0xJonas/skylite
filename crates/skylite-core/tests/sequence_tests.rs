@@ -16,22 +16,24 @@ mod wrapper {
     use super::fizz_buzz::FizzBuzz;
     use crate::project::SequenceTest;
 
-    skylite_proc::extra_properties! {
-        pub sequencer: Sequencer<FizzBuzz>
+    pub(crate) struct Wrapper {
+        #[skylite_proc::property]
+        #[skylite_proc::node]
+        pub content: FizzBuzz,
+        sequencer: Sequencer<FizzBuzz>,
     }
 
-    #[skylite_proc::create_properties]
-    fn create_properties() -> WrapperProperties {
-        WrapperProperties {
+    #[skylite_proc::new]
+    pub(crate) fn new() -> Wrapper {
+        Wrapper {
+            content: crate::fizz_buzz::new(),
             sequencer: Sequencer::new(crate::fizz_buzz_seq::FizzBuzzSeqHandle),
         }
     }
 
     #[skylite_proc::update]
     fn update(node: &mut Wrapper, _controls: &mut ProjectControls<SequenceTest>) {
-        node.properties
-            .sequencer
-            .update(&mut node.static_nodes.content);
+        node.sequencer.update(&mut node.content);
     }
 }
 
@@ -40,12 +42,25 @@ mod fizz_buzz {
     use super::fizz_buzz_scratch::FizzBuzzScratch;
     use crate::project::SequenceTest;
 
-    #[skylite_proc::create_properties]
-    fn create_properties() -> FizzBuzzProperties {
-        FizzBuzzProperties {
+    pub(crate) struct FizzBuzz {
+        #[skylite_proc::property]
+        pub counter: i16,
+        #[skylite_proc::property]
+        pub status: String,
+        #[skylite_proc::property]
+        pub stop: bool,
+        #[skylite_proc::property]
+        #[skylite_proc::node]
+        pub scratch: FizzBuzzScratch,
+    }
+
+    #[skylite_proc::new]
+    pub(crate) fn new() -> FizzBuzz {
+        FizzBuzz {
             counter: 0,
             status: String::new(),
             stop: false,
+            scratch: crate::fizz_buzz_scratch::new(),
         }
     }
 
@@ -53,7 +68,7 @@ mod fizz_buzz {
     fn update(node: &mut FizzBuzz, controls: &mut skylite_core::ProjectControls<SequenceTest>) {
         controls.get_target_instance_mut().log(&format!(
             "Counter: {}, Status: {}",
-            node.properties.counter, node.properties.status
+            node.counter, node.status
         ));
     }
 }
@@ -62,9 +77,18 @@ mod fizz_buzz {
 mod fizz_buzz_scratch {
     use crate::project::SequenceTest;
 
-    #[skylite_proc::create_properties]
-    fn create_properties() -> FizzBuzzScratchProperties {
-        FizzBuzzScratchProperties {
+    pub(crate) struct FizzBuzzScratch {
+        #[skylite_proc::property]
+        pub check_counter: i16,
+        #[skylite_proc::property]
+        pub is_fizz: bool,
+        #[skylite_proc::property]
+        pub is_buzz: bool,
+    }
+
+    #[skylite_proc::new]
+    pub(crate) fn new() -> FizzBuzzScratch {
+        FizzBuzzScratch {
             check_counter: 0,
             is_fizz: false,
             is_buzz: false,
@@ -76,8 +100,8 @@ mod fizz_buzz_scratch {
 mod project {
     use skylite_mock::MockTarget;
 
-    use super::fizz_buzz::{FizzBuzz, FizzBuzzProperties, FizzBuzzStaticNodes};
-    use super::fizz_buzz_scratch::{FizzBuzzScratch, FizzBuzzScratchProperties};
+    use super::fizz_buzz::FizzBuzz;
+    use super::fizz_buzz_scratch::FizzBuzzScratch;
     use super::wrapper::Wrapper;
 }
 

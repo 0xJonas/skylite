@@ -65,27 +65,11 @@ fn push_offset_ops_for_field(field: &Field) -> Vec<OpIR> {
     field
         .path
         .iter()
-        .flat_map(|segment| match segment {
-            FieldPathSegment::StaticNode(node, static_node) => {
-                let node_name = change_case(node, IdentCase::UpperCamelCase);
-                [
-                    OpIR::PushOffset(node_name.clone(), "static_nodes".to_owned()),
-                    OpIR::PushOffset(
-                        format!("{node_name}StaticNodes"),
-                        change_case(static_node, IdentCase::LowerSnakeCase),
-                    ),
-                ]
-            }
-            FieldPathSegment::Property(node, property) => {
-                let node_name = change_case(node, IdentCase::UpperCamelCase);
-                [
-                    OpIR::PushOffset(node_name.to_owned(), "properties".to_owned()),
-                    OpIR::PushOffset(
-                        format!("{node_name}Properties"),
-                        change_case(property, IdentCase::LowerSnakeCase),
-                    ),
-                ]
-            }
+        .map(|segment| match segment {
+            FieldPathSegment(node, property) => OpIR::PushOffset(
+                change_case(node, IdentCase::UpperCamelCase),
+                change_case(property, IdentCase::LowerSnakeCase),
+            ),
         })
         .collect()
 }
@@ -343,8 +327,8 @@ mod tests {
                     "start" => InputOp::Set {
                         field: Field {
                             path: vec![
-                                FieldPathSegment::StaticNode("TestNode1".to_owned(), "static-1".to_owned()),
-                                FieldPathSegment::Property("TestNode2".to_owned(), "prop-2".to_owned())
+                                FieldPathSegment("TestNode1".to_owned(), "static-1".to_owned()),
+                                FieldPathSegment("TestNode2".to_owned(), "prop-2".to_owned())
                             ],
                             typename: Type::U8
                         },
@@ -356,7 +340,7 @@ mod tests {
                         condition: BranchCondition::Equals(
                             Field {
                                 path: vec![
-                                    FieldPathSegment::Property("TestNode1".to_owned(), "prop-1".to_owned())
+                                    FieldPathSegment("TestNode1".to_owned(), "prop-1".to_owned())
                                 ],
                                 typename: Type::U16
                             },
@@ -382,19 +366,11 @@ mod tests {
                 ir_line!(
                     "start" => OpIR::PushOffset(
                         "TestNode1".to_owned(),
-                        "static_nodes".to_owned()
+                        "static_1".to_owned()
                     )
                 ),
                 ir_line!(OpIR::PushOffset(
-                    "TestNode1StaticNodes".to_owned(),
-                    "static_1".to_owned()
-                )),
-                ir_line!(OpIR::PushOffset(
                     "TestNode2".to_owned(),
-                    "properties".to_owned()
-                )),
-                ir_line!(OpIR::PushOffset(
-                    "TestNode2Properties".to_owned(),
                     "prop_2".to_owned()
                 )),
                 ir_line!(OpIR::SetField {
@@ -403,13 +379,9 @@ mod tests {
                 ir_line!(
                     "second" => OpIR::PushOffset(
                         "TestNode1".to_owned(),
-                        "properties".to_owned()
+                        "prop_1".to_owned()
                     )
                 ),
-                ir_line!(OpIR::PushOffset(
-                    "TestNode1Properties".to_owned(),
-                    "prop_1".to_owned()
-                )),
                 ir_line!(OpIR::BranchCmp {
                     comparison: Comparison::Equals,
                     rhs: TypedValue::U16(10),

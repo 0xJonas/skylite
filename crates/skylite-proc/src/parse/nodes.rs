@@ -50,8 +50,6 @@ pub(crate) struct Node {
     pub meta: AssetMetaData,
     pub parameters: Vec<Variable>,
     pub properties: Vec<Variable>,
-    pub static_nodes: Vec<(String, NodeInstance)>,
-    pub dynamic_nodes: Vec<NodeInstance>,
 }
 
 impl Node {
@@ -86,41 +84,10 @@ impl Node {
                 vec![]
             };
 
-            let maybe_static_nodes = assq_str("static-nodes", def)?;
-            let static_nodes = if let Some(static_nodes_scm) = maybe_static_nodes {
-                iter_list(static_nodes_scm)?
-                    .map(|item| {
-                        if scm_is_false(scm_pair_p(item)) {
-                            return Err(data_err!(
-                                "Expected (name . instance) pair for static node, got {}",
-                                form_to_string(item)
-                            ));
-                        }
-
-                        let name = parse_symbol(scm_car(item))?;
-                        let instance = NodeInstance::from_scheme_with_guile(scm_cdr(item), assets)?;
-                        Ok((name, instance))
-                    })
-                    .collect::<Result<Vec<(String, NodeInstance)>, SkyliteProcError>>()?
-            } else {
-                Vec::new()
-            };
-
-            let maybe_dynamic_nodes = assq_str("dynamic-nodes", def)?;
-            let dynamic_nodes = if let Some(dynamic_nodes_scm) = maybe_dynamic_nodes {
-                iter_list(dynamic_nodes_scm)?
-                    .map(|item| Ok(NodeInstance::from_scheme_with_guile(item, assets)?))
-                    .collect::<Result<Vec<NodeInstance>, SkyliteProcError>>()?
-            } else {
-                vec![]
-            };
-
             Ok(Node {
                 meta,
                 parameters,
                 properties,
-                static_nodes,
-                dynamic_nodes,
             })
         }
     }
@@ -149,8 +116,8 @@ impl Node {
 mod tests {
     use crate::assets::tests::create_tmp_fs;
     use crate::assets::Assets;
-    use crate::parse::nodes::{Node, NodeInstance};
-    use crate::parse::values::{Type, TypedValue, Variable};
+    use crate::parse::nodes::Node;
+    use crate::parse::values::{Type, Variable};
 
     #[test]
     fn test_parse_node() {
@@ -159,25 +126,14 @@ mod tests {
                 "nodes/test-node-1.scm",
                 r#"
                 '((parameters . ((id string)))
-                   (properties . ((id string)))
-                   (static-nodes .
-                     ((sub1 . (basic-node-2 "sub1"))
-                      (sub2 . (z-order-node "sub2" 2))))
-                   (dynamic-nodes .
-                     ((basic-node-2 "dynamic1")
-                      (z-order-node "dynamic2" -1))))
+                   (properties . ((id string)
+                                  (sub1 (node test-node-2)))))
                 "#,
             ),
             (
-                "nodes/basic-node-2.scm",
+                "nodes/test-node-2.scm",
                 r#"
                 '((parameters . ((id string))))
-                "#,
-            ),
-            (
-                "nodes/z-order-node.scm",
-                r#"
-                '((parameters . ((id string) (z-order i16))))
                 "#,
             ),
         ])
@@ -194,43 +150,18 @@ mod tests {
                     documentation: None,
                     default: None
                 }],
-                properties: vec![Variable {
-                    name: "id".to_owned(),
-                    typename: Type::String,
-                    documentation: None,
-                    default: None
-                }],
-                static_nodes: vec![
-                    (
-                        "sub1".to_owned(),
-                        NodeInstance {
-                            node_id: 0,
-                            name: "basic-node-2".to_owned(),
-                            args: vec![TypedValue::String("sub1".to_owned())]
-                        }
-                    ),
-                    (
-                        "sub2".to_owned(),
-                        NodeInstance {
-                            node_id: 2,
-                            name: "z-order-node".to_owned(),
-                            args: vec![TypedValue::String("sub2".to_owned()), TypedValue::I16(2)]
-                        }
-                    )
-                ],
-                dynamic_nodes: vec![
-                    NodeInstance {
-                        node_id: 0,
-                        name: "basic-node-2".to_owned(),
-                        args: vec![TypedValue::String("dynamic1".to_owned())]
+                properties: vec![
+                    Variable {
+                        name: "id".to_owned(),
+                        typename: Type::String,
+                        documentation: None,
+                        default: None
                     },
-                    NodeInstance {
-                        node_id: 2,
-                        name: "z-order-node".to_owned(),
-                        args: vec![
-                            TypedValue::String("dynamic2".to_owned()),
-                            TypedValue::I16(-1)
-                        ]
+                    Variable {
+                        name: "sub1".to_owned(),
+                        typename: Type::Node("test-node-2".to_owned()),
+                        documentation: None,
+                        default: None
                     }
                 ]
             }

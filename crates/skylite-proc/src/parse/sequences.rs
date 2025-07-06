@@ -146,14 +146,11 @@ impl BranchCondition {
 }
 
 /// A Segment of the path of a `Field`. A path consists of
-/// a chain of static node and property references. Each segment
-/// contains the Node for which it applies as well as either the
-/// static node or property it is referencing.
+/// a chain of property references. Each segment
+/// contains the Node for which it applies as well as the property it is
+/// referencing.
 #[derive(Debug, PartialEq, Clone)]
-pub(crate) enum FieldPathSegment {
-    StaticNode(String, String),
-    Property(String, String),
-}
+pub(crate) struct FieldPathSegment(pub String, pub String);
 
 /// Information on a field used in an `InputOp`.
 #[derive(Debug, PartialEq, Clone)]
@@ -168,23 +165,24 @@ fn resolve_field(
     assets: &mut Assets,
 ) -> Result<Field, SkyliteProcError> {
     let field_name = path[path.len() - 1].as_str();
+
+    // Build a sequence of (node, property) pairs for nested property access.
     let mut current_node_name = target_node_name.to_owned();
     let mut segments = Vec::new();
     for segment in path[..path.len() - 1].iter() {
         let node = assets.load_node(&current_node_name).unwrap();
-        let next_node_name = node
-            .static_nodes
+        let next_node = node
+            .properties
             .iter()
-            .find(|(name, _)| name == segment)
-            .ok_or(data_err!("Static node not found on node: {segment}"))?
-            .1
-            .name
-            .clone();
+            .find(|v| &v.name == segment)
+            .ok_or(data_err!("Property not found on node: {segment}"))?;
 
-        segments.push(FieldPathSegment::StaticNode(
-            node.meta.name.clone(),
-            segment.clone(),
-        ));
+        let next_node_name = match &next_node.typename {
+            Type::Node(node_type) => node_type.clone(),
+            _ => return Err(data_err!("Cannot nest into non-node property: {segment}")),
+        };
+
+        segments.push(FieldPathSegment(node.meta.name.clone(), segment.clone()));
 
         current_node_name = next_node_name;
     }
@@ -195,11 +193,11 @@ fn resolve_field(
         .properties
         .iter()
         .find(|v| v.name == field_name)
-        .ok_or(data_err!("Property not found one node: {field_name}"))?
+        .ok_or(data_err!("Property not found on node: {field_name}"))?
         .typename
         .clone();
 
-    segments.push(FieldPathSegment::Property(
+    segments.push(FieldPathSegment(
         bottom_node.meta.name.clone(),
         field_name.to_owned(),
     ));
@@ -629,7 +627,7 @@ mod tests {
         let tmp_fs = create_tmp_fs(&[
             (
                 "nodes/test-node-1.scm",
-                "'((properties . ((prop1 u8) (prop2 bool))) (static-nodes . ((static1 . (test-node-2)))))",
+                "'((properties . ((prop1 u8) (prop2 bool) (static1 (node test-node-2)))))",
             ),
             ("nodes/test-node-2.scm", "'((properties . ((prop1 u16))))"),
             (
@@ -685,7 +683,7 @@ mod tests {
                         labels: vec!["main-l-start".to_owned()],
                         input_op: InputOp::Set {
                             field: Field {
-                                path: vec![FieldPathSegment::Property(
+                                path: vec![FieldPathSegment(
                                     "test-node-1".to_owned(),
                                     "prop1".to_owned()
                                 )],
@@ -710,7 +708,7 @@ mod tests {
                         labels: vec!["main-b---1".to_owned()],
                         input_op: InputOp::Branch {
                             condition: BranchCondition::IfTrue(Field {
-                                path: vec![FieldPathSegment::Property(
+                                path: vec![FieldPathSegment(
                                     "test-node-1".to_owned(),
                                     "prop2".to_owned()
                                 )],
@@ -724,14 +722,11 @@ mod tests {
                         input_op: InputOp::Modify {
                             field: Field {
                                 path: vec![
-                                    FieldPathSegment::StaticNode(
+                                    FieldPathSegment(
                                         "test-node-1".to_owned(),
                                         "static1".to_owned()
                                     ),
-                                    FieldPathSegment::Property(
-                                        "test-node-2".to_owned(),
-                                        "prop1".to_owned()
-                                    )
+                                    FieldPathSegment("test-node-2".to_owned(), "prop1".to_owned())
                                 ],
                                 typename: Type::U16
                             },
@@ -743,7 +738,7 @@ mod tests {
                         input_op: InputOp::Branch {
                             condition: BranchCondition::LessThan(
                                 Field {
-                                    path: vec![FieldPathSegment::Property(
+                                    path: vec![FieldPathSegment(
                                         "test-node-1".to_owned(),
                                         "prop1".to_owned()
                                     )],

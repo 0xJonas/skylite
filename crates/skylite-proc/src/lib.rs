@@ -3,7 +3,6 @@ use std::str::FromStr;
 
 use generate::nodes::generate_node_definition;
 use generate::sequences::generate_sequence_definition;
-use generate::util::get_macro_item;
 use parse::guile::SCM;
 use parse::project::SkyliteProject;
 use parse::scheme_util::form_to_string;
@@ -231,24 +230,27 @@ fn node_definition_fallible(
     args_raw: TokenStream,
     body_raw: TokenStream,
 ) -> Result<TokenStream, SkyliteProcError> {
-    let mut module = parse2::<ItemMod>(body_raw.clone())
+    let module = parse2::<ItemMod>(body_raw.clone())
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
-    let items = &module
+
+    // The actual content is moved out of the module, everything else is
+    // retained. The content is passed through generate_node_definition, the
+    // output of which becomes the module's new content.
+    let mut module_out = ItemMod {
+        content: None,
+        ..module
+    };
+    let (brace, items) = module
         .content
-        .as_ref()
-        .ok_or(data_err!("Node definition module must have a body"))?
-        .1;
+        .ok_or(data_err!("Node definition module must have a body"))?;
 
     let (mut project, name) = extract_asset_file(&args_raw)?;
     let node = project.assets.load_node(&name)?;
 
-    generate_node_definition(&node, &project.name, items)?;
+    let tokens = generate_node_definition(&node, &project.name, items)?;
+    module_out.content = Some((brace, vec![Item::Verbatim(tokens)]));
 
-    let tokens = Item::Verbatim(generate_node_definition(&node, &project.name, items)?);
-
-    module.content.as_mut().unwrap().1.push(tokens);
-
-    Ok(module.into_token_stream())
+    Ok(module_out.into_token_stream())
 }
 
 fn sequence_definition_fallible(
@@ -325,6 +327,14 @@ pub fn sequence_definition(
 #[proc_macro]
 pub fn system(args: proc_macro::TokenStream) -> proc_macro::TokenStream {
     system_impl(args.into()).into()
+}
+
+#[proc_macro_attribute]
+pub fn new(
+    _args: proc_macro::TokenStream,
+    body: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    body
 }
 
 /// Marks a function to initialize something. Used for `node_definition!` and

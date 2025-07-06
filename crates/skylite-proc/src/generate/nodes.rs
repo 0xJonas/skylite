@@ -2,18 +2,18 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Ident, Item, ItemFn};
+use syn::{Field, Ident, Item, ItemFn, ItemStruct, Meta};
 
 use super::encode::{CompressionBuffer, Serialize};
 use crate::assets::AssetSource;
 use crate::generate::project::project_ident;
 use crate::generate::util::{
     generate_argument_list, generate_deserialize_statements, generate_field_list,
-    get_annotated_function, typed_value_to_rust,
+    get_annotated_function, validate_type,
 };
 use crate::parse::node_lists::NodeList;
 use crate::parse::nodes::{Node, NodeInstance};
-use crate::{change_case, get_macro_item, IdentCase, SkyliteProcError};
+use crate::{change_case, IdentCase, SkyliteProcError};
 
 pub fn node_type_name(name: &str) -> Ident {
     format_ident!("{}", change_case(name, IdentCase::UpperCamelCase))
@@ -72,156 +72,128 @@ fn get_fn_name(item: &ItemFn) -> &Ident {
     &item.sig.ident
 }
 
-fn properties_type_name(node_name: &str) -> Ident {
-    format_ident!(
-        "{}Properties",
-        change_case(node_name, IdentCase::UpperCamelCase)
-    )
+enum ChildNode {
+    Single(Ident),
+    Iterable(Ident),
 }
 
-fn gen_properties_type(node: &Node, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
-    let node_param_list = generate_field_list(&node.parameters, TokenStream::new());
-    let node_args = generate_argument_list(&node.parameters);
-    let properties_type_name = properties_type_name(&node.meta.name);
+struct NodeType {
+    properties: Vec<Ident>,
+    child_nodes: Vec<ChildNode>,
+}
 
-    let asset_properties = generate_field_list(&node.properties, quote!(pub));
-    let extra_properties = match get_macro_item("skylite_proc::extra_properties", items)? {
-        Some(tokens) => tokens.clone(),
-        None => TokenStream::new(),
-    };
-    let delimiter = if !extra_properties.is_empty() && !asset_properties.is_empty() {
-        quote!(,)
+/// Removes the specified annotation from the field's attributes.
+/// Returns true if the annotation was present and removed, false otherwise.
+fn remove_annotation(field: &mut Field, attr: &str) -> bool {
+    let meta = syn::parse_str::<Meta>(attr).unwrap();
+    let org_size = field.attrs.len();
+    field.attrs.retain(|a| a.meta != meta);
+    field.attrs.len() != org_size
+}
+
+fn validate_property(node: &Node, field: &syn::Field) -> Result<(), SkyliteProcError> {
+    let name = field.ident.as_ref().unwrap().to_string();
+
+    // Ensure property is pub or pub(crate).
+    if matches!(&field.vis, syn::Visibility::Inherited)
+        || matches!(&field.vis, syn::Visibility::Restricted(vis_restricted) if !vis_restricted.path.is_ident("crate"))
+    {
+        return Err(data_err!("Property {name} must be pub or pub(crate)"));
+    }
+
+    // Ensure the type matches the declaration in Scheme.
+    let variable = node
+        .properties
+        .iter()
+        .find(|var| change_case(&var.name, IdentCase::LowerSnakeCase) == name)
+        .ok_or(data_err!("Property {name} not found in node definition."))?;
+    if validate_type(&variable.typename, &field.ty) {
+        Ok(())
     } else {
-        TokenStream::new()
+        Err(data_err!(
+            "Type for field {name} does not match node declaration."
+        ))
+    }
+}
+
+fn parse_node_struct(
+    node: &Node,
+    node_struct: &mut ItemStruct,
+) -> Result<NodeType, SkyliteProcError> {
+    let node_type = match node_struct.fields {
+        syn::Fields::Unnamed(_) => NodeType {
+            properties: vec![],
+            child_nodes: vec![],
+        },
+        syn::Fields::Unit => NodeType {
+            properties: vec![],
+            child_nodes: vec![],
+        },
+        syn::Fields::Named(ref mut fields_named) => {
+            let mut properties = vec![];
+            let mut child_nodes = vec![];
+            for field in &mut fields_named.named {
+                if remove_annotation(field, "skylite_proc::property") {
+                    validate_property(node, &field)?;
+                    properties.push(field.ident.clone().unwrap());
+                }
+                if remove_annotation(field, "skylite_proc::node") {
+                    child_nodes.push(ChildNode::Single(field.ident.clone().unwrap()));
+                }
+                if remove_annotation(field, "skylite_proc::nodes") {
+                    child_nodes.push(ChildNode::Iterable(field.ident.clone().unwrap()));
+                }
+            }
+
+            NodeType {
+                properties,
+                child_nodes,
+            }
+        }
     };
 
-    let create_properties_call = if !asset_properties.is_empty() || !extra_properties.is_empty() {
-        get_annotated_function(items, "skylite_proc::create_properties")
-            .map(get_fn_name)
-            .map(|ident| quote!(#ident(#node_args)))
-            .ok_or(data_err!("Missing required special function `create_properties`. Function is required because the node has properties."))?
-    } else {
-        quote!(#properties_type_name {})
-    };
+    // All properties that are declared in Scheme must be marked on the Node type.
+    // Since the name of the property on the Node type is already checked by
+    // validate_property() and structs cannot have multiple fields with the same
+    // name, we only need to check that the list of declared properties and
+    // marked properties have the same length.
+    if node_type.properties.len() != node.properties.len() {
+        return Err(data_err!(
+            "properties in node declaration do not match properties in Node struct."
+        ));
+    }
+
+    Ok(node_type)
+}
+
+fn gen_node_new_fn(node: &Node, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
+    let node_name = node_type_name(&node.meta.name);
+    let params = generate_field_list(&node.parameters, TokenStream::new());
+    let args = generate_argument_list(&node.parameters);
+
+    let new_fn = get_annotated_function(items, "skylite_proc::new")
+        .map(get_fn_name)
+        .ok_or(syntax_err!(
+            "Missing required function `#[skylite_proc::new]`"
+        ))?;
 
     Ok(quote! {
-        pub struct #properties_type_name {
-            #asset_properties
-            #delimiter
-            #extra_properties
-        }
-
-        impl #properties_type_name {
-            fn _private_create_properties(#node_param_list) -> #properties_type_name {
-                #create_properties_call
+        impl #node_name {
+            pub(crate) fn _private_new(#params) -> Self {
+                #new_fn(#args)
             }
         }
     })
 }
 
-fn static_nodes_type_name(node_name: &str) -> Ident {
-    format_ident!(
-        "{}StaticNodes",
-        change_case(node_name, IdentCase::UpperCamelCase)
-    )
-}
-
-fn gen_static_nodes_type(node: &Node) -> TokenStream {
-    let static_nodes_type_name = static_nodes_type_name(&node.meta.name);
-    let members = node.static_nodes.iter().map(|(name, instance)| {
-        let member_name = format_ident!("{}", change_case(name, IdentCase::LowerSnakeCase));
-        let node_type = format_ident!("{}", change_case(&instance.name, IdentCase::UpperCamelCase));
-        quote!(#member_name: #node_type)
-    });
-    quote! {
-        pub struct #static_nodes_type_name {
-            #(pub #members),*
-        }
-    }
-}
-
-fn gen_node_type(node: &Node, project_name: &str) -> TokenStream {
-    let node_name = node_type_name(&node.meta.name);
-    let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
-    let properties_type_name = properties_type_name(&node.meta.name);
-    let static_nodes_type_name = static_nodes_type_name(&node.meta.name);
-    quote! {
-        pub struct #node_name {
-            pub properties: #properties_type_name,
-            pub static_nodes: #static_nodes_type_name,
-            pub dynamic_nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=#project_name>>>
-        }
-    }
-}
-
-fn gen_node_new_fn(node: &Node, project_name: &str, items: &[Item]) -> TokenStream {
-    let node_name = node_type_name(&node.meta.name);
-    let project_ident = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
-    let node_param_list = generate_field_list(&node.parameters, TokenStream::new());
-    let node_args = generate_argument_list(&node.parameters);
-    let properties_type_name = properties_type_name(&node.meta.name);
-    let static_nodes_type_name = static_nodes_type_name(&node.meta.name);
-
-    let static_nodes = node.static_nodes.iter().map(|(name, instance)| {
-        let member_name = format_ident!("{}", change_case(name, IdentCase::LowerSnakeCase));
-        let node_type = format_ident!("{}", change_case(&instance.name, IdentCase::UpperCamelCase));
-        let args = instance
-            .args
-            .iter()
-            .map(|arg| typed_value_to_rust(arg, project_name));
-        quote!(#member_name: #node_type::new(#(#args),*))
-    });
-
-    let dynamic_nodes = node.dynamic_nodes.iter().map(|instance| {
-        let node_type = format_ident!("{}", change_case(&instance.name, IdentCase::UpperCamelCase));
-        let args = instance
-            .args
-            .iter()
-            .map(|arg| typed_value_to_rust(arg, project_name));
-        quote!(#node_type::new(#(#args),*))
-    });
-
-    let init_call = get_annotated_function(items, "skylite_proc::init")
-        .map(get_fn_name)
-        .map(|name| quote!(#name(&mut out);))
-        .unwrap_or(TokenStream::new());
-
-    quote! {
-        pub fn new(#node_param_list) -> #node_name {
-            let properties = #properties_type_name::_private_create_properties(#node_args);
-            let static_nodes = #static_nodes_type_name {
-                #(#static_nodes),*
-            };
-            let dynamic_nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=#project_ident>>> = vec! [
-                #(Box::new(#dynamic_nodes)),*
-            ];
-            let mut out = #node_name {
-                properties,
-                static_nodes,
-                dynamic_nodes
-            };
-            #init_call
-            out
-        }
-    }
-}
-
 fn gen_node_impl(
     node: &Node,
+    node_type: &NodeType,
     project_name: &str,
     items: &[Item],
 ) -> Result<TokenStream, SkyliteProcError> {
     let node_name = node_type_name(&node.meta.name);
     let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
-    let mut static_node_names: Vec<Ident> = node
-        .static_nodes
-        .iter()
-        .map(|(n, _)| format_ident!("{}", change_case(n, IdentCase::LowerSnakeCase)))
-        .collect();
-    // Sub-nodes need to be added in reverse order to the NodeIterator in iter_nodes
-    // and iter_nodes_mut, because NodeIterator again reverses the order.
-    static_node_names.reverse();
-
     let decode_statements = generate_deserialize_statements(&node.parameters);
     let args = generate_argument_list(&node.parameters);
 
@@ -264,6 +236,28 @@ fn gen_node_impl(
         .map(get_fn_name)
         .map_or(quote!(1), |item| quote!(#item(self)));
 
+    let push_child_nodes = node_type
+        .child_nodes
+        .iter()
+        .map(|child| match child {
+            ChildNode::Single(ident) => quote!(iter._private_push_single(&self.#ident);),
+            ChildNode::Iterable(ident) => {
+                quote!(iter._private_push_sub_iterator(self.#ident.get_iterator());)
+            }
+        })
+        .rev(); // NodeIterator returns the elements pushed into it in reverse order.
+
+    let push_child_nodes_mut = node_type
+        .child_nodes
+        .iter()
+        .map(|child| match child {
+            ChildNode::Single(ident) => quote!(iter._private_push_single(&mut self.#ident);),
+            ChildNode::Iterable(ident) => {
+                quote!(iter._private_push_sub_iterator(self.#ident.get_iterator_mut());)
+            }
+        })
+        .rev();
+
     Ok(quote! {
         impl ::skylite_core::nodes::Node for #node_name {
             type P = #project_name;
@@ -274,7 +268,7 @@ fn gen_node_impl(
             {
                 use ::skylite_core::decode::Deserialize;
                 #decode_statements
-                #node_name::new(#args)
+                #node_name::_private_new(#args)
             }
 
             fn _private_update(&mut self, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
@@ -300,9 +294,8 @@ fn gen_node_impl(
             fn iter_nodes<'node>(&'node self) -> ::skylite_core::nodes::NodeIterator<'node, Self::P> {
                 use ::skylite_core::nodes::NodeIterable;
                 let mut iter = ::skylite_core::nodes::NodeIterator::new();
-                iter._private_push_sub_iterator(self.dynamic_nodes.get_iterator());
                 #(
-                    iter._private_push_single(&self.static_nodes.#static_node_names);
+                    #push_child_nodes
                 )*
                 iter
             }
@@ -310,9 +303,8 @@ fn gen_node_impl(
             fn iter_nodes_mut<'node>(&'node mut self) -> ::skylite_core::nodes::NodeIteratorMut<'node, Self::P> {
                 use ::skylite_core::nodes::NodeIterableMut;
                 let mut iter = ::skylite_core::nodes::NodeIteratorMut::new();
-                iter._private_push_sub_iterator(self.dynamic_nodes.get_iterator_mut());
                 #(
-                    iter._private_push_single(&mut self.static_nodes.#static_node_names);
+                    #push_child_nodes_mut
                 )*
                 iter
             }
@@ -320,34 +312,43 @@ fn gen_node_impl(
     })
 }
 
+fn find_node_struct<'a, 'b>(
+    node: &'a Node,
+    items: &'b mut [Item],
+) -> Result<&'b mut ItemStruct, SkyliteProcError> {
+    let name = node_type_name(&node.meta.name);
+    items
+        .iter_mut()
+        .filter_map(|item| match item {
+            Item::Struct(item_struct) if item_struct.ident == name => Some(item_struct),
+            _ => None,
+        })
+        .next()
+        .ok_or(syntax_err!("module must define a struct called {name}"))
+}
+
 pub(crate) fn generate_node_definition(
     node: &Node,
     project_name: &str,
-    items: &[Item],
+    mut items: Vec<Item>,
 ) -> Result<TokenStream, SkyliteProcError> {
     let node_name = node_type_name(&node.meta.name);
-    let properties_type = gen_properties_type(node, items)?;
-    let static_nodes_type = gen_static_nodes_type(node);
-    let node_type = gen_node_type(node, project_name);
-    let node_new_fn = gen_node_new_fn(node, project_name, items);
-    let node_impl = gen_node_impl(node, project_name, items)?;
+    let node_struct = find_node_struct(node, &mut items)?;
+    let node_type = parse_node_struct(node, node_struct)?;
+    let node_new_method = gen_node_new_fn(node, &items)?;
+    let node_impl = gen_node_impl(node, &node_type, project_name, &items)?;
 
     Ok(quote! {
-        #properties_type
-
-        #static_nodes_type
-
-        #node_type
-
-        impl #node_name {
-            #node_new_fn
-        }
+        #(#items)
+        *
 
         impl ::skylite_core::nodes::TypeId for #node_name {
             fn get_id() -> usize {
                 <Self as ::skylite_core::nodes::TypeId>::get_id as usize
             }
         }
+
+        #node_new_method
 
         #node_impl
     })
@@ -360,11 +361,10 @@ mod tests {
     use quote::quote;
     use syn::{parse_quote, File, Item};
 
-    use super::gen_node_new_fn;
     use crate::assets::{AssetMetaData, AssetSource, AssetType};
-    use crate::generate::nodes::gen_node_impl;
-    use crate::parse::nodes::{Node, NodeInstance};
-    use crate::parse::values::{Type, TypedValue, Variable};
+    use crate::generate::nodes::{find_node_struct, gen_node_impl, parse_node_struct};
+    use crate::parse::nodes::Node;
+    use crate::parse::values::{Type, Variable};
 
     fn create_test_node() -> Node {
         Node {
@@ -394,30 +394,23 @@ mod tests {
                 documentation: None,
                 default: None,
             }],
-            static_nodes: vec![(
-                "static1".to_owned(),
-                NodeInstance {
-                    node_id: 1,
-                    name: "TestNode2".to_owned(),
-                    args: vec![TypedValue::Bool(false)],
-                },
-            )],
-            dynamic_nodes: vec![NodeInstance {
-                node_id: 2,
-                name: "TestNode2".to_owned(),
-                args: vec![TypedValue::Bool(true)],
-            }],
         }
     }
 
     fn create_test_items() -> Vec<Item> {
         let file: File = parse_quote! {
-            skylite_proc::extra_properties! {
-                pub extra: bool
+            struct TestNode {
+                #[skylite_proc::property]
+                pub sum: u16,
+
+                #[skylite_proc::node] sub_node1: TestNode2,
+                #[skylite_proc::nodes] sub_nodes2: Vec<TestNode2>,
+
+                extra: bool
             }
 
-            #[skylite_proc::create_properties]
-            fn create_properties(id: &str) -> BasicNode1Properties {
+            #[skylite_proc::new]
+            fn new(param1: u8, param2: u16) -> TestNode {
                 todo!()
             }
 
@@ -437,39 +430,14 @@ mod tests {
     }
 
     #[test]
-    fn test_node_new_fn() {
-        let node = create_test_node();
-        let items = create_test_items();
-
-        let actual = gen_node_new_fn(&node, "TestProject", &items);
-        let expected = quote! {
-            pub fn new(param1: u8, param2: u16) -> TestNode {
-                let properties = TestNodeProperties::_private_create_properties(param1, param2);
-                let static_nodes = TestNodeStaticNodes {
-                    static1: TestNode2::new(false)
-                };
-                let dynamic_nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=TestProject>>> = vec! [
-                    Box::new(TestNode2::new(true))
-                ];
-                let mut out = TestNode {
-                    properties,
-                    static_nodes,
-                    dynamic_nodes
-                };
-                init(&mut out);
-                out
-            }
-        };
-
-        assert_eq!(actual.to_string(), expected.to_string());
-    }
-
-    #[test]
     fn test_node_impl() {
         let node = create_test_node();
-        let items = create_test_items();
+        let mut items = create_test_items();
 
-        let actual = gen_node_impl(&node, "TestProject", &items).unwrap();
+        let node_struct = find_node_struct(&node, &mut items).unwrap();
+        let node_type = parse_node_struct(&node, node_struct).unwrap();
+
+        let actual = gen_node_impl(&node, &node_type, "TestProject", &items).unwrap();
         let expected = quote! {
             impl ::skylite_core::nodes::Node for TestNode {
                 type P = TestProject;
@@ -481,7 +449,7 @@ mod tests {
                     use ::skylite_core::decode::Deserialize;
                     let param1 = u8::deserialize(decoder);
                     let param2 = u16::deserialize(decoder);
-                    TestNode::new(param1, param2)
+                    TestNode::_private_new(param1, param2)
                 }
 
                 fn _private_update(&mut self, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
@@ -507,16 +475,16 @@ mod tests {
                 fn iter_nodes<'node>(&'node self) -> ::skylite_core::nodes::NodeIterator<'node, Self::P> {
                     use ::skylite_core::nodes::NodeIterable;
                     let mut iter = ::skylite_core::nodes::NodeIterator::new();
-                    iter._private_push_sub_iterator(self.dynamic_nodes.get_iterator());
-                    iter._private_push_single(&self.static_nodes.static1);
+                    iter._private_push_sub_iterator(self.sub_nodes2.get_iterator());
+                    iter._private_push_single(&self.sub_node1);
                     iter
                 }
 
                 fn iter_nodes_mut<'node>(&'node mut self) -> ::skylite_core::nodes::NodeIteratorMut<'node, Self::P> {
                     use ::skylite_core::nodes::NodeIterableMut;
                     let mut iter = ::skylite_core::nodes::NodeIteratorMut::new();
-                    iter._private_push_sub_iterator(self.dynamic_nodes.get_iterator_mut());
-                    iter._private_push_single(&mut self.static_nodes.static1);
+                    iter._private_push_sub_iterator(self.sub_nodes2.get_iterator_mut());
+                    iter._private_push_single(&mut self.sub_node1);
                     iter
                 }
             }

@@ -4,22 +4,40 @@ use skylite_proc::{node_definition, skylite_project};
 
 #[node_definition("./tests/test-project-1/project.scm", "basic-node-1")]
 mod basic_node_1 {
+    use skylite_core::nodes::Node;
     use skylite_core::ProjectControls;
 
-    use super::basic_node_2::BasicNode2;
-    use super::z_order_node::ZOrderNode;
+    use crate::basic_node_2::{new_basic_node_2, BasicNode2};
     use crate::project::TestProject1;
+    use crate::z_order_node::{new_z_order_node, ZOrderNode};
 
-    #[skylite_proc::create_properties]
-    fn create_properties(id: String) -> BasicNode1Properties {
-        BasicNode1Properties { id: id.to_owned() }
+    pub(crate) struct BasicNode1 {
+        #[skylite_proc::property]
+        pub id: String,
+        #[skylite_proc::node]
+        sub1: BasicNode2,
+        #[skylite_proc::node]
+        sub2: ZOrderNode,
+        #[skylite_proc::nodes]
+        list: Vec<Box<dyn Node<P = TestProject1>>>,
+    }
+
+    #[skylite_proc::new]
+    pub(crate) fn new_basic_node_1(id: String) -> BasicNode1 {
+        BasicNode1 {
+            id,
+            sub1: new_basic_node_2(String::from("sub1")),
+            sub2: new_z_order_node(String::from("sub2"), -1),
+            list: vec![
+                Box::new(new_basic_node_2(String::from("list_item_1"))),
+                Box::new(new_z_order_node(String::from("list_item_2"), 2)),
+            ],
+        }
     }
 
     #[skylite_proc::pre_update]
     fn pre_update(node: &BasicNode1, controls: &mut ProjectControls<TestProject1>) {
-        controls
-            .get_target_instance_mut()
-            .push_tag(&node.properties.id);
+        controls.get_target_instance_mut().push_tag(&node.id);
         controls
             .get_target_instance_mut()
             .log("basic-node-1::pre_update");
@@ -40,16 +58,19 @@ mod basic_node_2 {
 
     use crate::project::TestProject1;
 
-    #[skylite_proc::create_properties]
-    fn create_properties(id: String) -> BasicNode2Properties {
-        BasicNode2Properties { id: id.to_owned() }
+    pub(crate) struct BasicNode2 {
+        #[skylite_proc::property]
+        pub id: String,
+    }
+
+    #[skylite_proc::new]
+    pub(crate) fn new_basic_node_2(id: String) -> BasicNode2 {
+        BasicNode2 { id }
     }
 
     #[skylite_proc::update]
     fn update(node: &BasicNode2, controls: &mut ProjectControls<TestProject1>) {
-        controls
-            .get_target_instance_mut()
-            .push_tag(&node.properties.id);
+        controls.get_target_instance_mut().push_tag(&node.id);
         controls
             .get_target_instance_mut()
             .log("basic-node-2::update");
@@ -63,32 +84,34 @@ mod z_order_node {
 
     use crate::project::TestProject1;
 
-    #[skylite_proc::create_properties]
-    fn create_properties(id: String, z_order: i16) -> ZOrderNodeProperties {
-        ZOrderNodeProperties {
-            id: id.to_owned(),
-            z_order,
-        }
+    pub(crate) struct ZOrderNode {
+        #[skylite_proc::property]
+        pub(crate) id: String,
+        #[skylite_proc::property]
+        pub(crate) z_order: i16,
+    }
+
+    #[skylite_proc::new]
+    pub(crate) fn new_z_order_node(id: String, z_order: i16) -> ZOrderNode {
+        ZOrderNode { id, z_order }
     }
 
     #[skylite_proc::z_order]
     fn z_order(node: &ZOrderNode) -> i32 {
-        node.properties.z_order as i32
+        node.z_order as i32
     }
 
     #[skylite_proc::render]
     fn render(node: &ZOrderNode, ctx: &mut RenderControls<TestProject1>) {
-        ctx.get_target_instance_mut().push_tag(&node.properties.id);
+        ctx.get_target_instance_mut().push_tag(&node.id);
         ctx.get_target_instance_mut()
-            .log(&format!("z-order-node::render@{}", node.properties.z_order));
+            .log(&format!("z-order-node::render@{}", node.z_order));
         ctx.get_target_instance_mut().pop_tag();
     }
 
     #[skylite_proc::update]
     fn update(node: &ZOrderNode, controls: &mut ProjectControls<TestProject1>) {
-        controls
-            .get_target_instance_mut()
-            .push_tag(&node.properties.id);
+        controls.get_target_instance_mut().push_tag(&node.id);
         controls
             .get_target_instance_mut()
             .log("z-order-node::update");

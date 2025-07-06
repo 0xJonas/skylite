@@ -70,7 +70,7 @@ fn generate_project_new_method(
         fn new(target: #target_type) -> #project_ident {
             let mut out = #project_ident {
                 target,
-                root_node: ::std::boxed::Box::new(#root_node_name::new(#(#root_node_params),*)),
+                root_node: ::std::boxed::Box::new(#root_node_name::_private_new(#(#root_node_params),*)),
                 focus_x: 0,
                 focus_y: 0,
                 update_count: 0
@@ -312,7 +312,7 @@ mod tests {
                 fn new(target: MockTarget) -> Test1 {
                     let mut out = Test1 {
                         target,
-                        root_node: ::std::boxed::Box::new(TestNode::new(false, 5u8)),
+                        root_node: ::std::boxed::Box::new(TestNode::_private_new(false, 5u8)),
                         focus_x: 0,
                         focus_y: 0,
                         update_count: 0

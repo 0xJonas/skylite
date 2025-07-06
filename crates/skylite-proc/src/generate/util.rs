@@ -1,12 +1,11 @@
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote, ToTokens};
-use syn::{parse_str, Item, ItemFn, Meta};
+use syn::{Item, ItemFn, Meta};
 
 use super::project::project_ident;
 use crate::generate::nodes::node_type_name;
 use crate::parse::util::{change_case, IdentCase};
 use crate::parse::values::{Type, TypedValue, Variable};
-use crate::SkyliteProcError;
 
 /// Returns the function item annotated with the given `attribute` from the list
 /// of `items`.
@@ -32,37 +31,6 @@ pub(crate) fn get_annotated_function<'a>(items: &'a [Item], attribute: &str) -> 
                 panic!("Expected function item")
             }
         })
-}
-
-/// Returns a function macro invocation with the given `name` from the list of
-/// `items`.
-///
-/// If no invocation with the given `name` is found, `Ok(None)` is returned. If
-/// multiple invocations are found, an `Err` is returned.
-pub(crate) fn get_macro_item<'tok>(
-    name: &str,
-    items: &'tok [Item],
-) -> Result<Option<&'tok TokenStream>, SkyliteProcError> {
-    let name_parsed = parse_str::<syn::Path>(name).unwrap();
-    let mut definitions_iter = items
-        .iter()
-        .filter_map(|item| {
-            if let Item::Macro(m) = item {
-                Some(m)
-            } else {
-                None
-            }
-        })
-        .filter(|m| m.mac.path == name_parsed);
-
-    let out = match definitions_iter.next() {
-        Some(def) => &def.mac.tokens,
-        None => return Ok(None),
-    };
-    match definitions_iter.next() {
-        None => Ok(Some(out)),
-        Some(_) => Err(syntax_err!("Multiple macro invocations for {name}!")),
-    }
 }
 
 /// Generates a `TokenStream` of the form `var1: type1, var2: type2:, ...` from
@@ -173,5 +141,30 @@ pub(crate) fn typed_value_to_rust(val: &TypedValue, project_name: &str) -> Token
             let project_ident = project_ident(project_name);
             quote!(#project_ident::_private_decode_node_list(#id))
         }
+    }
+}
+
+pub(crate) fn validate_type(skylite_type: &Type, rust_type: &syn::Type) -> bool {
+    match skylite_type {
+        Type::U8 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("u8")),
+        Type::U16 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("u16")),
+        Type::U32 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("u32")),
+        Type::U64 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("u64")),
+        Type::I8 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("i8")),
+        Type::I16 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("i16")),
+        Type::I32 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("i32")),
+        Type::I64 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("i64")),
+        Type::F32 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("f32")),
+        Type::F64 => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("f64")),
+        Type::Bool => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("bool")),
+
+        // These are technically not 100% correct, since String and Node could be written as their
+        // fully-qualified names, or their names could be changed in the `use`-statement.
+        // TODO: Improve somehow
+        Type::String => matches!(rust_type, syn::Type::Path(p) if p.path.is_ident("String")),
+        Type::Node(name) => {
+            matches!(rust_type, syn::Type::Path(p) if p.path.is_ident(&change_case(name, IdentCase::UpperCamelCase)))
+        }
+        _ => unimplemented!(),
     }
 }
