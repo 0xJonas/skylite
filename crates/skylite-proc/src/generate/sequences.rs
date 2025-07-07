@@ -8,8 +8,9 @@ use syn::Item;
 use super::util::get_annotated_function;
 use crate::generate::encode::{CompressionBuffer, Serialize};
 use crate::parse::sequences::{InputOp, Sequence};
+use crate::parse::util::{change_case, IdentCase};
 use crate::parse::values::TypedValue;
-use crate::{change_case, IdentCase, SkyliteProcError};
+use crate::SkyliteProcError;
 
 mod ir;
 

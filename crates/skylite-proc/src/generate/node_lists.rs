@@ -5,7 +5,7 @@ use super::encode::CompressionBuffer;
 use crate::generate::nodes::encode_node_instance;
 use crate::generate::project::project_ident;
 use crate::parse::node_lists::NodeList;
-use crate::{change_case, IdentCase};
+use crate::parse::util::{change_case, IdentCase};
 
 fn encode_node_list(list: &NodeList) -> TokenStream {
     let mut buffer = CompressionBuffer::new();

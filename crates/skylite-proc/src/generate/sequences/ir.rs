@@ -1,8 +1,8 @@
 use crate::parse::sequences::{
     BranchCondition, Field, FieldPathSegment, InputLine, InputOp, Sequence,
 };
+use crate::parse::util::{change_case, IdentCase};
 use crate::parse::values::TypedValue;
-use crate::{change_case, IdentCase};
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq)]

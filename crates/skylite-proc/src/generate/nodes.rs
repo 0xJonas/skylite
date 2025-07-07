@@ -13,7 +13,8 @@ use crate::generate::util::{
 };
 use crate::parse::node_lists::NodeList;
 use crate::parse::nodes::{Node, NodeInstance};
-use crate::{change_case, IdentCase, SkyliteProcError};
+use crate::parse::util::{change_case, IdentCase};
+use crate::SkyliteProcError;
 
 pub fn node_type_name(name: &str) -> Ident {
     format_ident!("{}", change_case(name, IdentCase::UpperCamelCase))
@@ -332,6 +333,7 @@ pub(crate) fn generate_node_definition(
     project_name: &str,
     mut items: Vec<Item>,
 ) -> Result<TokenStream, SkyliteProcError> {
+    let id = node.meta.id;
     let node_name = node_type_name(&node.meta.name);
     let node_struct = find_node_struct(node, &mut items)?;
     let node_type = parse_node_struct(node, node_struct)?;
@@ -344,7 +346,7 @@ pub(crate) fn generate_node_definition(
 
         impl ::skylite_core::nodes::TypeId for #node_name {
             fn get_id() -> usize {
-                <Self as ::skylite_core::nodes::TypeId>::get_id as usize
+                #id
             }
         }
 
@@ -413,9 +415,6 @@ mod tests {
             fn new(param1: u8, param2: u16) -> TestNode {
                 todo!()
             }
-
-            #[skylite_proc::init]
-            fn init(&mut self, id: &str) {}
 
             #[skylite_proc::pre_update]
             fn pre_update(&mut self, controls: &mut ProjectControls<MyProject>) {}

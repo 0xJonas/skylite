@@ -6,7 +6,6 @@ use generate::sequences::generate_sequence_definition;
 use parse::guile::SCM;
 use parse::project::SkyliteProject;
 use parse::scheme_util::form_to_string;
-use parse::util::{change_case, IdentCase};
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::parse::Parser;
