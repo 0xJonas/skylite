@@ -7,6 +7,7 @@ use syn::Item;
 
 use super::util::get_annotated_function;
 use crate::generate::encode::{CompressionBuffer, Serialize};
+use crate::generate::{ANNOTATION_CUSTOM_CONDITION, ANNOTATION_CUSTOM_OP};
 use crate::parse::sequences::{InputOp, Sequence};
 use crate::parse::util::{change_case, IdentCase};
 use crate::parse::values::TypedValue;
@@ -355,7 +356,7 @@ fn gen_run_custom(sequence: &Sequence, items: &[Item]) -> Result<TokenStream, Sk
         .enumerate()
         .map(|(i, id)| {
             let impl_name =
-                &get_annotated_function(items, &format!("skylite_proc::custom_op(\"{}\")", id))
+                &get_annotated_function(items, &format!("{}(\"{}\")", ANNOTATION_CUSTOM_OP, id))
                     .ok_or(data_err!("No definition for custom op {}", id))?
                     .sig
                     .ident;
@@ -390,7 +391,7 @@ fn gen_branch_custom(sequence: &Sequence, items: &[Item]) -> Result<TokenStream,
         .map(|(i, id)| {
             let impl_name = &get_annotated_function(
                 items,
-                &format!("skylite_proc::custom_condition(\"{}\")", id),
+                &format!("{}(\"{}\")", ANNOTATION_CUSTOM_CONDITION, id),
             )
             .ok_or(data_err!("No definition for custom condition {}", id))?
             .sig

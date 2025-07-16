@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use generate::nodes::generate_node_definition;
+use generate::remove_annotations_from_items;
 use generate::sequences::generate_sequence_definition;
 use parse::guile::SCM;
 use parse::project::SkyliteProject;
@@ -157,9 +158,9 @@ fn skylite_project_impl_fallible(
     let mut module = parse2::<ItemMod>(body_raw)
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
 
-    let items = &module
+    let items = &mut module
         .content
-        .as_ref()
+        .as_mut()
         .ok_or(data_err!("skylite_project! module must have a body"))?
         .1;
 
@@ -174,13 +175,8 @@ fn skylite_project_impl_fallible(
     let mut project = SkyliteProject::from_file(&path, true)?;
 
     let mut project_items = project.generate(target_type, &items)?;
-
-    module
-        .content
-        .as_mut()
-        .unwrap()
-        .1
-        .append(&mut project_items);
+    remove_annotations_from_items(items);
+    items.append(&mut project_items);
 
     let crate_root_check = get_crate_root_check();
     let endianness_check = get_endianness_check();
@@ -229,27 +225,23 @@ fn node_definition_fallible(
     args_raw: TokenStream,
     body_raw: TokenStream,
 ) -> Result<TokenStream, SkyliteProcError> {
-    let module = parse2::<ItemMod>(body_raw.clone())
+    let mut module = parse2::<ItemMod>(body_raw.clone())
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
 
-    // The actual content is moved out of the module, everything else is
-    // retained. The content is passed through generate_node_definition, the
-    // output of which becomes the module's new content.
-    let mut module_out = ItemMod {
-        content: None,
-        ..module
-    };
-    let (brace, items) = module
+    let items = &mut module
         .content
-        .ok_or(data_err!("Node definition module must have a body"))?;
+        .as_mut()
+        .ok_or(data_err!("Node definition module must have a body"))?
+        .1;
 
     let (mut project, name) = extract_asset_file(&args_raw)?;
     let node = project.assets.load_node(&name)?;
 
-    let tokens = generate_node_definition(&node, &project.name, items)?;
-    module_out.content = Some((brace, vec![Item::Verbatim(tokens)]));
+    let tokens = generate_node_definition(&node, &project.name, &items)?;
+    remove_annotations_from_items(items);
+    items.push(syn::Item::Verbatim(tokens));
 
-    Ok(module_out.into_token_stream())
+    Ok(module.into_token_stream())
 }
 
 fn sequence_definition_fallible(
@@ -258,9 +250,9 @@ fn sequence_definition_fallible(
 ) -> Result<TokenStream, SkyliteProcError> {
     let mut module = parse2::<ItemMod>(body_raw.clone())
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
-    let items = &module
+    let items = &mut module
         .content
-        .as_ref()
+        .as_mut()
         .ok_or(data_err!("Node definition module must have a body"))?
         .1;
 
@@ -272,8 +264,8 @@ fn sequence_definition_fallible(
         &project.name,
         &items,
     )?);
-
-    module.content.as_mut().unwrap().1.push(tokens);
+    remove_annotations_from_items(items);
+    items.push(tokens);
 
     Ok(module.into_token_stream())
 }
@@ -326,180 +318,4 @@ pub fn sequence_definition(
 #[proc_macro]
 pub fn system(args: proc_macro::TokenStream) -> proc_macro::TokenStream {
     system_impl(args.into()).into()
-}
-
-#[proc_macro_attribute]
-pub fn new(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Marks a function to initialize something. Used for `node_definition!` and
-/// `skylite_project!`.
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::init]`.**
-#[proc_macro_attribute]
-pub fn init(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Marks a function to be called at the beginning of updating a Node,
-/// before the child nodes are updated.
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::pre_update]`.**
-#[proc_macro_attribute]
-pub fn pre_update(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Marks a function to be called to update a Node. This is called after
-/// the Node's children have been updated.
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::update]`.**
-#[proc_macro_attribute]
-pub fn update(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Alias for `skylite_proc::update`.
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::post_update]`.**
-#[proc_macro_attribute]
-pub fn post_update(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Marks a function to be called at the beginning of rendering.
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::pre_render]`.**
-#[proc_macro_attribute]
-pub fn pre_render(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Marks a function to be called for rendering something.
-///
-/// This macro should be used from inside a `node_definition!`.
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::render]`.**
-#[proc_macro_attribute]
-pub fn render(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Marks a function to be called at the beginning of rendering.
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::post_render]`.**
-#[proc_macro_attribute]
-pub fn post_render(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Marks a function to be used to construct an node's properties
-/// from the parameters defined in the asset file (see `properties!`).
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::create_properties]`.**
-#[proc_macro_attribute]
-pub fn create_properties(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-/// Sets the backing asset file for an `node_definition`.
-///
-/// **This macro must always be used with an absolute path:
-/// `skylite_proc::asset_file!`.**
-///
-/// The definition file consists of the path to the project root file and the
-/// name of the asset. The name of the asset does *not* include the file
-/// extension. The specific file will be searched within the files for the
-/// respective asset defined in the project definition, e.g. nodes for
-/// `node_definition!`.
-///
-/// ## Example
-/// ```ignore
-/// node_definition! {
-///     // Uses the asset information from the node asset 'some_node'.
-///     skylite_proc::asset_file!("./path/project.scm", "some_node");
-/// }
-/// ```
-#[proc_macro]
-pub fn asset_file(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    proc_macro::TokenStream::new()
-}
-
-/// Defines additional properties for a node. These properties are added to the
-/// properties defined in the asset file. The properties should be defined as a
-/// list of struct fields.
-///
-/// **This macro must always be used with an absolute path:
-/// `skylite_proc::extra_properties!`.**
-///
-/// ## Example
-///
-/// ```ignore
-/// node_definition! {
-///     skylite_proc::extra_properties! {
-///         pub val1: u8,
-///         pub val2: u8
-///     }
-/// }
-/// ```
-#[proc_macro]
-pub fn extra_properties(_body: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    proc_macro::TokenStream::new()
-}
-
-/// Marks a function that returns the z-order for a node. The marked function
-/// must take an immutable reference to a node type.
-///
-/// **This macro must always be used with an absolute path:
-/// `#[skylite_proc::z_order]`.**
-#[proc_macro_attribute]
-pub fn z_order(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
-}
-
-#[proc_macro_attribute]
-pub fn is_visible(
-    _args: proc_macro::TokenStream,
-    body: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    body
 }

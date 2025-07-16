@@ -9,6 +9,10 @@ use crate::generate::node_lists::{
 };
 use crate::generate::nodes::{generate_decode_node_fn, node_type_name};
 use crate::generate::util::{get_annotated_function, typed_value_to_rust};
+use crate::generate::{
+    ANNOTATION_INIT, ANNOTATION_POST_RENDER, ANNOTATION_POST_UPDATE, ANNOTATION_PRE_RENDER,
+    ANNOTATION_PRE_UPDATE,
+};
 use crate::parse::nodes::NodeInstance;
 use crate::parse::project::SkyliteProject;
 use crate::parse::util::{change_case, IdentCase};
@@ -145,27 +149,27 @@ fn generate_project_trait_impl(
     let new_project_controls = gen_new_project_controls();
     let apply_project_controls = gen_apply_project_controls();
 
-    let init = get_annotated_function(items, "skylite_proc::init")
+    let init = get_annotated_function(items, ANNOTATION_INIT)
         .map(get_name)
         .map(|name| quote!(#name(&mut out);))
         .unwrap_or(TokenStream::new());
 
-    let pre_update = get_annotated_function(items, "skylite_proc::pre_update")
+    let pre_update = get_annotated_function(items, ANNOTATION_PRE_UPDATE)
         .map(get_name)
         .map(|name| quote!(#name(&mut controls);))
         .unwrap_or(TokenStream::new());
 
-    let post_update = get_annotated_function(items, "skylite_proc::post_update")
+    let post_update = get_annotated_function(items, ANNOTATION_POST_UPDATE)
         .map(get_name)
         .map(|name| quote!(#name(&mut controls);))
         .unwrap_or(TokenStream::new());
 
-    let pre_render = get_annotated_function(items, "skylite_proc::pre_render")
+    let pre_render = get_annotated_function(items, ANNOTATION_PRE_RENDER)
         .map(get_name)
         .map(|name| quote!(#name(&mut draw_context);))
         .unwrap_or(TokenStream::new());
 
-    let post_render = get_annotated_function(items, "skylite_proc::post_render")
+    let post_render = get_annotated_function(items, ANNOTATION_POST_RENDER)
         .map(get_name)
         .map(|name| quote!(#name(&mut draw_context);))
         .unwrap_or(TokenStream::new());

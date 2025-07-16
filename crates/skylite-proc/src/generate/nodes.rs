@@ -11,6 +11,11 @@ use crate::generate::util::{
     generate_argument_list, generate_deserialize_statements, generate_field_list,
     get_annotated_function, validate_type,
 };
+use crate::generate::{
+    ANNOTATION_IS_VISIBLE, ANNOTATION_NEW, ANNOTATION_NODE, ANNOTATION_NODES,
+    ANNOTATION_POST_UPDATE, ANNOTATION_PRE_UPDATE, ANNOTATION_PROPERTY, ANNOTATION_RENDER,
+    ANNOTATION_UPDATE, ANNOTATION_Z_ORDER,
+};
 use crate::parse::node_lists::NodeList;
 use crate::parse::nodes::{Node, NodeInstance};
 use crate::parse::util::{change_case, IdentCase};
@@ -83,13 +88,9 @@ struct NodeType {
     child_nodes: Vec<ChildNode>,
 }
 
-/// Removes the specified annotation from the field's attributes.
-/// Returns true if the annotation was present and removed, false otherwise.
-fn remove_annotation(field: &mut Field, attr: &str) -> bool {
+fn has_annotation(field: &Field, attr: &str) -> bool {
     let meta = syn::parse_str::<Meta>(attr).unwrap();
-    let org_size = field.attrs.len();
-    field.attrs.retain(|a| a.meta != meta);
-    field.attrs.len() != org_size
+    field.attrs.iter().any(|a| a.meta == meta)
 }
 
 fn validate_property(node: &Node, field: &syn::Field) -> Result<(), SkyliteProcError> {
@@ -117,10 +118,7 @@ fn validate_property(node: &Node, field: &syn::Field) -> Result<(), SkyliteProcE
     }
 }
 
-fn parse_node_struct(
-    node: &Node,
-    node_struct: &mut ItemStruct,
-) -> Result<NodeType, SkyliteProcError> {
+fn parse_node_struct(node: &Node, node_struct: &ItemStruct) -> Result<NodeType, SkyliteProcError> {
     let node_type = match node_struct.fields {
         syn::Fields::Unnamed(_) => NodeType {
             properties: vec![],
@@ -130,18 +128,18 @@ fn parse_node_struct(
             properties: vec![],
             child_nodes: vec![],
         },
-        syn::Fields::Named(ref mut fields_named) => {
+        syn::Fields::Named(ref fields_named) => {
             let mut properties = vec![];
             let mut child_nodes = vec![];
-            for field in &mut fields_named.named {
-                if remove_annotation(field, "skylite_proc::property") {
+            for field in &fields_named.named {
+                if has_annotation(field, ANNOTATION_PROPERTY) {
                     validate_property(node, &field)?;
                     properties.push(field.ident.clone().unwrap());
                 }
-                if remove_annotation(field, "skylite_proc::node") {
+                if has_annotation(field, ANNOTATION_NODE) {
                     child_nodes.push(ChildNode::Single(field.ident.clone().unwrap()));
                 }
-                if remove_annotation(field, "skylite_proc::nodes") {
+                if has_annotation(field, ANNOTATION_NODES) {
                     child_nodes.push(ChildNode::Iterable(field.ident.clone().unwrap()));
                 }
             }
@@ -172,10 +170,10 @@ fn gen_node_new_fn(node: &Node, items: &[Item]) -> Result<TokenStream, SkylitePr
     let params = generate_field_list(&node.parameters, TokenStream::new());
     let args = generate_argument_list(&node.parameters);
 
-    let new_fn = get_annotated_function(items, "skylite_proc::new")
+    let new_fn = get_annotated_function(items, ANNOTATION_NEW)
         .map(get_fn_name)
         .ok_or(syntax_err!(
-            "Missing required function `#[skylite_proc::new]`"
+            "Missing required function with `#[{ANNOTATION_NEW}]`"
         ))?;
 
     Ok(quote! {
@@ -198,29 +196,29 @@ fn gen_node_impl(
     let decode_statements = generate_deserialize_statements(&node.parameters);
     let args = generate_argument_list(&node.parameters);
 
-    let pre_update_call = get_annotated_function(items, "skylite_proc::pre_update")
+    let pre_update_call = get_annotated_function(items, ANNOTATION_PRE_UPDATE)
         .map(get_fn_name)
         .map_or(TokenStream::new(), |item| quote!(#item(self, controls)));
 
-    let update_call_opt = get_annotated_function(items, "skylite_proc::update")
+    let update_call_opt = get_annotated_function(items, ANNOTATION_UPDATE)
         .map(get_fn_name)
         .map(|item| quote!(#item(self, controls)));
 
-    let post_update_call_opt = get_annotated_function(items, "skylite_proc::post_update")
+    let post_update_call_opt = get_annotated_function(items, ANNOTATION_POST_UPDATE)
         .map(get_fn_name)
         .map(|item| quote!(#item(self, controls)));
 
     if update_call_opt.is_some() && post_update_call_opt.is_some() {
-        return Err(data_err!("skylite_proc::update and skylite_proc::post_update have the same meaning, only one must be given."));
+        return Err(data_err!("Annotations {ANNOTATION_UPDATE} and {ANNOTATION_POST_UPDATE} have the same meaning, only one must be given."));
     }
 
     let post_update_call = update_call_opt.or(post_update_call_opt).unwrap_or_default();
 
-    let render_call_opt = get_annotated_function(items, "skylite_proc::render")
+    let render_call_opt = get_annotated_function(items, ANNOTATION_RENDER)
         .map(get_fn_name)
         .map(|item| quote!(#item(self, ctx)));
 
-    let is_visible_call = get_annotated_function(items, "skylite_proc::is_visible")
+    let is_visible_call = get_annotated_function(items, ANNOTATION_IS_VISIBLE)
         .map(get_fn_name)
         .map_or(
             if render_call_opt.is_some() {
@@ -233,7 +231,7 @@ fn gen_node_impl(
 
     let render_call = render_call_opt.unwrap_or_default();
 
-    let z_order_call = get_annotated_function(items, "skylite_proc::z_order")
+    let z_order_call = get_annotated_function(items, ANNOTATION_Z_ORDER)
         .map(get_fn_name)
         .map_or(quote!(1), |item| quote!(#item(self)));
 
@@ -315,11 +313,11 @@ fn gen_node_impl(
 
 fn find_node_struct<'a, 'b>(
     node: &'a Node,
-    items: &'b mut [Item],
-) -> Result<&'b mut ItemStruct, SkyliteProcError> {
+    items: &'b [Item],
+) -> Result<&'b ItemStruct, SkyliteProcError> {
     let name = node_type_name(&node.meta.name);
     items
-        .iter_mut()
+        .iter()
         .filter_map(|item| match item {
             Item::Struct(item_struct) if item_struct.ident == name => Some(item_struct),
             _ => None,
@@ -331,19 +329,16 @@ fn find_node_struct<'a, 'b>(
 pub(crate) fn generate_node_definition(
     node: &Node,
     project_name: &str,
-    mut items: Vec<Item>,
+    items: &[Item],
 ) -> Result<TokenStream, SkyliteProcError> {
     let id = node.meta.id;
     let node_name = node_type_name(&node.meta.name);
-    let node_struct = find_node_struct(node, &mut items)?;
+    let node_struct = find_node_struct(node, &items)?;
     let node_type = parse_node_struct(node, node_struct)?;
     let node_new_method = gen_node_new_fn(node, &items)?;
     let node_impl = gen_node_impl(node, &node_type, project_name, &items)?;
 
     Ok(quote! {
-        #(#items)
-        *
-
         impl ::skylite_core::nodes::TypeId for #node_name {
             fn get_id() -> usize {
                 #id
