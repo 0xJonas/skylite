@@ -2,14 +2,14 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Field, Ident, Item, ItemFn, ItemStruct, Meta};
+use syn::{Field, Ident, ImplItem, Item, ItemStruct, Meta};
 
 use super::encode::{CompressionBuffer, Serialize};
 use crate::assets::AssetSource;
 use crate::generate::project::project_ident;
 use crate::generate::util::{
     generate_argument_list, generate_deserialize_statements, generate_field_list,
-    get_annotated_function, validate_type,
+    get_annotated_method_name, validate_type,
 };
 use crate::generate::{
     ANNOTATION_IS_VISIBLE, ANNOTATION_NEW, ANNOTATION_NODE, ANNOTATION_NODES,
@@ -72,10 +72,6 @@ pub(crate) fn generate_decode_node_fn(
             }
         }
     }
-}
-
-fn get_fn_name(item: &ItemFn) -> &Ident {
-    &item.sig.ident
 }
 
 enum ChildNode {
@@ -170,16 +166,14 @@ fn gen_node_new_fn(node: &Node, items: &[Item]) -> Result<TokenStream, SkylitePr
     let params = generate_field_list(&node.parameters, TokenStream::new());
     let args = generate_argument_list(&node.parameters);
 
-    let new_fn = get_annotated_function(items, ANNOTATION_NEW)
-        .map(get_fn_name)
-        .ok_or(syntax_err!(
-            "Missing required function with `#[{ANNOTATION_NEW}]`"
-        ))?;
+    let new_fn = get_annotated_method_name(items, ANNOTATION_NEW, &node_name).ok_or(
+        syntax_err!("Missing required function with `#[{ANNOTATION_NEW}]`"),
+    )?;
 
     Ok(quote! {
         impl #node_name {
             pub(crate) fn _private_new(#params) -> Self {
-                #new_fn(#args)
+                #node_name::#new_fn(#args)
             }
         }
     })
@@ -196,17 +190,14 @@ fn gen_node_impl(
     let decode_statements = generate_deserialize_statements(&node.parameters);
     let args = generate_argument_list(&node.parameters);
 
-    let pre_update_call = get_annotated_function(items, ANNOTATION_PRE_UPDATE)
-        .map(get_fn_name)
-        .map_or(TokenStream::new(), |item| quote!(#item(self, controls)));
+    let pre_update_call = get_annotated_method_name(items, ANNOTATION_PRE_UPDATE, &node_name)
+        .map_or(TokenStream::new(), |method| quote!(self.#method(controls)));
 
-    let update_call_opt = get_annotated_function(items, ANNOTATION_UPDATE)
-        .map(get_fn_name)
-        .map(|item| quote!(#item(self, controls)));
+    let update_call_opt = get_annotated_method_name(items, ANNOTATION_UPDATE, &node_name)
+        .map(|method| quote!(self.#method(controls)));
 
-    let post_update_call_opt = get_annotated_function(items, ANNOTATION_POST_UPDATE)
-        .map(get_fn_name)
-        .map(|item| quote!(#item(self, controls)));
+    let post_update_call_opt = get_annotated_method_name(items, ANNOTATION_POST_UPDATE, &node_name)
+        .map(|method| quote!(self.#method(controls)));
 
     if update_call_opt.is_some() && post_update_call_opt.is_some() {
         return Err(data_err!("Annotations {ANNOTATION_UPDATE} and {ANNOTATION_POST_UPDATE} have the same meaning, only one must be given."));
@@ -214,26 +205,23 @@ fn gen_node_impl(
 
     let post_update_call = update_call_opt.or(post_update_call_opt).unwrap_or_default();
 
-    let render_call_opt = get_annotated_function(items, ANNOTATION_RENDER)
-        .map(get_fn_name)
-        .map(|item| quote!(#item(self, ctx)));
+    let render_call_opt = get_annotated_method_name(items, ANNOTATION_RENDER, &node_name)
+        .map(|method| quote!(self.#method(ctx)));
 
-    let is_visible_call = get_annotated_function(items, ANNOTATION_IS_VISIBLE)
-        .map(get_fn_name)
+    let is_visible_call = get_annotated_method_name(items, ANNOTATION_IS_VISIBLE, &node_name)
         .map_or(
             if render_call_opt.is_some() {
                 quote!(true)
             } else {
                 quote!(false)
             },
-            |item| quote!(#item(self, ctx)),
+            |method| quote!(self.#method(ctx)),
         );
 
     let render_call = render_call_opt.unwrap_or_default();
 
-    let z_order_call = get_annotated_function(items, ANNOTATION_Z_ORDER)
-        .map(get_fn_name)
-        .map_or(quote!(1), |item| quote!(#item(self)));
+    let z_order_call = get_annotated_method_name(items, ANNOTATION_Z_ORDER, &node_name)
+        .map_or(quote!(1), |method| quote!(self.#method()));
 
     let push_child_nodes = node_type
         .child_nodes
@@ -282,11 +270,11 @@ fn gen_node_impl(
                 #render_call;
             }
 
-            fn z_order(&self) -> i32 {
+            fn _private_z_order(&self) -> i32 {
                 #z_order_call
             }
 
-            fn is_visible(&self, ctx: &::skylite_core::RenderControls<Self::P>) -> bool {
+            fn _private_is_visible(&self, ctx: &::skylite_core::RenderControls<Self::P>) -> bool {
                 #is_visible_call
             }
 
@@ -406,19 +394,21 @@ mod tests {
                 extra: bool
             }
 
-            #[skylite_proc::new]
-            fn new(param1: u8, param2: u16) -> TestNode {
-                todo!()
+            impl TestNode {
+                #[skylite_proc::new]
+                fn new(param1: u8, param2: u16) -> TestNode {
+                    todo!()
+                }
+
+                #[skylite_proc::pre_update]
+                fn pre_update(&mut self, controls: &mut ProjectControls<MyProject>) {}
+
+                #[skylite_proc::update]
+                fn update(&mut self, controls: &mut ProjectControls<MyProject>) {}
+
+                #[skylite_proc::render]
+                fn render(&self, ctx: &mut RenderControls<MyProject>) {}
             }
-
-            #[skylite_proc::pre_update]
-            fn pre_update(&mut self, controls: &mut ProjectControls<MyProject>) {}
-
-            #[skylite_proc::update]
-            fn update(&mut self, controls: &mut ProjectControls<MyProject>) {}
-
-            #[skylite_proc::render]
-            fn render(&self, ctx: &mut RenderControls<MyProject>) {}
         };
         file.items
     }
@@ -447,22 +437,22 @@ mod tests {
                 }
 
                 fn _private_update(&mut self, controls: &mut ::skylite_core::ProjectControls<Self::P>) {
-                    pre_update(self, controls);
+                    self.pre_update(controls);
 
                     ::skylite_core::nodes::_private::update_node_rec(self, controls);
 
-                    update(self, controls);
+                    self.update(controls);
                 }
 
                 fn _private_render(&self, ctx: &mut ::skylite_core::RenderControls<Self::P>) {
-                    render(self, ctx);
+                    self.render(ctx);
                 }
 
-                fn z_order(&self) -> i32 {
+                fn _private_z_order(&self) -> i32 {
                     1
                 }
 
-                fn is_visible(&self, ctx: &::skylite_core::RenderControls<Self::P>) -> bool {
+                fn _private_is_visible(&self, ctx: &::skylite_core::RenderControls<Self::P>) -> bool {
                     true
                 }
 

@@ -1,6 +1,6 @@
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote, ToTokens};
-use syn::{Item, ItemFn, Meta};
+use syn::{Ident, ImplItem, Item, ItemFn, Meta};
 
 use super::project::project_ident;
 use crate::generate::nodes::node_type_name;
@@ -31,6 +31,45 @@ pub(crate) fn get_annotated_function<'a>(items: &'a [Item], attribute: &str) -> 
                 panic!("Expected function item")
             }
         })
+}
+
+/// Returns the name of the method annotated with the given `attribute` in
+/// an `impl`-block for the given `struct_name`.
+pub(crate) fn get_annotated_method_name<'a>(
+    items: &'a [Item],
+    attr: &str,
+    struct_name: &Ident,
+) -> Option<&'a Ident> {
+    let meta = syn::parse_str::<Meta>(attr).unwrap();
+
+    for item in items {
+        let Item::Impl(impl_block) = item else {
+            continue;
+        };
+        let syn::Type::Path(type_path) = impl_block.self_ty.as_ref() else {
+            continue;
+        };
+        if type_path
+            .path
+            .segments
+            .last()
+            .map(|seg| &seg.ident)
+            .unwrap()
+            != struct_name
+        {
+            continue;
+        }
+
+        for impl_item in &impl_block.items {
+            let ImplItem::Fn(method) = impl_item else {
+                continue;
+            };
+            if method.attrs.iter().any(|attr_item| attr_item.meta == meta) {
+                return Some(&method.sig.ident);
+            }
+        }
+    }
+    None
 }
 
 /// Generates a `TokenStream` of the form `var1: type1, var2: type2:, ...` from

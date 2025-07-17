@@ -221,9 +221,9 @@ pub trait Node: TypeId + InstanceId {
 
     fn _private_render(&self, ctx: &mut RenderControls<Self::P>);
 
-    fn z_order(&self) -> i32;
+    fn _private_z_order(&self) -> i32;
 
-    fn is_visible(&self, ctx: &RenderControls<Self::P>) -> bool;
+    fn _private_is_visible(&self, ctx: &RenderControls<Self::P>) -> bool;
 
     fn iter_nodes<'node>(&'node self) -> NodeIterator<'node, Self::P>;
     fn iter_nodes_mut<'node>(&'node mut self) -> NodeIteratorMut<'node, Self::P>;
@@ -313,7 +313,7 @@ pub mod _private {
         node: &'nodes dyn Node<P = P>,
     ) {
         for (i, n) in list.iter().enumerate() {
-            if node.z_order() <= n.z_order() {
+            if node._private_z_order() <= n._private_z_order() {
                 list.insert(i, node);
                 return;
             }
@@ -327,7 +327,7 @@ pub mod _private {
         ctx: &RenderControls<P>,
     ) {
         for n in node.iter_nodes() {
-            if n.is_visible(ctx) {
+            if n._private_is_visible(ctx) {
                 insert_by_z_order(list, n);
             }
             insert_nodes_by_z_order_rec(list, n, ctx);
@@ -372,11 +372,11 @@ pub mod _private {
             unimplemented!()
         }
 
-        fn z_order(&self) -> i32 {
+        fn _private_z_order(&self) -> i32 {
             unimplemented!()
         }
 
-        fn is_visible(&self, _ctx: &RenderControls<Self::P>) -> bool {
+        fn _private_is_visible(&self, _ctx: &RenderControls<Self::P>) -> bool {
             unimplemented!()
         }
 

@@ -23,17 +23,19 @@ mod wrapper {
         sequencer: Sequencer<FizzBuzz>,
     }
 
-    #[skylite_proc::new]
-    pub(crate) fn new() -> Wrapper {
-        Wrapper {
-            content: crate::fizz_buzz::new(),
-            sequencer: Sequencer::new(crate::fizz_buzz_seq::FizzBuzzSeqHandle),
+    impl Wrapper {
+        #[skylite_proc::new]
+        pub(crate) fn new() -> Wrapper {
+            Wrapper {
+                content: FizzBuzz::new(),
+                sequencer: Sequencer::new(crate::fizz_buzz_seq::FizzBuzzSeqHandle),
+            }
         }
-    }
 
-    #[skylite_proc::update]
-    fn update(node: &mut Wrapper, _controls: &mut ProjectControls<SequenceTest>) {
-        node.sequencer.update(&mut node.content);
+        #[skylite_proc::update]
+        fn update(&mut self, _controls: &mut ProjectControls<SequenceTest>) {
+            self.sequencer.update(&mut self.content);
+        }
     }
 }
 
@@ -54,22 +56,24 @@ mod fizz_buzz {
         pub scratch: FizzBuzzScratch,
     }
 
-    #[skylite_proc::new]
-    pub(crate) fn new() -> FizzBuzz {
-        FizzBuzz {
-            counter: 0,
-            status: String::new(),
-            stop: false,
-            scratch: crate::fizz_buzz_scratch::new(),
+    impl FizzBuzz {
+        #[skylite_proc::new]
+        pub(crate) fn new() -> FizzBuzz {
+            FizzBuzz {
+                counter: 0,
+                status: String::new(),
+                stop: false,
+                scratch: FizzBuzzScratch::new(),
+            }
         }
-    }
 
-    #[skylite_proc::update]
-    fn update(node: &mut FizzBuzz, controls: &mut skylite_core::ProjectControls<SequenceTest>) {
-        controls.get_target_instance_mut().log(&format!(
-            "Counter: {}, Status: {}",
-            node.counter, node.status
-        ));
+        #[skylite_proc::update]
+        fn update(&self, controls: &mut skylite_core::ProjectControls<SequenceTest>) {
+            controls.get_target_instance_mut().log(&format!(
+                "Counter: {}, Status: {}",
+                self.counter, self.status
+            ));
+        }
     }
 }
 
@@ -86,12 +90,14 @@ mod fizz_buzz_scratch {
         pub is_buzz: bool,
     }
 
-    #[skylite_proc::new]
-    pub(crate) fn new() -> FizzBuzzScratch {
-        FizzBuzzScratch {
-            check_counter: 0,
-            is_fizz: false,
-            is_buzz: false,
+    impl FizzBuzzScratch {
+        #[skylite_proc::new]
+        pub(crate) fn new() -> FizzBuzzScratch {
+            FizzBuzzScratch {
+                check_counter: 0,
+                is_fizz: false,
+                is_buzz: false,
+            }
         }
     }
 }
