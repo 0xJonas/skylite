@@ -47,32 +47,52 @@ pub fn try_as_type_mut<T: TypeId + InstanceId>(node: &mut dyn InstanceId) -> Opt
     }
 }
 
+// region: Node iteration using shared refs
+
+#[allow(type_alias_bounds)]
+type NodeObjectRef<'a, P: SkyliteProject> = &'a (dyn Node<P = P> + 'a);
+#[allow(type_alias_bounds)]
+type NodeObjectRefIterator<'a, P: SkyliteProject> =
+    Box<dyn Iterator<Item = NodeObjectRef<'a, P>> + 'a>;
+
 /// Trait for types that iterate over a list of nodes.
 /// Produces an iterator that returns shared references with lifetime `'items`.
 pub trait NodeIterable<'nodes, P: SkyliteProject> {
-    fn get_iterator(self) -> Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes>;
+    fn get_iterator(self) -> NodeObjectRefIterator<'nodes, P>;
 }
 
 impl<'nodes, P: SkyliteProject> NodeIterable<'nodes, P> for &'nodes [Box<dyn Node<P = P>>] {
-    fn get_iterator(self) -> Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes> {
+    fn get_iterator(self) -> NodeObjectRefIterator<'nodes, P> {
         Box::new(self.iter().map(|n| n.as_ref()))
     }
 }
 
 impl<'nodes, P: SkyliteProject> NodeIterable<'nodes, P> for &'nodes Vec<Box<dyn Node<P = P>>> {
-    fn get_iterator(self) -> Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes> {
+    fn get_iterator(self) -> NodeObjectRefIterator<'nodes, P> {
         self.as_slice().get_iterator()
     }
 }
 
-enum NodeRef<'nodes, P: SkyliteProject> {
-    Single(&'nodes dyn Node<P = P>),
-    SubIterator(Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes>),
+impl<'nodes, P: SkyliteProject, N: Node<P = P>> NodeIterable<'nodes, P> for &'nodes [N] {
+    fn get_iterator(self) -> NodeObjectRefIterator<'nodes, P> {
+        Box::new(self.iter().map(|n| n as NodeObjectRef<'nodes, P>))
+    }
+}
+
+impl<'nodes, P: SkyliteProject, N: Node<P = P>> NodeIterable<'nodes, P> for &'nodes Vec<N> {
+    fn get_iterator(self) -> NodeObjectRefIterator<'nodes, P> {
+        self.as_slice().get_iterator()
+    }
+}
+
+enum NodeIteratorEntry<'nodes, P: SkyliteProject> {
+    Single(NodeObjectRef<'nodes, P>),
+    SubIterator(NodeObjectRefIterator<'nodes, P>),
 }
 
 pub struct NodeIterator<'nodes, P: SkyliteProject> {
-    refs: Vec<NodeRef<'nodes, P>>,
-    current_sub_iter: Option<Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes>>,
+    refs: Vec<NodeIteratorEntry<'nodes, P>>,
+    current_sub_iter: Option<NodeObjectRefIterator<'nodes, P>>,
 }
 
 impl<'nodes, P: SkyliteProject> NodeIterator<'nodes, P> {
@@ -83,20 +103,17 @@ impl<'nodes, P: SkyliteProject> NodeIterator<'nodes, P> {
         }
     }
 
-    pub fn _private_push_single(&mut self, node: &'nodes dyn Node<P = P>) {
-        self.refs.push(NodeRef::Single(node));
+    pub fn _private_push_single(&mut self, node: NodeObjectRef<'nodes, P>) {
+        self.refs.push(NodeIteratorEntry::Single(node));
     }
 
-    pub fn _private_push_sub_iterator(
-        &mut self,
-        iter: Box<dyn Iterator<Item = &'nodes (dyn Node<P = P> + 'nodes)> + 'nodes>,
-    ) {
-        self.refs.push(NodeRef::SubIterator(iter));
+    pub fn _private_push_sub_iterator(&mut self, iter: NodeObjectRefIterator<'nodes, P>) {
+        self.refs.push(NodeIteratorEntry::SubIterator(iter));
     }
 }
 
 impl<'nodes, P: SkyliteProject> Iterator for NodeIterator<'nodes, P> {
-    type Item = &'nodes dyn Node<P = P>;
+    type Item = NodeObjectRef<'nodes, P>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -109,31 +126,37 @@ impl<'nodes, P: SkyliteProject> Iterator for NodeIterator<'nodes, P> {
             }
 
             match self.refs.pop() {
-                Some(NodeRef::Single(node)) => return Some(node),
-                Some(NodeRef::SubIterator(iter)) => self.current_sub_iter = Some(iter),
+                Some(NodeIteratorEntry::Single(node)) => return Some(node),
+                Some(NodeIteratorEntry::SubIterator(iter)) => self.current_sub_iter = Some(iter),
                 None => return None,
             }
         }
     }
 }
 
+// endregion
+
+// region: Node iteration using mutable refs
+
+#[allow(type_alias_bounds)]
+type NodeObjectMut<'a, P: SkyliteProject> = &'a mut (dyn Node<P = P> + 'a);
+#[allow(type_alias_bounds)]
+type NodeObjectMutIterator<'a, P: SkyliteProject> =
+    Box<dyn Iterator<Item = NodeObjectMut<'a, P>> + 'a>;
+
 /// Trait for types that iterate mutably over a list of nodes.
 /// Produces an iterator that returns mutable references with lifetime `'items`.
 pub trait NodeIterableMut<'nodes, P: SkyliteProject> {
-    fn get_iterator_mut(
-        self,
-    ) -> Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes>;
+    fn get_iterator_mut(self) -> NodeObjectMutIterator<'nodes, P>;
 }
 
 impl<'nodes, P: SkyliteProject> NodeIterableMut<'nodes, P>
     for &'nodes mut [Box<dyn Node<P = P>>]
 {
-    fn get_iterator_mut(
-        self,
-    ) -> Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes> {
+    fn get_iterator_mut(self) -> NodeObjectMutIterator<'nodes, P> {
         Box::new(
             self.iter_mut()
-                .map(|n| n.as_mut() as &mut (dyn Node<P = P> + 'nodes)),
+                .map(|n| n.as_mut() as NodeObjectMut<'nodes, P>),
         )
     }
 }
@@ -141,23 +164,32 @@ impl<'nodes, P: SkyliteProject> NodeIterableMut<'nodes, P>
 impl<'nodes, P: SkyliteProject> NodeIterableMut<'nodes, P>
     for &'nodes mut Vec<Box<dyn Node<P = P>>>
 {
-    fn get_iterator_mut(
-        self,
-    ) -> Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes> {
+    fn get_iterator_mut(self) -> NodeObjectMutIterator<'nodes, P> {
         self.as_mut_slice().get_iterator_mut()
     }
 }
 
-enum NodeMut<'nodes, P: SkyliteProject> {
-    Single(&'nodes mut dyn Node<P = P>),
-    SubIterator(Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes>),
+impl<'nodes, P: SkyliteProject, N: Node<P = P>> NodeIterableMut<'nodes, P> for &'nodes mut [N] {
+    fn get_iterator_mut(self) -> NodeObjectMutIterator<'nodes, P> {
+        Box::new(self.iter_mut().map(|n| n as NodeObjectMut<'nodes, P>))
+    }
+}
+
+impl<'nodes, P: SkyliteProject, N: Node<P = P>> NodeIterableMut<'nodes, P> for &'nodes mut Vec<N> {
+    fn get_iterator_mut(self) -> NodeObjectMutIterator<'nodes, P> {
+        self.as_mut_slice().get_iterator_mut()
+    }
+}
+
+enum NodeIteratorEntryMut<'nodes, P: SkyliteProject> {
+    Single(NodeObjectMut<'nodes, P>),
+    SubIterator(NodeObjectMutIterator<'nodes, P>),
 }
 
 /// Iterator that returns mutable references to Nodes.
 pub struct NodeIteratorMut<'nodes, P: SkyliteProject> {
-    refs: Vec<NodeMut<'nodes, P>>,
-    current_sub_iter:
-        Option<Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes>>,
+    refs: Vec<NodeIteratorEntryMut<'nodes, P>>,
+    current_sub_iter: Option<NodeObjectMutIterator<'nodes, P>>,
 }
 
 impl<'nodes, P: SkyliteProject> NodeIteratorMut<'nodes, P> {
@@ -168,20 +200,17 @@ impl<'nodes, P: SkyliteProject> NodeIteratorMut<'nodes, P> {
         }
     }
 
-    pub fn _private_push_single(&mut self, node: &'nodes mut dyn Node<P = P>) {
-        self.refs.push(NodeMut::Single(node));
+    pub fn _private_push_single(&mut self, node: NodeObjectMut<'nodes, P>) {
+        self.refs.push(NodeIteratorEntryMut::Single(node));
     }
 
-    pub fn _private_push_sub_iterator(
-        &mut self,
-        iter: Box<dyn Iterator<Item = &'nodes mut (dyn Node<P = P> + 'nodes)> + 'nodes>,
-    ) {
-        self.refs.push(NodeMut::SubIterator(iter));
+    pub fn _private_push_sub_iterator(&mut self, iter: NodeObjectMutIterator<'nodes, P>) {
+        self.refs.push(NodeIteratorEntryMut::SubIterator(iter));
     }
 }
 
 impl<'nodes, P: SkyliteProject> Iterator for NodeIteratorMut<'nodes, P> {
-    type Item = &'nodes mut dyn Node<P = P>;
+    type Item = NodeObjectMut<'nodes, P>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -194,13 +223,15 @@ impl<'nodes, P: SkyliteProject> Iterator for NodeIteratorMut<'nodes, P> {
             }
 
             match self.refs.pop() {
-                Some(NodeMut::Single(node)) => return Some(node),
-                Some(NodeMut::SubIterator(iter)) => self.current_sub_iter = Some(iter),
+                Some(NodeIteratorEntryMut::Single(node)) => return Some(node),
+                Some(NodeIteratorEntryMut::SubIterator(iter)) => self.current_sub_iter = Some(iter),
                 None => return None,
             }
         }
     }
 }
+
+// endregion
 
 /// Nodes are the primary elements from which a Skylite project is constructed.
 ///
