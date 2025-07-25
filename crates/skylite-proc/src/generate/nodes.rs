@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Field, Ident, ImplItem, Item, ItemStruct, Meta};
+use syn::{Field, Ident, Item, ItemStruct, Meta};
 
 use super::encode::{CompressionBuffer, Serialize};
 use crate::assets::AssetSource;
@@ -166,7 +166,7 @@ fn gen_node_new_fn(node: &Node, items: &[Item]) -> Result<TokenStream, SkylitePr
     let params = generate_field_list(&node.parameters, TokenStream::new());
     let args = generate_argument_list(&node.parameters);
 
-    let new_fn = get_annotated_method_name(items, ANNOTATION_NEW, &node_name).ok_or(
+    let new_fn = get_annotated_method_name(items, ANNOTATION_NEW, &node_name)?.ok_or(
         syntax_err!("Missing required function with `#[{ANNOTATION_NEW}]`"),
     )?;
 
@@ -190,14 +190,15 @@ fn gen_node_impl(
     let decode_statements = generate_deserialize_statements(&node.parameters);
     let args = generate_argument_list(&node.parameters);
 
-    let pre_update_call = get_annotated_method_name(items, ANNOTATION_PRE_UPDATE, &node_name)
+    let pre_update_call = get_annotated_method_name(items, ANNOTATION_PRE_UPDATE, &node_name)?
         .map_or(TokenStream::new(), |method| quote!(self.#method(controls)));
 
-    let update_call_opt = get_annotated_method_name(items, ANNOTATION_UPDATE, &node_name)
+    let update_call_opt = get_annotated_method_name(items, ANNOTATION_UPDATE, &node_name)?
         .map(|method| quote!(self.#method(controls)));
 
-    let post_update_call_opt = get_annotated_method_name(items, ANNOTATION_POST_UPDATE, &node_name)
-        .map(|method| quote!(self.#method(controls)));
+    let post_update_call_opt =
+        get_annotated_method_name(items, ANNOTATION_POST_UPDATE, &node_name)?
+            .map(|method| quote!(self.#method(controls)));
 
     if update_call_opt.is_some() && post_update_call_opt.is_some() {
         return Err(data_err!("Annotations {ANNOTATION_UPDATE} and {ANNOTATION_POST_UPDATE} have the same meaning, only one must be given."));
@@ -205,10 +206,10 @@ fn gen_node_impl(
 
     let post_update_call = update_call_opt.or(post_update_call_opt).unwrap_or_default();
 
-    let render_call_opt = get_annotated_method_name(items, ANNOTATION_RENDER, &node_name)
+    let render_call_opt = get_annotated_method_name(items, ANNOTATION_RENDER, &node_name)?
         .map(|method| quote!(self.#method(ctx)));
 
-    let is_visible_call = get_annotated_method_name(items, ANNOTATION_IS_VISIBLE, &node_name)
+    let is_visible_call = get_annotated_method_name(items, ANNOTATION_IS_VISIBLE, &node_name)?
         .map_or(
             if render_call_opt.is_some() {
                 quote!(true)
@@ -220,7 +221,7 @@ fn gen_node_impl(
 
     let render_call = render_call_opt.unwrap_or_default();
 
-    let z_order_call = get_annotated_method_name(items, ANNOTATION_Z_ORDER, &node_name)
+    let z_order_call = get_annotated_method_name(items, ANNOTATION_Z_ORDER, &node_name)?
         .map_or(quote!(1), |method| quote!(self.#method()));
 
     let push_child_nodes = node_type

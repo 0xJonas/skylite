@@ -6,6 +6,7 @@ use super::project::project_ident;
 use crate::generate::nodes::node_type_name;
 use crate::parse::util::{change_case, IdentCase};
 use crate::parse::values::{Type, TypedValue, Variable};
+use crate::SkyliteProcError;
 
 /// Returns the function item annotated with the given `attribute` from the list
 /// of `items`.
@@ -39,8 +40,9 @@ pub(crate) fn get_annotated_method_name<'a>(
     items: &'a [Item],
     attr: &str,
     struct_name: &Ident,
-) -> Option<&'a Ident> {
+) -> Result<Option<&'a Ident>, SkyliteProcError> {
     let meta = syn::parse_str::<Meta>(attr).unwrap();
+    let mut out = None;
 
     for item in items {
         let Item::Impl(impl_block) = item else {
@@ -65,11 +67,15 @@ pub(crate) fn get_annotated_method_name<'a>(
                 continue;
             };
             if method.attrs.iter().any(|attr_item| attr_item.meta == meta) {
-                return Some(&method.sig.ident);
+                if out.is_some() {
+                    return Err(syntax_err!("Multiple items marked with {attr}"));
+                } else {
+                    out = Some(&method.sig.ident);
+                }
             }
         }
     }
-    None
+    Ok(out)
 }
 
 /// Generates a `TokenStream` of the form `var1: type1, var2: type2:, ...` from
@@ -205,5 +211,37 @@ pub(crate) fn validate_type(skylite_type: &Type, rust_type: &syn::Type) -> bool 
             matches!(rust_type, syn::Type::Path(p) if p.path.is_ident(&change_case(name, IdentCase::UpperCamelCase)))
         }
         _ => unimplemented!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use quote::format_ident;
+    use syn::{parse_quote, File};
+
+    #[test]
+    fn test_get_annotated_method_name() {
+        let file: File = parse_quote! {
+            impl MyStruct {
+                #[test1]
+                fn test1_fn() {}
+
+                #[test2]
+                fn test2_fn() {}
+
+                #[test2]
+                fn test_duplicate() {}
+            }
+        };
+        let items = file.items;
+
+        let result = super::get_annotated_method_name(&items, "test1", &format_ident!("MyStruct"));
+        assert!(matches!(result, Ok(Some(ident)) if ident == &format_ident!("test1_fn")));
+
+        let result = super::get_annotated_method_name(&items, "test2", &format_ident!("MyStruct"));
+        assert!(result.is_err());
+
+        let result = super::get_annotated_method_name(&items, "test3", &format_ident!("MyStruct"));
+        assert!(matches!(result, Ok(None)));
     }
 }
