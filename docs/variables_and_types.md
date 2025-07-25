@@ -1,18 +1,18 @@
 # Variables and Types
 
-Throughout the engine, there are many places where variables are defined in asset files and then used from Rust code, for example as parameters and properties for [nodes](node_assets.md). All variables are made up of an identifier and a type, which both have different representations in different contexts.
+Throughout a project, there are some places where variables are defined in asset files and then used from Rust code, primarily as parameters and properties for [nodes](nodes.md#asset-file). All variables are made up of an identifier and a type, which both have different representations in different contexts.
 
 Variables are declared using the following syntax:
 
 ```scheme
-'(<name> <type> <description>)
+'(<name> <type>)
 ```
 
-`<name>` must be a symbol giving the identifier of the variable. `<type>` must be either one of the symbols for a primitive type, or a list containing nested lists or primitive type symbols. `<description>` must be a string literal and is optional. When it is given, it is usually added as a documentation attribute to the variable in the generated Rust code.
+`<name>` must be a symbol giving the identifier of the variable. The syntax for `<type>` varies depending on the specific type and is described below.
 
 ## Identifiers
 
-Variable identifiers are initially defined in an asset file, like a node asset, and therefore start as a Scheme symbol. When a variable is given a counterpart in Rust code, the casing of the identifier is changed to match the variable's function in the code. It is important to note that the names of asset files are themselves identifiers which follow this same pattern.
+Variable identifiers initially defined in an asset file, like a node asset, generally need to be converted to a Rust variable. When an identifier is given a counterpart in Rust code, its casing is changed to match the variable's function in the code. It is important to note that the names of asset files are themselves identifiers which follow this same pattern.
 
 An identifier can assume the following casings:
 
@@ -24,9 +24,9 @@ An identifier can assume the following casings:
 | Lower camel-case | `colorRgb`  | N/A                                                       |
 | Upper camel-case | `ColorRgb`  | Type names and traits                                     |
 
-Since identifiers start in Scheme, which has very liberal rules for its symbols, a single identifier can use a mix of different casings. This is not recommended however, since it can lead to surprises when the identifier is normalized in the generated Rust code.
+When an identifier starts in Scheme, which has very liberal rules for its symbols, it can use a mix of different casings. This is not recommended however, since it can lead to surprises when the identifier is normalized in the generated Rust code.
 
-## Type Conversion
+## Types
 
 A variable also has a type to specify what kind of data the variable holds and which values are allowed to be used for this variable in other assets. To convert between the asset files' Scheme format and Rust syntax, a fixed set of types with representation in both Scheme and Rust is used. These types are identified by a symbol or list in Scheme and map to a matching type in Rust.
 
@@ -34,7 +34,7 @@ A variable also has a type to specify what kind of data the variable holds and w
 
 The following primitive types are supported:
 
-| Type                         | Scheme Symbol | Rust type |
+| Type                         | Scheme Syntax | Rust type |
 | ---------------------------- | ------------- | --------- |
 | 8-bit unsigned integer       | `u8`          | `u8`      |
 | 16-bit unsigned integer      | `u16`         | `u16`     |
@@ -55,14 +55,14 @@ In Scheme, the allowed values for each of these types is the same as it would be
 
 The following aggregate types are supported:
 
-| Type   | Scheme                | Rust type               |
+| Type   | Scheme Syntax         | Rust type               |
 | ------ | --------------------- | ----------------------- |
 | Tuple  | `(#type1 #type2 ...)` | `(#type1, #type2, ...)` |
 | Vector | `(vec #type)`         | `Vec<#type>`            |
 
-A tuple is a fixed-length sequence of up to eight elements of arbitrary types. When supplying a value to a variable with tuple type in Scheme, simply list the values for each element in order.
+A **tuple** is a fixed-length sequence of up to eight elements of arbitrary types. When supplying a value to a variable with tuple type in Scheme, simply list the values for each element in order.
 
-A vector is a list of variable length of entries of a single type. Values to vector type variables in scheme are simply lists which contain only elements of the vectors item type.
+A **vector** is a list of variable length of entries of a single type. Values to vector type variables in scheme are simply lists which contain only elements of the vectors item type.
 
 Vectors and tuples can be arbitrarily nested.
 
@@ -70,8 +70,20 @@ Vectors and tuples can be arbitrarily nested.
 
 Certain assets can also be used as parameters or properties, when declaring the property with one of the following types:
 
-| Type      | Scheme      | Rust type                       |
-| --------- | ----------- | ------------------------------- |
-| Node list | `node-list` | `skylite_core::nodes::NodeList` |
+| Type                       | Scheme Syntax       | Rust type                       |
+| -------------------------- | ------------------- | ------------------------------- |
+| [Node](nodes.md)           | `(node #node-type)` | `#NodeType`                     |
+| [Node list](node_lists.md) | `node-list`         | `skylite_core::nodes::NodeList` |
 
-When passing a value to a parameter of one of these types, a the name of the asset as a symbol (unquoted string) should be used.
+Node variables must be declared with a `#node-type`, which should be a symbol containing the name of the node asset. When passing a value to a node type parameter, a list starting with the node type and followed by the arguments to the node's parameters should be used.
+
+Example:
+```scheme
+; Declaration
+(node my-node)
+
+; Value
+(my-node 1 2 3)
+```
+
+A node list variable simply has the type `node-list`. As a value, the a symbol containing the name of a node list asset should be used.

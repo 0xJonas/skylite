@@ -85,6 +85,8 @@ impl<'nodes, P: SkyliteProject, N: Node<P = P>> NodeIterable<'nodes, P> for &'no
     }
 }
 
+// TODO: arrays, Box<dyn Node> for single nodes
+
 enum NodeIteratorEntry<'nodes, P: SkyliteProject> {
     Single(NodeObjectRef<'nodes, P>),
     SubIterator(NodeObjectRefIterator<'nodes, P>),
