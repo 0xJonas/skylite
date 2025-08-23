@@ -84,14 +84,16 @@ pub(crate) fn generate_field_list(params: &[Variable], prefix: TokenStream) -> T
     let param_names = params
         .iter()
         .map(|p| format_ident!("{}", change_case(&p.name, IdentCase::LowerSnakeCase)));
-    let param_types = params.iter().map(|p| skylite_type_to_rust(&p.typename));
+    let param_types = params
+        .iter()
+        .map(|p| skylite_type_to_rust(&p.typename, true));
     quote! {
         #(#prefix #param_names: #param_types),*
     }
 }
 
 /// Converts a `Type` to the corresponding owned Rust type.
-pub(crate) fn skylite_type_to_rust(t: &Type) -> TokenStream {
+pub(crate) fn skylite_type_to_rust(t: &Type, is_annotation: bool) -> TokenStream {
     match t {
         Type::U8 => quote!(u8),
         Type::U16 => quote!(u16),
@@ -106,12 +108,18 @@ pub(crate) fn skylite_type_to_rust(t: &Type) -> TokenStream {
         Type::Bool => quote!(bool),
         Type::String => quote!(String),
         Type::Tuple(member_types) => {
-            let member_types_tokens = member_types.iter().map(skylite_type_to_rust);
+            let member_types_tokens = member_types
+                .iter()
+                .map(|t| skylite_type_to_rust(t, is_annotation));
             quote!((#(#member_types_tokens),*))
         }
         Type::Vec(item_type) => {
-            let item_type_tokens = skylite_type_to_rust(&item_type);
-            quote!(Vec<#item_type_tokens>)
+            let item_type_tokens = skylite_type_to_rust(&item_type, is_annotation);
+            if is_annotation {
+                quote!(Vec<#item_type_tokens>)
+            } else {
+                quote!(Vec::<#item_type_tokens>)
+            }
         }
         Type::NodeList => quote!(::skylite_core::nodes::NodeList),
         Type::Node(name) => node_type_name(name.as_str()).to_token_stream(),
@@ -123,8 +131,8 @@ pub(crate) fn skylite_type_to_rust(t: &Type) -> TokenStream {
 /// functions.
 pub(crate) fn generate_deserialize_statements(args: &[Variable]) -> TokenStream {
     let statements = args.iter().map(|v| {
-        let t = skylite_type_to_rust(&v.typename);
         let ident = format_ident!("{}", change_case(&v.name, IdentCase::LowerSnakeCase));
+        let t = skylite_type_to_rust(&v.typename, false);
         quote!(let #ident = #t::deserialize(decoder);)
     });
     quote!(#(#statements)*)

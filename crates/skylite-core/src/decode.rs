@@ -3,6 +3,8 @@
 #![allow(non_snake_case)]
 use skylite_compress::Decoder;
 
+use crate::nodes::Node;
+
 pub trait Deserialize {
     fn deserialize(decoder: &mut dyn Decoder) -> Self;
 }
@@ -99,6 +101,12 @@ impl Deserialize for String {
 impl Deserialize for bool {
     fn deserialize(decoder: &mut dyn Decoder) -> Self {
         decoder.decode_u8() != 0
+    }
+}
+
+impl<N: Node> Deserialize for N {
+    fn deserialize(decoder: &mut dyn Decoder) -> Self {
+        N::_private_decode(decoder)
     }
 }
 

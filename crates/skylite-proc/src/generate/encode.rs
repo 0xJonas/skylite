@@ -139,7 +139,7 @@ impl Serialize for TypedValue {
             TypedValue::String(v) => v.as_str().serialize(buffer),
             TypedValue::Tuple(v) => v.iter().for_each(|i| i.serialize(buffer)),
             TypedValue::Vec(v) => (&v[..]).serialize(buffer),
-            TypedValue::Node(_) => panic!("Serializing a TypedValue::Node is not supported"),
+            TypedValue::Node(instance) => instance.args.iter().for_each(|i| i.serialize(buffer)),
             TypedValue::NodeList(v) => buffer.write_varint(*v as usize),
         }
     }
