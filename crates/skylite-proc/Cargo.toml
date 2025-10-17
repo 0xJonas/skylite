@@ -16,6 +16,7 @@ quote = "^1.0"
 glob = "0.3.1"
 
 skylite-compress = { workspace = true, default-features = true }
+skylite-assets = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

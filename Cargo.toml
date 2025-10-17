@@ -6,5 +6,6 @@ resolver = "2"
 [workspace.dependencies]
 skylite-compress = { path = "./crates/skylite-compress", default-features = false }
 skylite-proc = { path = "./crates/skylite-proc" }
+skylite-assets = { path = "./crates/skylite-assets" }
 skylite-core = { path = "./crates/skylite-core" }
 skylite-mock = { path = "./crates/skylite-mock" }

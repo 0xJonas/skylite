@@ -1,0 +1,3 @@
+#lang skylite/asset 'node
+
+'()
