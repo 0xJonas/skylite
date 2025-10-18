@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -8,13 +7,16 @@ use crate::error::AssetError;
 const SERVER_SOCKET: &'static str = "socket";
 const SERVER_LOCK: &'static str = "lock";
 
-static SERVER_SCRIPT: &'static str = concat!(
-    "(module asset-server racket\n",
-    ";", /* Used to comment out '#lang racket', as it is not allowed when running the script
-         with `racket --load -` */
-    include_str!("../asset-server/asset-server.rkt"),
-    ") (require (submod 'asset-server main))"
-);
+static SERVER_MODULES: [(&'static str, &'static str); 2] = [
+    (
+        "log-trace.rkt",
+        include_str!("../asset-server/log-trace.rkt"),
+    ),
+    (
+        "asset-server.rkt",
+        include_str!("../asset-server/asset-server.rkt"),
+    ),
+];
 
 #[cfg(target_family = "unix")]
 mod unix {
@@ -65,16 +67,14 @@ mod unix {
     pub(crate) fn connect_to_asset_server() -> Result<AssetServerConnection, AssetError> {
         let server_tmp_dir = temp_dir().join("skylite").join("asset-server");
         if !server_tmp_dir.is_dir() {
-            std::fs::create_dir_all(&server_tmp_dir)
-                .map_err(|err| AssetError::OtherError(err.to_string()))?;
+            std::fs::create_dir_all(&server_tmp_dir)?;
         }
 
         let socket = server_tmp_dir.join(SERVER_SOCKET);
 
         if socket.exists() {
             // Socket already exists, try to connect to the asset server
-            let stream_res =
-                UnixStream::connect(&socket).map_err(|err| AssetError::OtherError(err.to_string()));
+            let stream_res = UnixStream::connect(&socket);
 
             if stream_res.is_ok() {
                 return Ok(AssetServerConnection {
@@ -83,16 +83,16 @@ mod unix {
             }
 
             // The socket exists, but the asset-server is not running.
-            std::fs::remove_file(&socket).map_err(|err| AssetError::OtherError(err.to_string()))?;
+            std::fs::remove_file(&socket)?;
         }
 
         // The asset server is not running, try to launch it.
 
         let lock_path = server_tmp_dir.join(SERVER_LOCK);
         let lock_file = if !lock_path.exists() {
-            File::create(lock_path).map_err(|err| AssetError::OtherError(err.to_string()))?
+            File::create(lock_path)?
         } else {
-            File::open(lock_path).map_err(|err| AssetError::OtherError(err.to_string()))?
+            File::open(lock_path)?
         };
 
         let lock_file_fd = lock_file.as_raw_fd();
@@ -105,8 +105,7 @@ mod unix {
             unsafe { flock(lock_file_fd, LOCK_UN) };
 
             return Ok(AssetServerConnection {
-                socket_stream: UnixStream::connect(socket)
-                    .map_err(|err| AssetError::OtherError(err.to_string()))?,
+                socket_stream: UnixStream::connect(socket)?,
             });
         }
 
@@ -114,47 +113,34 @@ mod unix {
 
         unsafe { flock(lock_file_fd, LOCK_UN) };
         Ok(AssetServerConnection {
-            socket_stream: UnixStream::connect(socket)
-                .map_err(|err| AssetError::OtherError(err.to_string()))?,
+            socket_stream: UnixStream::connect(socket)?,
         })
     }
 }
 
 fn start_asset_server(cwd: &Path) -> Result<(), AssetError> {
+    for (filename, content) in SERVER_MODULES {
+        std::fs::write(cwd.join(filename), content.as_bytes())?;
+    }
+
     let mut command = Command::new("racket");
     command
-        .args(["--load", "-"])
+        .args(["--require", "asset-server.rkt"])
         .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
 
     #[cfg(target_family = "unix")]
     command.process_group(0);
     #[cfg(target_family = "windows")]
     command.creation_flags(0x00000200); // CREATE_NEW_PROCESS_GROUP
 
-    let mut child = command
-        .spawn()
-        .map_err(|err| AssetError::OtherError(err.to_string()))?;
-
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(SERVER_SCRIPT.as_bytes())
-        .map_err(|err| AssetError::OtherError(err.to_string()))?;
+    let mut child = command.spawn()?;
 
     // Wait for the asset-server to open its socket.
     let socket = cwd.join(SERVER_SOCKET);
-    while !socket
-        .try_exists()
-        .map_err(|err| AssetError::OtherError(err.to_string()))?
-        && child
-            .try_wait()
-            .map_err(|err| AssetError::OtherError(err.to_string()))?
-            .is_none()
-    {
+    while !socket.try_exists()? && child.try_wait()?.is_none() {
         std::thread::yield_now();
     }
 

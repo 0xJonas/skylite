@@ -21,6 +21,9 @@ pub enum AssetError {
     /// The data for an asset is inconsistent.
     DataError(String),
 
+    /// IO-Error
+    IOError(std::io::Error),
+
     /// Something else went wrong.
     OtherError(String),
 }
@@ -31,7 +34,14 @@ impl std::fmt::Display for AssetError {
             Self::RacketException(str) => write!(f, "Racket Exception: {}", str),
             Self::FormatError(str) => write!(f, "Format Error: {}", str),
             Self::DataError(str) => write!(f, "Data Error: {}", str),
+            Self::IOError(err) => write!(f, "IO Error: {}", err),
             Self::OtherError(str) => write!(f, "Error: {}", str),
         }
+    }
+}
+
+impl From<std::io::Error> for AssetError {
+    fn from(err: std::io::Error) -> Self {
+        AssetError::IOError(err)
     }
 }
