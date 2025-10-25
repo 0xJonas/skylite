@@ -9,8 +9,10 @@
 
 (struct log-metadata (timestamp trace))
 
+
 (define (make-log-metadata)
   (log-metadata (current-date) (tracing-stack)))
+
 
 (define-syntax (define/trace stx)
   (syntax-parse stx
@@ -30,10 +32,12 @@
              (~? (log-message (current-logger) exit-level exit-msg (make-log-metadata) #f) #f)
              $result)))]))
 
+
 (define-syntax (log/trace stx)
   (syntax-parse stx
     [(_ level fmt fmt-args ...)
      #'(log-message (current-logger) level (format fmt fmt-args ...) (make-log-metadata) #f)]))
+
 
 (define (start-log-thread)
   (define receiver (make-log-receiver (current-logger) 'info))

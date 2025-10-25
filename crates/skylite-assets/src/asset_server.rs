@@ -1,3 +1,4 @@
+#[cfg(target_family = "unix")]
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -7,10 +8,14 @@ use crate::error::AssetError;
 const SERVER_SOCKET: &'static str = "socket";
 const SERVER_LOCK: &'static str = "lock";
 
-static SERVER_MODULES: [(&'static str, &'static str); 2] = [
+static SERVER_MODULES: [(&'static str, &'static str); 3] = [
     (
         "log-trace.rkt",
         include_str!("../asset-server/log-trace.rkt"),
+    ),
+    (
+        "project.rkt",
+        include_str!("../asset-server/project.rkt"),
     ),
     (
         "asset-server.rkt",

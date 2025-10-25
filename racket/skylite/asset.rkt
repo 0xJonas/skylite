@@ -32,4 +32,5 @@
        #`(module ignored racket
            (provide skylite-assets)
            #,@out-defs
-           (define skylite-assets `((#,asset-name . (#,asset-type . ,(lambda () #,out-asset))))))))))
+           (define skylite-assets `([#,asset-name . ([type . #,asset-type]
+                                                     [get . ,(lambda () #,out-asset)])])))))))

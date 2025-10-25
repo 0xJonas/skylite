@@ -1,77 +1,12 @@
 #lang racket
 
-(require file/glob)
 (require racket/unix-socket)
 (require "./log-trace.rkt")
-
-(struct project (assets))
-
-(define asset-cache (make-hash))
-(define open-projects (list))
-
-(define (load-asset-file path)
-  (let ([ns (make-base-namespace)])
-    (parameterize ([current-namespace ns])
-      (dynamic-require path 'skylite-assets))))
-
-(define (list-asset-files root glob-paths)
-  (flatten
-   (for/list ([glob-path glob-paths])
-     (define glob-path-full (if (absolute-path? glob-path)
-                                glob-path
-                                (build-path root glob-path)))
-     (glob glob-path-full))))
-
-(define/trace (load-project project-root)
-  #:enter 'info (format "Loading project ~a" project-root)
-  #:exit 'debug (format "Finished loading project ~a" project-root)
-
-  ; Load project definition
-  (define project-root-assets (load-asset-file project-root))
-  (define project-asset-def
-    (let ([res (findf (lambda (asset) (eq? (cadr asset) 'project)) project-root-assets)])
-      (if res
-          res
-          (raise-user-error "Asset file ~a does not contain a 'project asset." project-root))))
-  (define project-asset
-    (let ([asset-name (car project-asset-def)]
-          [asset-thunk (cddr project-asset-def)])
-      (hash-ref! asset-cache (cons project-root asset-name) asset-thunk)))
-
-  ; Load assets for project
-  (define asset-file-globs (cdr (or (assq 'assets project-asset)
-                                    '(assets . ("./**/*.rkt")))))
-  (define asset-files (list-asset-files (path-only project-root) asset-file-globs))
-  (define assets-defs (apply append (for/list ([file asset-files]) (load-asset-file file))))
-  (define assets (for/fold ([assets (make-immutable-hash project-root-assets)]) ([new-asset assets-defs])
-                   (hash-set assets (car new-asset) (cdr new-asset))))
-
-  (project assets))
-
-; Returns the project for the given project root.
-; If the project is not known, this function will try to load it.
-(define (retrieve-project project-root)
-  (define res (assoc project-root open-projects))
-  (if res
-      (begin
-        (log/trace 'debug "Project already loaded: ~a" project-root)
-        (cdr res))
-      (let ([project (load-project project-root)])
-        (set! open-projects (cons (cons project-root project) open-projects))
-        project)))
-
-(define (retrieve-asset project-root assets asset)
-  (define asset-def (hash-ref assets asset))
-  (define asset-type (car asset-def))
-  (define asset-thunk (cdr asset-def))
-  (define/trace (eval-asset)
-    #:enter 'info (format "Evaluating asset ~a in project ~a" asset project-root)
-    (asset-thunk))
-
-  (cons asset-type (hash-ref! asset-cache (cons project-root asset) eval-asset)))
+(require "./project.rkt")
 
 (struct request-header (type project-root))
 (struct asset-request-params (asset))
+
 
 ; Request Header:
 ; - request type: 1 Byte
@@ -85,6 +20,7 @@
                [project-root (bytes->path (read-bytes project-root-len in))])
           (request-header req-type project-root)))))
 
+
 (define (read-request-params request in)
   (match (request-header-type request)
     [0
@@ -93,19 +29,21 @@
      (asset-request-params asset)]
     [1 '()]))
 
+
 (define (process-request header params out)
   (match (request-header-type header)
     [0
      (define project-root (request-header-project-root header))
      (define project (retrieve-project project-root))
-     (retrieve-asset project-root (project-assets project) (asset-request-params-asset params))
+     (retrieve-asset project-root project (asset-request-params-asset params))
      ; TODO: Serialize
      ]
     [1
      (define project (retrieve-project (request-header-project-root header)))
-     (hash-keys (project-assets project))
+     (list-assets project)
      ; TODO: Serialize
      ]))
+
 
 (define (server-thread in out)
   (log/trace 'info "New connection")
@@ -115,6 +53,7 @@
     (process-request header params out)
     (let ([next-header (read-request-header in)])
       (when next-header (lp next-header)))))
+
 
 (module* main #f
   (define debug-mode
