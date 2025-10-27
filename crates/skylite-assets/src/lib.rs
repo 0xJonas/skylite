@@ -1,5 +1,5 @@
 mod asset_server;
-mod error;
 mod base_serde;
+mod error;
 
 pub use error::*;
