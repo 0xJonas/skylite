@@ -8,14 +8,15 @@ use crate::error::AssetError;
 const SERVER_SOCKET: &'static str = "socket";
 const SERVER_LOCK: &'static str = "lock";
 
-static SERVER_MODULES: [(&'static str, &'static str); 3] = [
+static SERVER_MODULES: [(&'static str, &'static str); 4] = [
     (
         "log-trace.rkt",
         include_str!("../asset-server/log-trace.rkt"),
     ),
+    ("project.rkt", include_str!("../asset-server/project.rkt")),
     (
-        "project.rkt",
-        include_str!("../asset-server/project.rkt"),
+        "base-serde.rkt",
+        include_str!("../asset-server/base-serde.rkt"),
     ),
     (
         "asset-server.rkt",

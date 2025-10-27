@@ -10,11 +10,11 @@ pub trait Deserialize {
 }
 
 macro_rules! deserialize_for_primitive {
-    ($typename:ident, $bytes:expr) => {
+    ($typename:ident) => {
         impl Deserialize for $typename {
             fn deserialize(decoder: &mut dyn Decoder) -> $typename {
-                let mut data = [0; $bytes];
-                for i in 0..$bytes {
+                let mut data = [0; std::mem::size_of::<$typename>()];
+                for i in 0..std::mem::size_of::<$typename>() {
                     data[i] = decoder.decode_u8();
                 }
                 $typename::from_ne_bytes(data)
@@ -23,16 +23,16 @@ macro_rules! deserialize_for_primitive {
     };
 }
 
-deserialize_for_primitive!(u8, 1);
-deserialize_for_primitive!(u16, 2);
-deserialize_for_primitive!(u32, 4);
-deserialize_for_primitive!(u64, 8);
-deserialize_for_primitive!(i8, 1);
-deserialize_for_primitive!(i16, 2);
-deserialize_for_primitive!(i32, 4);
-deserialize_for_primitive!(i64, 8);
-deserialize_for_primitive!(f32, 4);
-deserialize_for_primitive!(f64, 8);
+deserialize_for_primitive!(u8);
+deserialize_for_primitive!(u16);
+deserialize_for_primitive!(u32);
+deserialize_for_primitive!(u64);
+deserialize_for_primitive!(i8);
+deserialize_for_primitive!(i16);
+deserialize_for_primitive!(i32);
+deserialize_for_primitive!(i64);
+deserialize_for_primitive!(f32);
+deserialize_for_primitive!(f64);
 
 pub fn read_varint(decoder: &mut dyn Decoder) -> usize {
     let mut out = 0;
