@@ -15,10 +15,29 @@ jobs:
     #   id: install-rust
     #   uses: dtolnay/rust-toolchain@stable
 
+    - name: Try to restore Racket dependencies from cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/racket
+          ~/.local/share/racket
+        key: ${{ runner.os }}-racket-${{ hashFiles('.racket-version') }}
+
+    - name: Install Racket
+      uses: Bogdanp/setup-racket@v1.14
+      with:
+        architecture: 'x64'
+        distribution: 'full'
+        variant: 'CS'
+        version: '8.14'
+
     - name: Install Guile
       run: sudo apt-get install guile-3.0-dev
 
-    - name: Attempt to restore dependencies from cache
+    - name: Install skylite support package
+      run: raco pkg install --link ./support/skylite-racket
+
+    - name: Try to restore Rust dependencies from cache
       uses: actions/cache@v4
       with:
         path: |
@@ -29,9 +48,13 @@ jobs:
           target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Run tests
+    - name: Run Racket tests
+      run: |
+        raco test ./crates/skylite-assets/asset-server
+        raco test ./support/skylite-racket/
+
+    - name: Run Rust tests
       run: cargo test --tests
 
     - name: Run formatting check
-      run: |
-        cargo fmt --check
+      run: cargo fmt --check
