@@ -15,13 +15,13 @@ jobs:
     #   id: install-rust
     #   uses: dtolnay/rust-toolchain@stable
 
-    - name: Try to restore Racket dependencies from cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/racket
-          ~/.local/share/racket
-        key: ${{ runner.os }}-racket-${{ hashFiles('.racket-version') }}
+    # - name: Try to restore Racket dependencies from cache
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: |
+    #       ~/.cache/racket
+    #       ~/.local/share/racket
+    #     key: ${{ runner.os }}-racket-${{ hashFiles('.racket-version') }}
 
     - name: Install Racket
       uses: Bogdanp/setup-racket@v1.14
