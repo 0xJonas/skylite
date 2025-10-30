@@ -1,8 +1,8 @@
 use std::io::{Read, Write};
 
-use crate::AssetError;
+use crate::assets::AssetError;
 
-trait Serialize {
+pub(crate) trait Serialize {
     fn serialize(&self, output: &mut impl Write) -> Result<(), AssetError>
     where
         Self: Sized;
@@ -27,6 +27,8 @@ serialize_for_primitive!(i8);
 serialize_for_primitive!(i16);
 serialize_for_primitive!(i32);
 serialize_for_primitive!(i64);
+serialize_for_primitive!(f32);
+serialize_for_primitive!(f64);
 
 impl Serialize for bool {
     fn serialize(&self, output: &mut impl Write) -> Result<(), AssetError> {
@@ -39,7 +41,7 @@ impl Serialize for bool {
     }
 }
 
-impl Serialize for String {
+impl Serialize for &str {
     fn serialize(&self, output: &mut impl Write) -> Result<(), AssetError> {
         let bytes = self.as_bytes();
         (bytes.len() as u32).serialize(output)?;
@@ -48,10 +50,10 @@ impl Serialize for String {
     }
 }
 
-impl<T: Serialize> Serialize for Vec<T> {
+impl<T: Serialize> Serialize for &[T] {
     fn serialize(&self, output: &mut impl Write) -> Result<(), AssetError> {
         (self.len() as u32).serialize(output)?;
-        for elem in self {
+        for elem in *self {
             elem.serialize(output)?;
         }
         Ok(())
@@ -84,7 +86,7 @@ serialize_for_tuple!(T1, T2, T3, T4, T5, T6);
 serialize_for_tuple!(T1, T2, T3, T4, T5, T6, T7);
 serialize_for_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
 
-trait Deserialize {
+pub(crate) trait Deserialize {
     fn deserialize(input: &mut impl Read) -> Result<Self, AssetError>
     where
         Self: Sized;
@@ -110,6 +112,8 @@ deserialize_for_primitive!(i8);
 deserialize_for_primitive!(i16);
 deserialize_for_primitive!(i32);
 deserialize_for_primitive!(i64);
+deserialize_for_primitive!(f32);
+deserialize_for_primitive!(f64);
 
 impl Deserialize for bool {
     fn deserialize(input: &mut impl Read) -> Result<Self, AssetError> {
@@ -183,11 +187,12 @@ mod tests {
         (-15i32).serialize(&mut data).unwrap();
         (-20i64).serialize(&mut data).unwrap();
         false.serialize(&mut data).unwrap();
-        "test".to_owned().serialize(&mut data).unwrap();
+        "test".serialize(&mut data).unwrap();
         vec![1i16, 2i16, 3i16, 4i16, 5i16]
+            .as_slice()
             .serialize(&mut data)
             .unwrap();
-        ("a".to_owned(), 5u8).serialize(&mut data).unwrap();
+        ("a", 5u8).serialize(&mut data).unwrap();
 
         assert_eq!(
             data.get_ref(),

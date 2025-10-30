@@ -28,9 +28,9 @@
          (parameterize ([tracing-stack (cons (symbol->string 'name) (tracing-stack))])
            (~? (log-message (current-logger) enter-level enter-msg (make-log-metadata) #f) #f)
 
-           (let ([$result (inner)])
+           (let ([$result (call-with-values inner list)])
              (~? (log-message (current-logger) exit-level exit-msg (make-log-metadata) #f) #f)
-             $result)))]))
+             (apply values $result))))]))
 
 
 (define-syntax (log/trace stx)

@@ -1,14 +1,16 @@
+use std::io::Write;
 #[cfg(target_family = "unix")]
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::error::AssetError;
+use crate::assets::{AssetError, AssetType};
+use crate::base_serde::Serialize;
 
 const SERVER_SOCKET: &'static str = "socket";
 const SERVER_LOCK: &'static str = "lock";
 
-static SERVER_MODULES: [(&'static str, &'static str); 4] = [
+static SERVER_MODULES: [(&'static str, &'static str); 5] = [
     (
         "log-trace.rkt",
         include_str!("../asset-server/log-trace.rkt"),
@@ -18,6 +20,7 @@ static SERVER_MODULES: [(&'static str, &'static str); 4] = [
         "base-serde.rkt",
         include_str!("../asset-server/base-serde.rkt"),
     ),
+    ("nodes.rkt", include_str!("../asset-server/nodes.rkt")),
     (
         "asset-server.rkt",
         include_str!("../asset-server/asset-server.rkt"),
@@ -35,7 +38,7 @@ mod unix {
 
     use super::start_asset_server;
     use crate::asset_server::{SERVER_LOCK, SERVER_SOCKET};
-    use crate::error::AssetError;
+    use crate::assets::AssetError;
 
     const LOCK_EX: c_int = 2;
     const LOCK_UN: c_int = 8;
@@ -160,3 +163,35 @@ pub(crate) use unix::{connect_to_asset_server, AssetServerConnection};
 
 #[cfg(not(target_family = "unix"))]
 compile_error!("This platform is currently not supported.");
+
+const REQ_TYPE_RETRIEVE_ASSET: u8 = 0;
+const REQ_TYPE_LIST_ASSETS: u8 = 1;
+const REQ_TYPE_CLEAR_CACHE: u8 = 2;
+const REQ_TYPE_SHUTDOWN: u8 = 3;
+
+impl AssetServerConnection {
+    pub(crate) fn send_load_asset_request(
+        &mut self,
+        project_path: &Path,
+        atype: AssetType,
+        name: &str,
+    ) -> Result<(), AssetError> {
+        REQ_TYPE_RETRIEVE_ASSET.serialize(self)?;
+        project_path
+            .to_str()
+            .ok_or_else(|| AssetError::OtherError("Invalid project path".to_owned()))
+            .and_then(|s| {
+                s.serialize(self)?;
+                Ok(())
+            })?;
+        match atype {
+            AssetType::Project => 0u8.serialize(self)?,
+            AssetType::Node => 1u8.serialize(self)?,
+            AssetType::NodeList => 2u8.serialize(self)?,
+            AssetType::Sequence => 3u8.serialize(self)?,
+        }
+        name.serialize(self)?;
+        self.flush()?;
+        Ok(())
+    }
+}
