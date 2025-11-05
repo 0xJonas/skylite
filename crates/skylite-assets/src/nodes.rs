@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::asset_server::connect_to_asset_server;
-use crate::assets::{AssetError, AssetMeta, AssetType, Type};
+use crate::assets::{AssetError, AssetMeta, AssetType, NodeArgs, Type, TypedValue};
 use crate::base_serde::Deserialize;
 
 #[derive(Debug, PartialEq)]
@@ -60,12 +60,60 @@ pub fn load_node(project_path: &Path, name: &str) -> Result<Node, AssetError> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeInstance {
+    pub node: String,
+    pub args: NodeArgs,
+}
+
+impl NodeInstance {
+    fn read(input: &mut impl Read) -> Result<NodeInstance, AssetError> {
+        let name = String::deserialize(input)?;
+        let TypedValue::Node(args) = TypedValue::read(input, &Type::Node(name.clone()))? else {
+            unreachable!()
+        };
+
+        Ok(NodeInstance { node: name, args })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeList {
+    pub meta: AssetMeta,
+    pub nodes: Vec<NodeInstance>,
+}
+
+impl NodeList {
+    fn read(input: &mut impl Read) -> Result<NodeList, AssetError> {
+        let meta = AssetMeta::read(input)?;
+        let len = u32::deserialize(input)? as usize;
+        let mut nodes = Vec::with_capacity(len);
+        for _ in 0..len {
+            nodes.push(NodeInstance::read(input)?);
+        }
+        Ok(NodeList { meta, nodes })
+    }
+}
+
+pub fn load_node_list(project_path: &Path, name: &str) -> Result<NodeList, AssetError> {
+    let mut connection = connect_to_asset_server()?;
+    connection.send_load_asset_request(project_path, AssetType::NodeList, name)?;
+
+    let mut status = [0u8; 1];
+    connection.read_exact(&mut status)?;
+    if status[0] == 0 {
+        Ok(NodeList::read(&mut connection)?)
+    } else {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{load_node, Node, Variable};
-    use crate::assets::Type;
+    use super::{load_node, load_node_list, Node, NodeInstance, NodeList, Variable};
+    use crate::assets::{NodeArgs, Type, TypedValue};
 
     #[test]
     fn test_load_node() {
@@ -81,7 +129,7 @@ mod tests {
                     id: node.meta.id,
                     name: "node1".to_owned(),
                     asset_type: crate::AssetType::Node,
-                    tracked_paths: vec![project_dir.join("nodes/node1.rkt")]
+                    tracked_paths: vec![project_dir.join("assets/node1.rkt")]
                 },
                 parameters: vec![
                     Variable {
@@ -101,6 +149,40 @@ mod tests {
                     Variable {
                         name: "prop2".to_owned(),
                         vtype: Type::Bool
+                    },
+                ],
+            }
+        )
+    }
+
+    #[test]
+    fn test_load_node_list() {
+        let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("./tests/test-project")
+            .canonicalize()
+            .unwrap();
+        let node_list = load_node_list(&project_dir.join("project.rkt"), "node-list1").unwrap();
+        assert_eq!(
+            node_list,
+            NodeList {
+                meta: crate::AssetMeta {
+                    id: node_list.meta.id,
+                    name: "node-list1".to_owned(),
+                    asset_type: crate::AssetType::NodeList,
+                    tracked_paths: vec![project_dir.join("assets/node-list1.rkt")]
+                },
+                nodes: vec![
+                    NodeInstance {
+                        node: "node1".to_owned(),
+                        args: NodeArgs {
+                            args: vec![TypedValue::U8(1), TypedValue::String("test1".to_owned())]
+                        },
+                    },
+                    NodeInstance {
+                        node: "node1".to_owned(),
+                        args: NodeArgs {
+                            args: vec![TypedValue::U8(2), TypedValue::String("test2".to_owned())]
+                        },
                     },
                 ],
             }

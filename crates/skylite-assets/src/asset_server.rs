@@ -16,11 +16,8 @@ static SERVER_MODULES: [(&'static str, &'static str); 5] = [
         include_str!("../asset-server/log-trace.rkt"),
     ),
     ("project.rkt", include_str!("../asset-server/project.rkt")),
-    (
-        "base-serde.rkt",
-        include_str!("../asset-server/base-serde.rkt"),
-    ),
-    ("nodes.rkt", include_str!("../asset-server/nodes.rkt")),
+    ("serde.rkt", include_str!("../asset-server/serde.rkt")),
+    ("validate.rkt", include_str!("../asset-server/validate.rkt")),
     (
         "asset-server.rkt",
         include_str!("../asset-server/asset-server.rkt"),

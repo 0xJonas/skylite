@@ -3,8 +3,7 @@
 (require racket/unix-socket)
 (require "./log-trace.rkt")
 (require "./project.rkt")
-(require "./base-serde.rkt")
-(require "./nodes.rkt")
+(require "./serde.rkt")
 
 (struct request-header (type project-root))
 (struct asset-request-params (asset-type asset-name))
@@ -63,17 +62,15 @@
   (case (request-header-type header)
     [(0)
      (define project-root (request-header-project-root header))
-     (define project (retrieve-project project-root))
-     (define-values (asset asset-data) (retrieve-asset project
-                                                       (asset-request-params-asset-type params)
-                                                       (asset-request-params-asset-name params)))
-     (define asset-id (compute-asset-id project-root (asset-name asset)))
-     (define out-bytes
+     (parameterize ([current-project (retrieve-project project-root)])
+       (define-values (asset asset-data) (retrieve-asset (asset-request-params-asset-type params)
+                                                         (asset-request-params-asset-name params)))
+       (define asset-id (compute-asset-id project-root asset))
+       (serialize-obj out 'u8 0) ; Result ok
+       (serialize-asset-meta out asset-id asset)
        (match (asset-type asset)
-         ['node (node->bytes out asset-data)]))
-     (serialize-obj out 'u8 0) ; Result ok
-     (serialize-asset-meta out asset-id asset)
-     (write-bytes out-bytes out)
+         ['node (serialize-node out asset-data)]
+         ['node-list (serialize-node-list out asset-data)]))
      (flush-output out)]
     [(1)
      (define project (retrieve-project (request-header-project-root header)))

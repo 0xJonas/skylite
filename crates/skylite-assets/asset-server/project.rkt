@@ -2,8 +2,9 @@
 
 (require file/glob)
 (require "./log-trace.rkt")
+(require "./validate.rkt")
 
-(provide retrieve-project list-assets asset-exists? retrieve-asset compute-asset-id
+(provide current-project retrieve-project list-assets asset-exists? retrieve-asset compute-asset-id
          (struct-out project)
          (struct-out asset))
 
@@ -14,6 +15,8 @@
 (define asset-cache (make-immutable-hash))
 (define open-assets (make-immutable-hash))
 (define open-projects (make-immutable-hash))
+
+(define current-project (make-parameter #f))
 
 
 (define (raw->asset raw asset-file)
@@ -122,10 +125,11 @@
   ; Project definition, name of the project's root asset, additional assets included in the root file.
   (define-values (project-asset-def root-asset-name additional-assets)
     (if (not project-root-changed)
-        (values (let-values ([(_ def) (retrieve-asset prev-project 'project (project-root-asset-name prev-project))])
-                  def)
-                (project-root-asset-name prev-project)
-                '())
+        (parameterize ([current-project prev-project])
+          (values (let-values ([(_ def) (retrieve-asset 'project (project-root-asset-name prev-project))])
+                    def)
+                  (project-root-asset-name prev-project)
+                  '()))
         (load-project-root-asset project-root project-root-hash)))
 
   (define-values (changed-asset-files unchanged-asset-files)
@@ -187,38 +191,52 @@
         new-project)))
 
 
-(define (list-assets project)
-  (filter (lambda (k) (equal? (car k) (project-root-asset-file project))) (hash-keys open-assets)))
+(define (list-assets)
+  (filter (lambda (k) (equal? (car k) (project-root-asset-file (current-project)))) (hash-keys open-assets)))
 
 
-(define (asset-exists? project-inst req-type req-name)
-  (define asset-key (cons (project-root-asset-file project-inst) req-name))
+(define (asset-exists? req-type req-name)
+  (define asset-key (cons (project-root-asset-file (current-project)) req-name))
   (define asset-inst (hash-ref open-assets asset-key #f))
   (and asset-inst (eq? (asset-type asset-inst) req-type)))
 
 
-(define/trace (retrieve-asset project-inst req-type req-name)
-  #:enter 'debug (format "Retrieving asset ~a from project ~a" req-name (project-root-asset-file project-inst))
+(define (validate-asset type asset-data)
+  (define (retrieve-node node-name)
+    (let-values ([(_ data) (retrieve-asset 'node node-name)])
+      data))
 
-  (define asset-key (cons (project-root-asset-file project-inst) req-name))
+  (match type
+    ['project #t]
+    ['node (validate-node asset-data (lambda (type asset-name) (asset-exists? type asset-name)))]
+    ['node-list (validate-node-list asset-data
+                                    (lambda (type asset-name) (asset-exists? type asset-name))
+                                    retrieve-node)]
+    ['sequence #t]))
+
+
+(define/trace (retrieve-asset req-type req-name)
+  #:enter 'debug (format "Retrieving asset ~a from project ~a" req-name (project-root-asset-file (current-project)))
+
+  (define asset-key (cons (project-root-asset-file (current-project)) req-name))
   (define asset-inst (hash-ref open-assets asset-key
-                               (lambda () (raise-user-error 'retrieve-asset "Asset ~v not found in project ~a" req-name (project-root-asset-file project-inst)))))
+                               (lambda () (raise-user-error 'retrieve-asset "Asset ~v not found in project ~a" req-name (project-root-asset-file (current-project))))))
   (unless (eq? (asset-type asset-inst) req-type)
-    (raise-user-error 'retrieve-asset "Asset ~v in project ~a does not have type ~a" req-name (project-root-asset-file project-inst) req-type))
+    (raise-user-error 'retrieve-asset "Asset ~v in project ~a does not have type ~a" req-name (project-root-asset-file (current-project)) req-type))
 
-  (define asset-file-hash (cdr (assoc (asset-file asset-inst) (project-asset-files project-inst))))
+  (define asset-file-hash (cdr (assoc (asset-file asset-inst) (project-asset-files (current-project)))))
   (define cached-entry (hash-ref asset-cache asset-key #f))
 
   (define tracked-paths-changed-hash
     (for/list ([tp (asset-tracked-paths asset-inst)])
-      (file-changed? (car tp) (project-last-check-timestamp project-inst) (cdr tp))))
+      (file-changed? (car tp) (project-last-check-timestamp (current-project)) (cdr tp))))
   (define new-tracked-paths
     (for/list ([tp (asset-tracked-paths asset-inst)]
                [ch tracked-paths-changed-hash])
       (if ch (cons (car tp) ch) tp)))
 
   (define/trace (eval-asset)
-    #:enter 'info (format "Evaluating asset ~a in project ~a" req-name (project-root-asset-file project-inst))
+    #:enter 'info (format "Evaluating asset ~a in project ~a" req-name (project-root-asset-file (current-project)))
     ((asset-thunk asset-inst)))
 
   (if (and cached-entry
@@ -230,14 +248,17 @@
       ; Cache entry does not exist or is no longer valid
       (let ([asset-data (eval-asset)]
             [new-asset (struct-copy asset asset-inst [tracked-paths new-tracked-paths])])
+        (validate-asset req-type asset-data)
         (set! asset-cache (hash-set asset-cache asset-key (cons asset-file-hash asset-data)))
         (set! open-assets (hash-set open-assets asset-key new-asset))
         (values asset-inst asset-data))))
 
 
-(define (compute-asset-id project-root asset-name)
-  (for/fold ([id 0]) ([a (hash-keys open-assets)])
-    (if (and (equal? project-root (car a)) (string<? (cdr a) asset-name))
+(define (compute-asset-id project-root asset-inst)
+  (for/fold ([id 0]) ([entry (hash->list open-assets)])
+    (if (and (equal? project-root (caar entry))
+             (eq? (asset-type (cdr entry)) (asset-type asset-inst))
+             (string<? (cdar entry) (asset-name asset-inst)))
         (+ 1 id)
         id)))
 
@@ -289,45 +310,45 @@
   (define project-root (build-path base-dir "project.rkt"))
 
   ; Loading a project for the first time should evaluate all files as well as the project root asset.
-  (define project (retrieve-project project-root))
+  (current-project (retrieve-project project-root))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\n")
 
   ; Loading a project again without intermediate changes should not evaluate anything.
-  (set! project (retrieve-project project-root))
+  (current-project (retrieve-project project-root))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\n")
 
   ; Retrieving a node for the first time should evaluate its asset thunk.
-  (let-values ([(_1 _2) (retrieve-asset project 'node "node-1")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node "node-1")]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\n")
 
   ; Retrieving a node again without intermediate changes should not evaluate anything.
-  (let-values ([(_1 _2) (retrieve-asset project 'node "node-1")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node "node-1")]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\n")
 
   ; Changing an asset file should cause it to be evaluated again.
   (void (define-asset (build-path base-dir "node-1.rkt")
           "node-1" 'node "(list)" '()))
-  (set! project (retrieve-project project-root))
+  (current-project (retrieve-project project-root))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\n")
 
   ; The asset itself also has to be reevaluated.
-  (let-values ([(_1 _2) (retrieve-asset project 'node "node-1")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node "node-1")]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\n")
 
   ; Changing the project root should cause it to be evaluated again, as well as any new asset files.
   (void (define-asset (build-path base-dir "project.rkt")
           "project" 'project "'([name . test] [assets . (\"./node-2.rkt\")])" '()))
-  (set! project (retrieve-project (build-path base-dir "project.rkt")))
+  (current-project (retrieve-project (build-path base-dir "project.rkt")))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\n")
 
   ; Changing a tracked path should reevaluate the affected asset.
-  (let-values ([(_1 _2) (retrieve-asset project 'node "node-2")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node "node-2")]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\n")
   (void (define-asset (build-path base-dir "node-1.rkt")
           "node-1" 'node "'()" '()))
-  (let-values ([(_1 _2) (retrieve-asset project 'node "node-2")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node "node-2")]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\nnode-2-asset\n")
 
   ; Retrieving the asset again should not evaluate anything.
-  (let-values ([(_1 _2) (retrieve-asset project 'node "node-2")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node "node-2")]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\nnode-2-asset\n"))

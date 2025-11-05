@@ -72,7 +72,7 @@ impl AssetType {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssetMeta {
     pub id: u32,
     pub name: String,
@@ -163,6 +163,12 @@ impl Type {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeArgs {
+    pub args: Vec<TypedValue>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypedValue {
     U8(u8),
     U16(u16),
@@ -179,9 +185,9 @@ pub enum TypedValue {
     Vec(Vec<TypedValue>),
     Tuple(Vec<TypedValue>),
     // Project,
-    // Node,
-    // NodeList,
-    // Sequence
+    Node(NodeArgs),
+    NodeList(String),
+    Sequence(String),
 }
 
 impl TypedValue {
@@ -213,6 +219,23 @@ impl TypedValue {
                     items.push(TypedValue::read(input, item_type)?);
                 }
                 Ok(TypedValue::Tuple(items))
+            }
+            Type::Node(_) => {
+                let args_len = u32::deserialize(input)? as usize;
+                let mut args = Vec::with_capacity(args_len);
+                for _ in 0..args_len {
+                    let t = Type::read(input)?;
+                    args.push(TypedValue::read(input, &t)?);
+                }
+                Ok(TypedValue::Node(NodeArgs { args }))
+            }
+            Type::NodeList => {
+                let name = String::deserialize(input)?;
+                Ok(TypedValue::NodeList(name))
+            }
+            Type::Sequence => {
+                let name = String::deserialize(input)?;
+                Ok(TypedValue::Sequence(name))
             }
             _ => Err(AssetError::OtherError(
                 "Unsupported type for reading typed value".to_owned(),

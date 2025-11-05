@@ -1,13 +1,8 @@
 #lang racket
 
-(provide valid-base-type? serialize-type serialize-obj deserialize-obj)
+(require "./project.rkt")
 
-
-(define (valid-base-type? type)
-  (or (memv type '(u8 u16 u32 u64 i8 i16 i32 i64 f32 f64 bool string project node-list sequence))
-      (and (pair? type) (eq? (car type) 'vec) (valid-base-type? (cdr type)))
-      (and (pair? type) (eq? (car type) 'node) (symbol? (cdr type)))
-      (list? type (for/and ([item-type type]) (valid-base-type? item-type)))))
+(provide serialize-obj deserialize-obj serialize-node serialize-node-list)
 
 
 (define (serialize-type out type)
@@ -54,7 +49,16 @@
      (for ([item value]) (serialize-obj out item-type item))]
     [(list item-types ...)
      (for ([item-type item-types] [item value])
-       (serialize-obj out item-type item))])
+       (serialize-obj out item-type item))]
+    ['project (serialize-obj out 'string (symbol->string value))]
+    [(cons 'node name)
+     (define-values (_ asset-data) (retrieve-asset 'node (symbol->string name)))
+     (define parameters (cdr (or (assq 'parameters asset-data) '(parameters . ()))))
+     (for ([p parameters] [v (cdr value)])
+       (serialize-obj out 'type (cadr p))
+       (serialize-obj out (cadr p) v))]
+    ['node-list (serialize-obj out 'string (symbol->string value))]
+    ['sequence (serialize-obj out 'string (symbol->string value))])
   (void))
 
 
@@ -78,6 +82,34 @@
      (let ([len (deserialize-obj in 'u32)])
        (for/vector ([_ (build-list len values)]) (deserialize-obj in item-type)))]
     [(list item-types ...) (for/list ([item-type item-types]) (deserialize-obj in item-type))]))
+
+
+(define (serialize-node out asset-data)
+  (define param-pair (assq 'parameters asset-data))
+  (if param-pair
+      (let ([parameters (cdr param-pair)])
+        (serialize-obj out 'u32 (length parameters))
+        (for ([var parameters])
+          (serialize-obj out 'string (symbol->string (car var)))
+          (serialize-type out (cadr var))))
+      (serialize-obj out 'u32 0))
+
+  (define prop-pair (assq 'properties asset-data))
+  (if prop-pair
+      (let ([properties (cdr prop-pair)])
+        (serialize-obj out 'u32 (length properties))
+        (for ([var properties])
+          (serialize-obj out 'string (symbol->string (car var)))
+          (serialize-type out (cadr var))))
+      (serialize-obj out 'u32 0)))
+
+
+(define (serialize-node-list out asset-data)
+  (serialize-obj out 'u32 (length asset-data))
+  (for ([inst asset-data])
+    (serialize-obj out 'string (symbol->string (car inst)))
+    (serialize-obj out 'u32 (length (cdr inst)))
+    (serialize-obj out (cons 'node (car inst)) inst)))
 
 
 (module+ test
