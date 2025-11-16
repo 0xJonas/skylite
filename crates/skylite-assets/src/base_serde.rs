@@ -126,7 +126,7 @@ impl Deserialize for String {
         let len = u32::deserialize(input)? as usize;
         let mut buf = vec![0u8; len];
         input.read_exact(&mut buf)?;
-        Ok(String::from_utf8(buf).map_err(|err| AssetError::OtherError(err.to_string()))?)
+        Ok(String::from_utf8(buf).expect("Received invalid string. Reader desynced?"))
     }
 }
 

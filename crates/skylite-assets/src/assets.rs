@@ -1,46 +1,119 @@
+use std::ffi::OsString;
 use std::io::Read;
+#[cfg(target_family = "unix")]
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::base_serde::Deserialize;
 
-macro_rules! format_err {
-    ($msg:literal $(,$args:expr)*) => {
-        AssetError::FormatError(format!($msg, $($args),*))
-    };
+#[cfg(target_family = "unix")]
+pub(crate) fn path_to_native(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes().to_vec()
 }
 
-macro_rules! data_err {
-    ($msg:literal $(,$args:expr)*) => {
-        AssetError::DataError(format!($msg, $($args),*))
-    };
+#[cfg(target_family = "unix")]
+pub(crate) fn native_to_path(bytes: Vec<u8>) -> PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+    PathBuf::from(OsString::from_vec(bytes))
 }
+
+#[cfg(target_family = "windows")]
+pub(crate) fn path_to_native(path: &Path) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+    path.as_os_str()
+        .encode_wide()
+        .map(|c| c.to_ne_bytes())
+        .flatten()
+        .collect()
+}
+
+#[cfg(target_family = "windows")]
+pub(crate) fn native_to_path(bytes: Vec<u8>) -> PathBuf {
+    use std::os::windows::ffi::OsStringExt;
+    let wide: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_ne_bytes([chunk[0], chunk[1]]))
+        .collect();
+    PathBuf::from(OsString::from_wide(&wide))
+}
+
+#[cfg(not(any(target_family = "unix", target_family = "windows")))]
+compile_error!("This platform is currently not supported.");
 
 #[derive(Debug)]
 pub enum AssetError {
     /// An exception was raised within Racket.
-    RacketException(String),
-
-    /// The data format of an asset is incorrect.
-    FormatError(String),
-
-    /// The data for an asset is inconsistent.
-    DataError(String),
+    RacketException {
+        project_root: Option<PathBuf>,
+        asset_file: Option<PathBuf>,
+        asset: Option<String>,
+        message: String,
+    },
 
     /// IO-Error
     IOError(std::io::Error),
+}
 
-    /// Something else went wrong.
-    OtherError(String),
+impl AssetError {
+    pub(crate) fn read(input: &mut impl Read) -> AssetError {
+        let project_root_bytes = match Vec::<u8>::deserialize(input) {
+            Ok(bytes) => bytes,
+            Err(err) => return err,
+        };
+        let asset_file_bytes = match Vec::<u8>::deserialize(input) {
+            Ok(bytes) => bytes,
+            Err(err) => return err,
+        };
+        let asset = match String::deserialize(input) {
+            Ok(s) => s,
+            Err(err) => return err,
+        };
+        let message = match String::deserialize(input) {
+            Ok(s) => s,
+            Err(err) => return err,
+        };
+
+        AssetError::RacketException {
+            project_root: if project_root_bytes.len() > 0 {
+                Some(native_to_path(project_root_bytes))
+            } else {
+                None
+            },
+            asset_file: if asset_file_bytes.len() > 0 {
+                Some(native_to_path(asset_file_bytes))
+            } else {
+                None
+            },
+            asset: if asset.len() > 0 { Some(asset) } else { None },
+            message,
+        }
+    }
 }
 
 impl std::fmt::Display for AssetError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::RacketException(str) => write!(f, "Racket Exception: {}", str),
-            Self::FormatError(str) => write!(f, "Format Error: {}", str),
-            Self::DataError(str) => write!(f, "Data Error: {}", str),
-            Self::IOError(err) => write!(f, "IO Error: {}", err),
-            Self::OtherError(str) => write!(f, "Error: {}", str),
+            Self::RacketException {
+                project_root,
+                asset_file,
+                asset,
+                message,
+            } => {
+                if let Some(file) = asset_file.as_ref().or(project_root.as_ref()) {
+                    write!(f, "{}", file.to_string_lossy())?;
+                    if asset.is_some() {
+                        write!(f, ", ")?;
+                    } else {
+                        write!(f, ": ")?;
+                    }
+                }
+                if let Some(a) = asset {
+                    write!(f, "{a}: ")?;
+                }
+                write!(f, "Error processing asset: {message}")
+            }
+            Self::IOError(err) => write!(f, "IO Error: {err}"),
         }
     }
 }
@@ -67,7 +140,7 @@ impl AssetType {
             1 => Ok(AssetType::Node),
             2 => Ok(AssetType::NodeList),
             3 => Ok(AssetType::Sequence),
-            _ => Err(AssetError::OtherError("Unknown asset type".to_owned())),
+            t @ _ => panic!("Unknown asset type {t}. Reader desynced?"),
         }
     }
 }
@@ -88,8 +161,8 @@ impl AssetMeta {
         let tracked_paths_len = u32::deserialize(input)? as usize;
         let mut tracked_paths = Vec::with_capacity(tracked_paths_len);
         for _ in 0..tracked_paths_len {
-            let path_str = String::deserialize(input)?;
-            tracked_paths.push(PathBuf::from(path_str));
+            let path_bytes = Vec::<u8>::deserialize(input)?;
+            tracked_paths.push(native_to_path(path_bytes));
         }
         Ok(AssetMeta {
             id,
@@ -156,9 +229,7 @@ impl Type {
             }
             16 => Ok(Type::NodeList),
             17 => Ok(Type::Sequence),
-            _ => Err(AssetError::OtherError(
-                "Unknown type. Decoder desynced?".to_owned(),
-            )),
+            t @ _ => panic!("Unknown variable type {t}. Reader desynced?"),
         }
     }
 }
@@ -220,6 +291,7 @@ impl TypedValue {
                 }
                 Ok(TypedValue::Tuple(items))
             }
+            Type::Project => todo!(),
             Type::Node(_) => {
                 let args_len = u32::deserialize(input)? as usize;
                 let mut args = Vec::with_capacity(args_len);
@@ -237,9 +309,6 @@ impl TypedValue {
                 let name = String::deserialize(input)?;
                 Ok(TypedValue::Sequence(name))
             }
-            _ => Err(AssetError::OtherError(
-                "Unsupported type for reading typed value".to_owned(),
-            )),
         }
     }
 }

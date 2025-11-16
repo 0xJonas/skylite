@@ -3,7 +3,9 @@
 (require racket/date)
 (require (for-syntax syntax/parse))
 
-(provide define/trace log/trace start-log-thread tracing-stack)
+(provide define/trace log/trace start-log-thread tracing-stack
+         (struct-out exn:asset) raise-asset-error
+         (struct-out error-context) current-error-context)
 
 (define tracing-stack (make-parameter '()))
 
@@ -69,3 +71,16 @@
 
   (void (thread log-thread))
   (semaphore-wait log-ready))
+
+
+(struct error-context (project-root asset-file asset-name))
+(define current-error-context (make-parameter (error-context #f #f #f)))
+
+(struct exn:asset (context tracing-stack message))
+
+
+(define (raise-asset-error msg . params)
+  (raise
+   (exn:asset (current-error-context)
+              (tracing-stack)
+              (apply format (cons msg params)))))

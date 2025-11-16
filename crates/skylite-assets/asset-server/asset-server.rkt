@@ -9,15 +9,15 @@
 (struct asset-request-params (asset-type asset-name))
 
 
-; Request Header:
-; - request type: 1 Byte
-; - project-root length: 2 Byte
-; - project root string
 (define (read-request-header in)
   (let ([req-type (read-byte in)])
     (if (eof-object? req-type)
         #f
-        (request-header req-type (string->path (deserialize-obj in 'string))))))
+        (request-header req-type
+                        (bytes->path
+                         (list->bytes
+                          (vector->list
+                           (deserialize-obj in '(vec . u8)))))))))
 
 
 (define (asset-type->id type)
@@ -40,37 +40,53 @@
   (case (request-header-type request)
     [(0)
      (define asset-type (id->asset-type (deserialize-obj in 'u8)))
-     (define asset-name (deserialize-obj in 'string))
+     (define asset-name (string->symbol (deserialize-obj in 'string)))
      (asset-request-params asset-type asset-name)]
     [(1) '()]))
 
 
 (define (serialize-asset-meta out id asset)
   (serialize-obj out 'u32 id)
-  (serialize-obj out 'string (asset-name asset))
+  (serialize-obj out 'string (symbol->string (asset-name asset)))
   (serialize-obj out 'u8 (asset-type->id (asset-type asset)))
 
   (define tracked-paths
     (vector-append
      (for/vector ([tp (asset-tracked-paths asset)])
-       (path->string (car tp)))
-     (vector (path->string (asset-file asset)))))
-  (serialize-obj out '(vec . string) tracked-paths))
+       (list->vector (bytes->list (path->bytes (car tp)))))
+     (vector (list->vector (bytes->list (path->bytes (asset-file asset)))))))
+  (serialize-obj out '(vec . (vec . u8)) tracked-paths))
+
+
+(define (error-response out exn)
+  (serialize-obj out 'u8 1) ; Result err
+  (let ([context (exn:asset-context exn)])
+    (serialize-obj out 'string (if (error-context-project-root context)
+                                   (path->string (error-context-project-root context))
+                                   ""))
+    (serialize-obj out 'string (if (error-context-asset-file context)
+                                   (path->string (error-context-asset-file context))
+                                   ""))
+    (serialize-obj out 'string (if (error-context-asset-name context)
+                                   (symbol->string (error-context-asset-name context))
+                                   "")))
+  (serialize-obj out 'string (exn:asset-message exn)))
 
 
 (define (process-request header params out)
   (case (request-header-type header)
     [(0)
      (define project-root (request-header-project-root header))
-     (parameterize ([current-project (retrieve-project project-root)])
-       (define-values (asset asset-data) (retrieve-asset (asset-request-params-asset-type params)
-                                                         (asset-request-params-asset-name params)))
-       (define asset-id (compute-asset-id project-root asset))
-       (serialize-obj out 'u8 0) ; Result ok
-       (serialize-asset-meta out asset-id asset)
-       (match (asset-type asset)
-         ['node (serialize-node out asset-data)]
-         ['node-list (serialize-node-list out asset-data)]))
+     (with-handlers ([exn:asset? (lambda (exn) (error-response out exn))])
+       (parameterize ([current-project (retrieve-project project-root)])
+         (define-values (asset asset-data) (retrieve-asset (asset-request-params-asset-type params)
+                                                           (asset-request-params-asset-name params)))
+         (define asset-id (compute-asset-id project-root asset))
+         (serialize-obj out 'u8 0) ; Result ok
+         (serialize-asset-meta out asset-id asset)
+         (match (asset-type asset)
+           ['node (serialize-node out asset-data)]
+           ['node-list (serialize-node-list out asset-data)])))
      (flush-output out)]
     [(1)
      (define project (retrieve-project (request-header-project-root header)))

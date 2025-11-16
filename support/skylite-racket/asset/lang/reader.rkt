@@ -13,9 +13,10 @@
 (define (skylite-read-syntax source-name in)
   (let* ([asset-file (path->bytes (file-name-from-path source-name))]
          [asset-extension (or (path-get-extension source-name) #"")]
-         [asset-name (bytes->string/utf-8
-                      (subbytes asset-file 0 (- (bytes-length  asset-file)
-                                                (bytes-length asset-extension))))]
+         [asset-name (string->symbol
+                      (bytes->string/utf-8
+                       (subbytes asset-file 0 (- (bytes-length  asset-file)
+                                                 (bytes-length asset-extension)))))]
          [asset-type-syntax (read-syntax source-name in)]
          [asset-type (eval (syntax->datum asset-type-syntax))]
          [forms (for/list (#:when (not (eof-object? (peek-byte in))))

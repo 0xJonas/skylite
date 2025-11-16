@@ -52,7 +52,7 @@
        (serialize-obj out item-type item))]
     ['project (serialize-obj out 'string (symbol->string value))]
     [(cons 'node name)
-     (define-values (_ asset-data) (retrieve-asset 'node (symbol->string name)))
+     (define-values (_ asset-data) (retrieve-asset 'node name))
      (define parameters (cdr (or (assq 'parameters asset-data) '(parameters . ()))))
      (for ([p parameters] [v (cdr value)])
        (serialize-obj out 'type (cadr p))

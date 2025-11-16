@@ -56,7 +56,7 @@ pub fn load_node(project_path: &Path, name: &str) -> Result<Node, AssetError> {
     if status[0] == 0 {
         Ok(Node::read(&mut connection)?)
     } else {
-        todo!()
+        Err(AssetError::read(&mut connection))
     }
 }
 
@@ -104,7 +104,7 @@ pub fn load_node_list(project_path: &Path, name: &str) -> Result<NodeList, Asset
     if status[0] == 0 {
         Ok(NodeList::read(&mut connection)?)
     } else {
-        todo!()
+        Err(AssetError::read(&mut connection))
     }
 }
 

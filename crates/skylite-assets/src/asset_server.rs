@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 
 use crate::assets::{AssetError, AssetType};
 use crate::base_serde::Serialize;
+use crate::path_to_native;
 
 const SERVER_SOCKET: &'static str = "socket";
 const SERVER_LOCK: &'static str = "lock";
@@ -174,13 +175,8 @@ impl AssetServerConnection {
         name: &str,
     ) -> Result<(), AssetError> {
         REQ_TYPE_RETRIEVE_ASSET.serialize(self)?;
-        project_path
-            .to_str()
-            .ok_or_else(|| AssetError::OtherError("Invalid project path".to_owned()))
-            .and_then(|s| {
-                s.serialize(self)?;
-                Ok(())
-            })?;
+        path_to_native(project_path).as_slice().serialize(self)?;
+
         match atype {
             AssetType::Project => 0u8.serialize(self)?,
             AssetType::Node => 1u8.serialize(self)?,

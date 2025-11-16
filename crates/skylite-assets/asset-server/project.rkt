@@ -21,33 +21,38 @@
 
 (define (raw->asset raw asset-file)
   (unless (pair? raw)
-    (raise-user-error "Invalid asset in ~a: expected pair [\"<name>\" . <definition>]" asset-file))
+    (raise-asset-error "Invalid asset in ~a: expected pair [\"<name>\" . <definition>]" asset-file))
   (define name (car raw))
+  (unless (symbol? name)
+    (raise-asset-error "Asset name must be a symbol, got ~v" name))
   (define asset-def (cdr raw))
-  (define (invalid msg)
-    (raise-user-error 'raw->asset "Invalid definition for asset ~v (~a): ~a" name asset-file msg))
 
-  (unless (list? asset-def) (invalid "Body must be an associative list."))
+  (unless (list? asset-def) (raise-asset-error "Body must be an associative list"))
 
   (define type (cdr (or (assq 'type asset-def)
-                        (invalid "Missing required field 'type."))))
-  (unless (memq type '(project node node-list sequence)) (invalid (format "~v is not a valid type." type)))
+                        (raise-asset-error "Missing required field 'type"))))
+  (unless (memq type '(project node node-list sequence)) (raise-asset-error "~v is not a valid type" type))
 
   (define get (cdr (or (assq 'get asset-def)
-                       (invalid "Missing required field 'get."))))
-  (unless (procedure? get) (invalid "'get must be a procedure."))
+                       (raise-asset-error "Missing required field 'get"))))
+  (unless (procedure? get) (raise-asset-error "'get must be a procedure"))
 
+  (define base-path (path-only asset-file))
   (define tracked-paths-raw (cdr (or (assq 'tracked-paths asset-def) '(tracked-paths . ()))))
-  (unless (and (list? tracked-paths-raw)
-               (for/and ([p tracked-paths-raw]) (string? p)))
-    (invalid "'tracked-paths must be a list of strings."))
-  (define tracked-paths
-    (map (lambda (p)
-           (let ([tracked-path (build-path (path-only asset-file) p)])
-             (cons tracked-path (sha256-bytes (open-input-file tracked-path)))))
-         tracked-paths-raw))
+  (unless (list? tracked-paths-raw)
+    (raise-asset-error "'tracked-paths must be a list of paths, got ~v" tracked-paths-raw))
 
-  (asset name type asset-file tracked-paths get))
+  (define tracked-paths
+    (for/list ([p tracked-paths-raw])
+      (cond
+        [(path? p) (build-path base-path p)]
+        [(string? p) (build-path base-path (string->path p))]
+        [else (raise-asset-error "'tracked-paths element not a string or path: ~v" p)])))
+
+  (define tracked-paths-with-hash
+    (for/list ([p tracked-paths]) (cons p (sha256-bytes (open-input-file p)))))
+
+  (asset name type asset-file tracked-paths-with-hash get))
 
 
 (define (load-assets-from-file path)
@@ -56,8 +61,11 @@
       (parameterize ([current-namespace ns])
         (dynamic-require path 'skylite-assets))))
 
-  (for/list ([raw-asset raw-assets])
-    (raw->asset raw-asset path)))
+  (parameterize ([current-error-context
+                  (struct-copy error-context (current-error-context)
+                               [asset-file path])])
+    (for/list ([raw-asset raw-assets])
+      (raw->asset raw-asset path))))
 
 
 (define (file-changed? path last-check-timestamp last-check-hash)
@@ -177,18 +185,19 @@
   #:enter 'debug (format "Retrieving project ~a" project-root)
   #:exit 'debug (format "Finished loading project ~a" project-root)
 
-  (define prev-project (hash-ref open-projects project-root #f))
+  (parameterize ([current-error-context (error-context project-root #f #f)])
+    (define prev-project (hash-ref open-projects project-root #f))
 
-  (if (and prev-project
-           (for/and ([asset-file (project-asset-files prev-project)])
-             (not (file-changed? (car asset-file) (project-last-check-timestamp prev-project) (cdr asset-file)))))
-      ; Fast path: no asset files changed
-      prev-project
+    (if (and prev-project
+             (for/and ([asset-file (project-asset-files prev-project)])
+               (not (file-changed? (car asset-file) (project-last-check-timestamp prev-project) (cdr asset-file)))))
+        ; Fast path: no asset files changed
+        prev-project
 
-      ; Project was not open or some files have changed
-      (let ([new-project (load-or-update-project prev-project project-root)])
-        (set! open-projects (hash-set open-projects project-root new-project))
-        new-project)))
+        ; Project was not open or some files have changed
+        (let ([new-project (load-or-update-project prev-project project-root)])
+          (set! open-projects (hash-set open-projects project-root new-project))
+          new-project))))
 
 
 (define (list-assets)
@@ -217,48 +226,52 @@
 
 (define/trace (retrieve-asset req-type req-name)
   #:enter 'debug (format "Retrieving asset ~a from project ~a" req-name (project-root-asset-file (current-project)))
+  (parameterize ([current-error-context (error-context (project-root-asset-file (current-project)) #f #f)])
 
-  (define asset-key (cons (project-root-asset-file (current-project)) req-name))
-  (define asset-inst (hash-ref open-assets asset-key
-                               (lambda () (raise-user-error 'retrieve-asset "Asset ~v not found in project ~a" req-name (project-root-asset-file (current-project))))))
-  (unless (eq? (asset-type asset-inst) req-type)
-    (raise-user-error 'retrieve-asset "Asset ~v in project ~a does not have type ~a" req-name (project-root-asset-file (current-project)) req-type))
+    (define asset-key (cons (project-root-asset-file (current-project)) req-name))
+    (define asset-inst (hash-ref open-assets asset-key
+                                 (lambda () (raise-asset-error "Asset ~v not found in project ~a" req-name (project-root-asset-file project)))))
+    (unless (eq? (asset-type asset-inst) req-type)
+      (raise-asset-error "Asset ~v in project ~a does not have type ~v" req-name (project-root-asset-file project) req-type))
 
-  (define asset-file-hash (cdr (assoc (asset-file asset-inst) (project-asset-files (current-project)))))
-  (define cached-entry (hash-ref asset-cache asset-key #f))
+    (define asset-file-hash (cdr (assoc (asset-file asset-inst) (project-asset-files (current-project)))))
+    (define cached-entry (hash-ref asset-cache asset-key #f))
 
-  (define tracked-paths-changed-hash
-    (for/list ([tp (asset-tracked-paths asset-inst)])
-      (file-changed? (car tp) (project-last-check-timestamp (current-project)) (cdr tp))))
-  (define new-tracked-paths
-    (for/list ([tp (asset-tracked-paths asset-inst)]
-               [ch tracked-paths-changed-hash])
-      (if ch (cons (car tp) ch) tp)))
+    (define tracked-paths-changed-hash
+      (for/list ([tp (asset-tracked-paths asset-inst)])
+        (file-changed? (car tp) (project-last-check-timestamp (current-project)) (cdr tp))))
+    (define new-tracked-paths
+      (for/list ([tp (asset-tracked-paths asset-inst)]
+                 [ch tracked-paths-changed-hash])
+        (if ch (cons (car tp) ch) tp)))
 
-  (define/trace (eval-asset)
-    #:enter 'info (format "Evaluating asset ~a in project ~a" req-name (project-root-asset-file (current-project)))
-    ((asset-thunk asset-inst)))
+    (define/trace (eval-asset)
+      #:enter 'info (format "Evaluating asset ~a in project ~a" req-name (project-root-asset-file (current-project)))
+      ((asset-thunk asset-inst)))
 
-  (if (and cached-entry
-           (equal? asset-file-hash (car cached-entry))
-           (not (for/or ([t tracked-paths-changed-hash]) t)))
-      ; Cache entry still valid
-      (values asset-inst (cdr cached-entry))
+    (if (and cached-entry
+             (equal? asset-file-hash (car cached-entry))
+             (not (for/or ([t tracked-paths-changed-hash]) t)))
+        ; Cache entry still valid
+        (values asset-inst (cdr cached-entry))
 
-      ; Cache entry does not exist or is no longer valid
-      (let ([asset-data (eval-asset)]
-            [new-asset (struct-copy asset asset-inst [tracked-paths new-tracked-paths])])
-        (validate-asset req-type asset-data)
-        (set! asset-cache (hash-set asset-cache asset-key (cons asset-file-hash asset-data)))
-        (set! open-assets (hash-set open-assets asset-key new-asset))
-        (values asset-inst asset-data))))
+        ; Cache entry does not exist or is no longer valid
+        (parameterize ([current-error-context (struct-copy error-context (current-error-context)
+                                                           [asset-file (asset-file asset-inst)]
+                                                           [asset-name (asset-name asset-inst)])])
+          (let ([asset-data (eval-asset)]
+                [new-asset (struct-copy asset asset-inst [tracked-paths new-tracked-paths])])
+            (validate-asset req-type asset-data)
+            (set! asset-cache (hash-set asset-cache asset-key (cons asset-file-hash asset-data)))
+            (set! open-assets (hash-set open-assets asset-key new-asset))
+            (values asset-inst asset-data))))))
 
 
 (define (compute-asset-id project-root asset-inst)
   (for/fold ([id 0]) ([entry (hash->list open-assets)])
     (if (and (equal? project-root (caar entry))
              (eq? (asset-type (cdr entry)) (asset-type asset-inst))
-             (string<? (cdar entry) (asset-name asset-inst)))
+             (symbol<? (cdar entry) (asset-name asset-inst)))
         (+ 1 id)
         id)))
 
@@ -280,7 +293,7 @@
             #:exists 'append))
         (log-eval \"~a-file\")
         (define skylite-assets
-          `([~v . ([type . ,~v]
+          `([,~v . ([type . ,~v]
                    [get . ,(lambda () (log-eval \"~a-asset\") asset)]
                    [tracked-paths . ,~v])]))"
        content (path->string (build-path base-dir "eval.log")) name name type name tracked-paths))
@@ -289,11 +302,11 @@
 
   (define (setup-test-project)
     (define-asset (build-path base-dir "project.rkt")
-      "project" 'project "'([name . test] [assets . (\"./node-1.rkt\")])" '())
+      'project 'project "'([name . test] [assets . (\"./node-1.rkt\")])" '())
     (define-asset (build-path base-dir "node-1.rkt")
-      "node-1" 'node "'()" '())
+      'node-1 'node "'()" '())
     (define-asset (build-path base-dir "node-2.rkt")
-      "node-2" 'node "'()" '("./node-1.rkt"))
+      'node-2 'node "'()" '("./node-1.rkt"))
     (void))
 
 
@@ -318,37 +331,38 @@
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\n")
 
   ; Retrieving a node for the first time should evaluate its asset thunk.
-  (let-values ([(_1 _2) (retrieve-asset 'node "node-1")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node 'node-1)]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\n")
 
+
   ; Retrieving a node again without intermediate changes should not evaluate anything.
-  (let-values ([(_1 _2) (retrieve-asset 'node "node-1")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node 'node-1)]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\n")
 
   ; Changing an asset file should cause it to be evaluated again.
   (void (define-asset (build-path base-dir "node-1.rkt")
-          "node-1" 'node "(list)" '()))
+          'node-1 'node "(list)" '()))
   (current-project (retrieve-project project-root))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\n")
 
   ; The asset itself also has to be reevaluated.
-  (let-values ([(_1 _2) (retrieve-asset 'node "node-1")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node 'node-1)]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\n")
 
   ; Changing the project root should cause it to be evaluated again, as well as any new asset files.
   (void (define-asset (build-path base-dir "project.rkt")
-          "project" 'project "'([name . test] [assets . (\"./node-2.rkt\")])" '()))
+          'project 'project "'([name . test] [assets . (\"./node-2.rkt\")])" '()))
   (current-project (retrieve-project (build-path base-dir "project.rkt")))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\n")
 
   ; Changing a tracked path should reevaluate the affected asset.
-  (let-values ([(_1 _2) (retrieve-asset 'node "node-2")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node 'node-2)]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\n")
   (void (define-asset (build-path base-dir "node-1.rkt")
-          "node-1" 'node "'()" '()))
-  (let-values ([(_1 _2) (retrieve-asset 'node "node-2")]) (void))
+          'node-1 'node "'()" '()))
+  (let-values ([(_1 _2) (retrieve-asset 'node 'node-2)]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\nnode-2-asset\n")
 
   ; Retrieving the asset again should not evaluate anything.
-  (let-values ([(_1 _2) (retrieve-asset 'node "node-2")]) (void))
+  (let-values ([(_1 _2) (retrieve-asset 'node 'node-2)]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\nnode-2-asset\n"))
