@@ -217,11 +217,9 @@
 
   (match type
     ['project #t]
-    ['node (validate-node asset-data (lambda (type asset-name) (asset-exists? type asset-name)))]
-    ['node-list (validate-node-list asset-data
-                                    (lambda (type asset-name) (asset-exists? type asset-name))
-                                    retrieve-node)]
-    ['sequence #t]))
+    ['node (validate-node asset-data asset-exists?)]
+    ['node-list (validate-node-list asset-data asset-exists? retrieve-node)]
+    ['sequence (validate-sequence asset-data asset-exists? retrieve-node)]))
 
 
 (define/trace (retrieve-asset req-type req-name)
