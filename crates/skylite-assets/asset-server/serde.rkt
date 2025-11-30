@@ -1,6 +1,7 @@
 #lang racket
 
 (require "./project.rkt")
+(require "./types.rkt")
 
 (provide serialize-obj deserialize-obj serialize-node serialize-node-list)
 
@@ -51,12 +52,10 @@
      (for ([item-type item-types] [item value])
        (serialize-obj out item-type item))]
     ['project (serialize-obj out 'string (symbol->string value))]
-    [(cons 'node name)
-     (define-values (_ asset-data) (retrieve-asset 'node name))
-     (define parameters (cdr (or (assq 'parameters asset-data) '(parameters . ()))))
-     (for ([p parameters] [v (cdr value)])
-       (serialize-obj out 'type (cadr p))
-       (serialize-obj out (cadr p) v))]
+    [(cons 'node _)
+     (for ([arg (cdr value)])
+       (serialize-obj out 'type (car arg))
+       (serialize-obj out (car arg) (cdr arg)))]
     ['node-list (serialize-obj out 'string (symbol->string value))]
     ['sequence (serialize-obj out 'string (symbol->string value))])
   (void))
@@ -84,24 +83,16 @@
     [(list item-types ...) (for/list ([item-type item-types]) (deserialize-obj in item-type))]))
 
 
-(define (serialize-node out asset-data)
-  (define param-pair (assq 'parameters asset-data))
-  (if param-pair
-      (let ([parameters (cdr param-pair)])
-        (serialize-obj out 'u32 (length parameters))
-        (for ([var parameters])
-          (serialize-obj out 'string (symbol->string (car var)))
-          (serialize-type out (cadr var))))
-      (serialize-obj out 'u32 0))
+(define (serialize-node out node)
+  (serialize-obj out 'u32 (length (node-parameters node)))
+  (for ([var (node-parameters node)])
+    (serialize-obj out 'string (symbol->string (car var)))
+    (serialize-type out (cadr var)))
 
-  (define prop-pair (assq 'properties asset-data))
-  (if prop-pair
-      (let ([properties (cdr prop-pair)])
-        (serialize-obj out 'u32 (length properties))
-        (for ([var properties])
-          (serialize-obj out 'string (symbol->string (car var)))
-          (serialize-type out (cadr var))))
-      (serialize-obj out 'u32 0)))
+  (serialize-obj out 'u32 (length (node-properties node)))
+  (for ([var (node-properties node)])
+    (serialize-obj out 'string (symbol->string (car var)))
+    (serialize-type out (cadr var))))
 
 
 (define (serialize-node-list out asset-data)

@@ -2,7 +2,8 @@
 
 (require file/glob)
 (require "./log-trace.rkt")
-(require "./validate.rkt")
+(require "./nodes.rkt")
+(require "./sequences.rkt")
 
 (provide current-project retrieve-project list-assets asset-exists? retrieve-asset compute-asset-id
          (struct-out project)
@@ -210,16 +211,22 @@
   (and asset-inst (eq? (asset-type asset-inst) req-type)))
 
 
-(define (validate-asset type asset-data)
+; Refining an asset performes multiple transformations to make
+; further usage of the asset easier, such as:
+; - Type checking and general validation.
+; - Adding explicit type information to certain values, e.g. in node instances and sequences.
+; - Renaming local backwards/forwards labels in sequences to regular labels.
+; Assets are stored in their refined form in the asset cache.
+(define (refine-asset type asset-data)
   (define (retrieve-node node-name)
     (let-values ([(_ data) (retrieve-asset 'node node-name)])
       data))
 
   (match type
     ['project #t]
-    ['node (validate-node asset-data asset-exists?)]
-    ['node-list (validate-node-list asset-data asset-exists? retrieve-node)]
-    ['sequence (validate-sequence asset-data asset-exists? retrieve-node)]))
+    ['node (refine-node asset-data asset-exists?)]
+    ['node-list (refine-node-list asset-data asset-exists? retrieve-node)]
+    ['sequence (refine-sequence asset-data asset-exists? retrieve-node)]))
 
 
 (define/trace (retrieve-asset req-type req-name)
@@ -257,12 +264,12 @@
         (parameterize ([current-error-context (struct-copy error-context (current-error-context)
                                                            [asset-file (asset-file asset-inst)]
                                                            [asset-name (asset-name asset-inst)])])
-          (let ([asset-data (eval-asset)]
-                [new-asset (struct-copy asset asset-inst [tracked-paths new-tracked-paths])])
-            (validate-asset req-type asset-data)
-            (set! asset-cache (hash-set asset-cache asset-key (cons asset-file-hash asset-data)))
+          (let* ([asset-data (eval-asset)]
+                 [new-asset (struct-copy asset asset-inst [tracked-paths new-tracked-paths])]
+                 [refined-data (refine-asset req-type asset-data)])
+            (set! asset-cache (hash-set asset-cache asset-key (cons asset-file-hash refined-data)))
             (set! open-assets (hash-set open-assets asset-key new-asset))
-            (values asset-inst asset-data))))))
+            (values asset-inst refined-data))))))
 
 
 (define (compute-asset-id project-root asset-inst)
