@@ -235,7 +235,7 @@
 
     (define asset-key (cons (project-root-asset-file (current-project)) req-name))
     (define asset-inst (hash-ref open-assets asset-key
-                                 (lambda () (raise-asset-error "Asset ~v not found in project ~a" req-name (project-root-asset-file project)))))
+                                 (lambda () (raise-asset-error "Asset ~v not found in project ~a" req-name (project-root-asset-file (current-project))))))
     (unless (eq? (asset-type asset-inst) req-type)
       (raise-asset-error "Asset ~v in project ~a does not have type ~v" req-name (project-root-asset-file project) req-type))
 
@@ -338,7 +338,6 @@
   ; Retrieving a node for the first time should evaluate its asset thunk.
   (let-values ([(_1 _2) (retrieve-asset 'node 'node-1)]) (void))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\n")
-
 
   ; Retrieving a node again without intermediate changes should not evaluate anything.
   (let-values ([(_1 _2) (retrieve-asset 'node 'node-1)]) (void))
