@@ -223,7 +223,7 @@
       data))
 
   (match type
-    ['project #t]
+    ['project asset-data]
     ['node (refine-node asset-data asset-exists?)]
     ['node-list (refine-node-list asset-data asset-exists? retrieve-node)]
     ['sequence (refine-sequence asset-data asset-exists? retrieve-node)]))
