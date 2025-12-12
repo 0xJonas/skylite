@@ -1,9 +1,8 @@
 #lang racket
 
-(require "./project.rkt")
 (require "./types.rkt")
 
-(provide serialize-obj deserialize-obj serialize-node serialize-node-list)
+(provide serialize-obj deserialize-obj serialize-node serialize-node-list serialize-sequence)
 
 
 (define (serialize-type out type)
@@ -101,6 +100,99 @@
     (serialize-obj out 'string (symbol->string (car inst)))
     (serialize-obj out 'u32 (length (cdr inst)))
     (serialize-obj out (cons 'node (car inst)) inst)))
+
+
+(define (serialize-sequence out sequence)
+  (define (serialize-instruction inst)
+    (case (car inst)
+      [(push-offset)
+       (serialize-obj out 'u8 0)
+       (serialize-obj out 'string (cadr inst)) ; node
+       (serialize-obj out 'string (caddr inst)) ; property
+       ]
+      [(set)
+       (serialize-obj out 'u8 1)
+       (serialize-obj out 'type (caadr inst)) ; type
+       (serialize-obj out (caadr inst) (cdadr inst)) ; value
+       ]
+      [(set-string)
+       (serialize-obj out 'u8 2)
+       (serialize-obj out 'string (cadr inst)) ; value
+       ]
+      [(modify)
+       (serialize-obj out 'u8 3)
+       (serialize-obj out 'type (caadr inst)) ; type
+       (serialize-obj out (caadr inst) (cdadr inst)) ; value
+       ]
+      [(modify-f32)
+       (serialize-obj out 'u8 4)
+       (serialize-obj out 'f32 (cadr inst)) ; value
+       ]
+      [(modify-f64)
+       (serialize-obj out 'u8 5)
+       (serialize-obj out 'f64 (cadr inst)) ; value
+       ]
+      [(branch-if-true)
+       (serialize-obj out 'u8 6)
+       (serialize-obj out 'u32 (cadr inst)) ; target
+       ]
+      [(branch-if-false)
+       (serialize-obj out 'u8 7)
+       (serialize-obj out 'u32 (cadr inst)) ; target
+       ]
+      [(branch-uint)
+       (serialize-obj out 'u8 8)
+       (serialize-obj out 'u8 (cadr inst)) ; comparison op
+       (serialize-obj out 'type (caaddr inst)) ; type
+       (serialize-obj out (caaddr inst) (cdaddr inst)) ; value
+       (serialize-obj out 'u32 (cadddr inst)) ; target
+       ]
+      [(branch-sint)
+       (serialize-obj out 'u8 9)
+       (serialize-obj out 'u8 (cadr inst)) ; comparison op
+       (serialize-obj out 'type (caaddr inst)) ; type
+       (serialize-obj out (caaddr inst) (cdaddr inst)) ; value
+       (serialize-obj out 'u32 (cadddr inst)) ; target
+       ]
+      [(branch-f32)
+       (serialize-obj out 'u8 10)
+       (serialize-obj out 'u8 (cadr inst)) ; comparison op
+       (serialize-obj out 'f32 (caddr inst)) ; value
+       (serialize-obj out 'u32 (cadddr inst)) ; target
+       ]
+      [(branch-f64)
+       (serialize-obj out 'u8 11)
+       (serialize-obj out 'u8 (cadr inst)) ; comparison op
+       (serialize-obj out 'f64 (caddr inst)) ; value
+       (serialize-obj out 'u32 (cadddr inst)) ; target
+       ]
+      [(jump)
+       (serialize-obj out 'u8 12)
+       (serialize-obj out 'u32 (cadr inst)) ; target
+       ]
+      [(call)
+       (serialize-obj out 'u8 13)
+       (serialize-obj out 'u32 (cadr inst)) ; target
+       ]
+      [(return) (serialize-obj out 'u8 14)]
+      [(wait)
+       (serialize-obj out 'u8 15)
+       (serialize-obj out 'u16 (cadr inst)) ; frames
+       ]
+      [(run-custom)
+       (serialize-obj out 'u8 16)
+       (serialize-obj out 'string (cadr inst)) ; fname
+       ]
+      [(branch-custom)
+       (serialize-obj out 'u8 17)
+       (serialize-obj out 'string (cadr inst)) ; fname
+       (serialize-obj out 'u32 (caddr inst)) ; target
+       ]))
+
+  (serialize-obj out 'string (sequence-node sequence))
+  (serialize-obj out 'u32 (length (sequence-script sequence)))
+  (for ([inst (sequence-script sequence)])
+    (serialize-instruction inst)))
 
 
 (module+ test

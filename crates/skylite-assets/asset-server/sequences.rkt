@@ -258,7 +258,7 @@
 
   (define (compile-branch condition target)
     (define (comparison->byte comp)
-      (case comp [(=) 2] [(!=) 3] [(<) 4] [(>) 5] [(<=) 6] [(>=) 7]))
+      (case comp [(=) 0] [(!=) 1] [(<) 2] [(>) 3] [(<=) 4] [(>=) 5]))
 
     (unless (symbol? target) (raise-asset-error "Target for 'branch' instruction must be a symbol, got ~v" target))
     (match condition
@@ -321,13 +321,13 @@
       [(list 'run-custom fname)
        (unless (symbol? fname)
          (raise-asset-error "'run-custom' instruction expects a symbol as function name, got ~v" fname))
-       (list inst)]
+       `((run-custom ,(symbol->string fname)))]
 
       [(list 'branch-custom fname target)
        (unless (symbol? fname)
          (raise-asset-error "'run-custom' instruction expects a symbol as function name, got ~v" fname))
        (unless (symbol? target) (raise-asset-error "Target for 'branch-custom' instruction must be a symbol, got ~v" target))
-       (list inst)]
+       `((branch-custom ,(symbol->string fname) ,target))]
 
       [_ (raise-asset-error "Unknown instruction ~v" inst)]))
 
@@ -365,7 +365,7 @@
   (define merged-script (merge-scripts compiled-scripts))
   (define resolved-script (resolve-labels merged-script))
 
-  (sequence target-node resolved-script))
+  (sequence (symbol->string target-node) resolved-script))
 
 
 (module+ test
@@ -415,17 +415,17 @@
       (push-offset "node1" "prop2")
       (branch-if-false 0)
       (push-offset "node1" "prop1")
-      (branch-uint 2 (u8 . 5) 0)    ; 15
+      (branch-uint 0 (u8 . 5) 0)    ; 15
       (push-offset "node1" "prop7")
-      (branch-sint 4 (i8 . 6) 0)
+      (branch-sint 2 (i8 . 6) 0)
       (push-offset "node1" "prop5")
-      (branch-f32 5 5.0 0)
+      (branch-f32 3 5.0 0)
       (push-offset "node1" "prop6") ; 20
-      (branch-f64 7 -5.0 0)
+      (branch-f64 5 -5.0 0)
       (jump 0)
       (call 27)
-      (run-custom test-fn)
-      (branch-custom branch-fn 0)   ; 25
+      (run-custom "test-fn")
+      (branch-custom "branch-fn" 0)   ; 25
       (return)
       (return)))
 

@@ -86,7 +86,8 @@
          (serialize-asset-meta out asset-id asset)
          (match (asset-type asset)
            ['node (serialize-node out asset-data)]
-           ['node-list (serialize-node-list out asset-data)])))
+           ['node-list (serialize-node-list out asset-data)]
+           ['sequence (serialize-sequence out asset-data)])))
      (flush-output out)]
     [(1)
      (define project (retrieve-project (request-header-project-root header)))
