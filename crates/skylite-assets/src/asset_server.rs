@@ -192,4 +192,22 @@ impl AssetServerConnection {
         self.flush()?;
         Ok(())
     }
+
+    pub(crate) fn send_list_asset_request(
+        &mut self,
+        project_path: &Path,
+        atype: AssetType,
+    ) -> Result<(), AssetError> {
+        REQ_TYPE_LIST_ASSETS.serialize(self)?;
+        path_to_native(project_path).as_slice().serialize(self)?;
+
+        match atype {
+            AssetType::Project => 0u8.serialize(self)?,
+            AssetType::Node => 1u8.serialize(self)?,
+            AssetType::NodeList => 2u8.serialize(self)?,
+            AssetType::Sequence => 3u8.serialize(self)?,
+        }
+        self.flush()?;
+        Ok(())
+    }
 }

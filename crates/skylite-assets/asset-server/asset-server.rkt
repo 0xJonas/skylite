@@ -7,6 +7,7 @@
 
 (struct request-header (type project-root))
 (struct asset-request-params (asset-type asset-name))
+(struct list-assets-request-params (asset-type))
 
 
 (define (read-request-header in)
@@ -42,7 +43,9 @@
      (define asset-type (id->asset-type (deserialize-obj in 'u8)))
      (define asset-name (string->symbol (deserialize-obj in 'string)))
      (asset-request-params asset-type asset-name)]
-    [(1) '()]))
+    [(1)
+     (define asset-type (id->asset-type (deserialize-obj in 'u8)))
+     (list-assets-request-params asset-type)]))
 
 
 (define (serialize-asset-meta out id asset)
@@ -90,10 +93,16 @@
            ['sequence (serialize-sequence out asset-data)])))
      (flush-output out)]
     [(1)
-     (define project (retrieve-project (request-header-project-root header)))
-     (list-assets project)
-     ; TODO: Serialize
-     ]))
+     (define project-root (request-header-project-root header))
+     (with-handlers ([exn:asset? (lambda (exn) (error-response out exn))])
+       (parameterize ([current-project (retrieve-project project-root)])
+         (define assets (list-assets (list-assets-request-params-asset-type params)))
+         (define num-assets (length assets))
+         (serialize-obj out 'u8 0) ; Result ok
+         (serialize-obj out 'u32 num-assets)
+         (for ([asset assets] [id (build-list num-assets values)])
+           (serialize-asset-meta out id asset))))
+     (flush-output out)]))
 
 
 (define (server-thread in out)

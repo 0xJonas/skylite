@@ -201,8 +201,16 @@
           new-project))))
 
 
-(define (list-assets)
-  (filter (lambda (k) (equal? (car k) (project-root-asset-file (current-project)))) (hash-keys open-assets)))
+(define (list-assets type)
+  (define sorted-assets
+    (sort
+     (filter (lambda (entry)
+               (and (equal? (caar entry) (project-root-asset-file (current-project)))
+                    (eq? (asset-type (cdr entry)) type)))
+             (hash->list open-assets))
+     symbol<?
+     #:key cdar))
+  (map cdr sorted-assets))
 
 
 (define (asset-exists? req-type req-name)

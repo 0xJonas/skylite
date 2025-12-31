@@ -4,6 +4,7 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::asset_server::connect_to_asset_server;
 use crate::base_serde::Deserialize;
 
 #[cfg(target_family = "unix")]
@@ -173,6 +174,24 @@ impl AssetMeta {
     }
 }
 
+pub fn list_assets(project_path: &Path, atype: AssetType) -> Result<Vec<AssetMeta>, AssetError> {
+    let mut connection = connect_to_asset_server()?;
+    connection.send_list_asset_request(project_path, atype)?;
+
+    let mut status = [0u8; 1];
+    connection.read_exact(&mut status)?;
+    if status[0] == 0 {
+        let num_assets = u32::deserialize(&mut connection)? as usize;
+        let mut out = Vec::with_capacity(num_assets);
+        for _ in 0..num_assets {
+            out.push(AssetMeta::read(&mut connection)?);
+        }
+        Ok(out)
+    } else {
+        Err(AssetError::read(&mut connection))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     U8,
@@ -310,5 +329,41 @@ impl TypedValue {
                 Ok(TypedValue::Sequence(name))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{list_assets, AssetMeta, AssetType};
+
+    #[test]
+    fn test_list_assets() {
+        let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("./tests/test-project")
+            .canonicalize()
+            .unwrap();
+
+        let nodes = list_assets(&project_dir.join("project.rkt"), AssetType::Node).unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(
+            nodes[0],
+            AssetMeta {
+                asset_type: AssetType::Node,
+                id: 0,
+                name: "node1".to_owned(),
+                tracked_paths: vec![project_dir.join("assets/node1.rkt")]
+            }
+        );
+        assert_eq!(
+            nodes[1],
+            AssetMeta {
+                asset_type: AssetType::Node,
+                id: 1,
+                name: "node2".to_owned(),
+                tracked_paths: vec![project_dir.join("assets/node2.rkt")]
+            }
+        );
     }
 }
