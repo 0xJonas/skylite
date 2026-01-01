@@ -2,6 +2,7 @@
 
 (require file/glob)
 (require "./log-trace.rkt")
+(require "./project-assets.rkt")
 (require "./nodes.rkt")
 (require "./sequences.rkt")
 
@@ -104,7 +105,7 @@
   (define project-entry (or (findf (lambda (asset) (eq? (asset-type asset) 'project)) assets)
                             (raise-user-error "No 'project asset found in project root ~a" project-root)))
   (define root-asset-name (asset-name project-entry))
-  (define project-asset-def ((asset-thunk project-entry)))
+  (define project-asset-def (refine-project ((asset-thunk project-entry))))
 
   (set! asset-cache (hash-set asset-cache (cons project-root root-asset-name)
                               (cons project-root-hash project-asset-def)))
@@ -142,13 +143,11 @@
         (load-project-root-asset project-root project-root-hash)))
 
   (define-values (changed-asset-files unchanged-asset-files)
-    (let ([asset-file-globs (cdr (or (assq 'assets project-asset-def)
-                                     '(assets . ("./**/*.rkt"))))]
-          [cons-prev-hash (lambda (file)
+    (let ([cons-prev-hash (lambda (file)
                             (cons file (cdr (or (assoc file prev-asset-files) '("" . -1)))))])
       (partition-changed-files
        (cons (cons project-root project-root-hash)
-             (map cons-prev-hash (list-asset-files (path-only project-root) asset-file-globs)))
+             (map cons-prev-hash (list-asset-files (path-only project-root) (project-asset-globs project-asset-def))))
        prev-last-check-timestamp)))
 
   (set! open-assets
@@ -231,7 +230,7 @@
       data))
 
   (match type
-    ['project asset-data]
+    ['project (refine-project asset-data)]
     ['node (refine-node asset-data asset-exists?)]
     ['node-list (refine-node-list asset-data asset-exists? retrieve-node)]
     ['sequence (refine-sequence asset-data asset-exists? retrieve-node)]))

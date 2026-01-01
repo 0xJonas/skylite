@@ -193,7 +193,7 @@ impl AssetServerConnection {
         Ok(())
     }
 
-    pub(crate) fn send_list_asset_request(
+    pub(crate) fn send_list_assets_request(
         &mut self,
         project_path: &Path,
         atype: AssetType,

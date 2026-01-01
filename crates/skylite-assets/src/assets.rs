@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::asset_server::connect_to_asset_server;
+use crate::asset_server::{connect_to_asset_server, AssetServerConnection};
 use crate::base_serde::Deserialize;
 
 #[cfg(target_family = "unix")]
@@ -174,22 +174,29 @@ impl AssetMeta {
     }
 }
 
-pub fn list_assets(project_path: &Path, atype: AssetType) -> Result<Vec<AssetMeta>, AssetError> {
-    let mut connection = connect_to_asset_server()?;
-    connection.send_list_asset_request(project_path, atype)?;
+pub(crate) fn list_assets_conn(
+    project_path: &Path,
+    atype: AssetType,
+    connection: &mut AssetServerConnection,
+) -> Result<Vec<AssetMeta>, AssetError> {
+    connection.send_list_assets_request(project_path, atype)?;
 
     let mut status = [0u8; 1];
     connection.read_exact(&mut status)?;
     if status[0] == 0 {
-        let num_assets = u32::deserialize(&mut connection)? as usize;
+        let num_assets = u32::deserialize(connection)? as usize;
         let mut out = Vec::with_capacity(num_assets);
         for _ in 0..num_assets {
-            out.push(AssetMeta::read(&mut connection)?);
+            out.push(AssetMeta::read(connection)?);
         }
         Ok(out)
     } else {
-        Err(AssetError::read(&mut connection))
+        Err(AssetError::read(connection))
     }
+}
+
+pub fn list_assets(project_path: &Path, atype: AssetType) -> Result<Vec<AssetMeta>, AssetError> {
+    list_assets_conn(project_path, atype, &mut connect_to_asset_server()?)
 }
 
 #[derive(Debug, Clone, PartialEq)]

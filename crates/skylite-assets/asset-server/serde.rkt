@@ -2,7 +2,11 @@
 
 (require "./types.rkt")
 
-(provide serialize-obj deserialize-obj serialize-node serialize-node-list serialize-sequence)
+(provide serialize-obj deserialize-obj
+         serialize-project-asset
+         serialize-node
+         serialize-node-list
+         serialize-sequence)
 
 
 (define (serialize-type out type)
@@ -80,6 +84,10 @@
      (let ([len (deserialize-obj in 'u32)])
        (for/vector ([_ (build-list len values)]) (deserialize-obj in item-type)))]
     [(list item-types ...) (for/list ([item-type item-types]) (deserialize-obj in item-type))]))
+
+
+(define (serialize-project-asset out project-asset)
+  (serialize-obj out 'string (project-asset-name project-asset)))
 
 
 (define (serialize-node out node)

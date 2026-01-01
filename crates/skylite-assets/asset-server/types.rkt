@@ -2,9 +2,11 @@
 
 (require "./log-trace.rkt")
 (provide validate-type refine-value
+         (struct-out project-asset)
          (struct-out node)
          (struct-out sequence))
 
+(struct project-asset (name globs))
 (struct node (parameters properties))
 (struct sequence (node script))
 

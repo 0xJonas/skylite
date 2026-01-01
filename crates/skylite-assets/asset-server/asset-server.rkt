@@ -88,6 +88,7 @@
          (serialize-obj out 'u8 0) ; Result ok
          (serialize-asset-meta out asset-id asset)
          (match (asset-type asset)
+           ['project (serialize-project-asset out asset-data)]
            ['node (serialize-node out asset-data)]
            ['node-list (serialize-node-list out asset-data)]
            ['sequence (serialize-sequence out asset-data)])))
