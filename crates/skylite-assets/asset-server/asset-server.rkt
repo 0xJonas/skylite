@@ -55,8 +55,8 @@
 
   (define tracked-paths
     (vector-append
-     (for/vector ([tp (asset-tracked-paths asset)])
-       (list->vector (bytes->list (path->bytes (car tp)))))
+     (for/vector ([tfile (asset-tracked-paths asset)])
+       (list->vector (bytes->list (path->bytes (tracked-file-path tfile)))))
      (vector (list->vector (bytes->list (path->bytes (asset-file asset)))))))
   (serialize-obj out '(vec . (vec . u8)) tracked-paths))
 

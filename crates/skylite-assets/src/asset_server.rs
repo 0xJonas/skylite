@@ -11,10 +11,14 @@ use crate::path_to_native;
 const SERVER_SOCKET: &'static str = "socket";
 const SERVER_LOCK: &'static str = "lock";
 
-static SERVER_MODULES: [(&'static str, &'static str); 7] = [
+static SERVER_MODULES: [(&'static str, &'static str); 8] = [
     (
         "log-trace.rkt",
         include_str!("../asset-server/log-trace.rkt"),
+    ),
+    (
+        "project-assets.rkt",
+        include_str!("../asset-server/project-assets.rkt"),
     ),
     ("project.rkt", include_str!("../asset-server/project.rkt")),
     ("serde.rkt", include_str!("../asset-server/serde.rkt")),

@@ -1,6 +1,7 @@
 #lang racket
 
 (require file/glob)
+(require racket/set)
 (require "./log-trace.rkt")
 (require "./project-assets.rkt")
 (require "./nodes.rkt")
@@ -8,14 +9,19 @@
 
 (provide current-project retrieve-project list-assets asset-exists? retrieve-asset compute-asset-id
          (struct-out project)
-         (struct-out asset))
+         (struct-out asset)
+         (struct-out tracked-file))
 
-(struct project (root-asset-file root-asset-name last-check-timestamp asset-files))
+(struct tracked-file (path time hash))
+(struct project (root-asset-file root-asset-name asset-files))
 (struct asset (name type file tracked-paths thunk))
 
-; (project asset-name) -> (file-hash asset-data)
+
+; (project-root asset-name) -> asset-data
 (define asset-cache (make-immutable-hash))
+; (project-root asset-name) -> asset-meta
 (define open-assets (make-immutable-hash))
+; project-root -> project
 (define open-projects (make-immutable-hash))
 
 (define current-project (make-parameter #f))
@@ -52,7 +58,7 @@
         [else (raise-asset-error "'tracked-paths element not a string or path: ~v" p)])))
 
   (define tracked-paths-with-hash
-    (for/list ([p tracked-paths]) (cons p (sha256-bytes (open-input-file p)))))
+    (for/list ([p tracked-paths]) (tracked-file p (current-seconds) (sha256-bytes (open-input-file p)))))
 
   (asset name type asset-file tracked-paths-with-hash get))
 
@@ -70,37 +76,31 @@
       (raw->asset raw-asset path))))
 
 
-(define (file-changed? path last-check-timestamp last-check-hash)
-  (define file-timestamp (file-or-directory-modify-seconds path))
-  (and
-   (<= last-check-timestamp file-timestamp)
-   (let ([current-hash (sha256-bytes (open-input-file path))])
-     (and (not (equal? current-hash last-check-hash))
-          current-hash))))
+(define (path->tracked-file path)
+  (tracked-file path (current-seconds) (sha256-bytes (open-input-file path))))
 
 
-(define (list-asset-files root glob-paths)
-  (flatten
-   (for/list ([glob-path glob-paths])
-     (define glob-path-full (if (absolute-path? glob-path)
-                                glob-path
-                                (build-path root glob-path)))
-     (glob glob-path-full))))
+(define (tracked-files-equal? a b)
+  (and (equal? (tracked-file-path a) (tracked-file-path b))
+       (equal? (tracked-file-hash a) (tracked-file-hash b))))
 
 
-(define (partition-changed-files files last-check-timestamp)
-  (let lp ([files files]
-           [changed '()]
-           [unchanged '()])
-    (if (pair? files)
-        (let ([changed-hash (file-changed? (caar files) last-check-timestamp (cdar files))])
-          (if changed-hash
-              (lp (cdr files) (cons (cons (caar files) changed-hash) changed) unchanged)
-              (lp (cdr files) changed (cons (car files) unchanged))))
-        (values changed unchanged))))
+; Updates the given tracked-file by recalculating its hash, if the file may have changed.
+(define (update-tracked-file tfile)
+  (define file-timestamp (file-or-directory-modify-seconds (tracked-file-path tfile)))
+  (if (<= (tracked-file-time tfile) file-timestamp)
+      (struct-copy tracked-file tfile
+                   [time (current-seconds)]
+                   [hash (sha256-bytes (open-input-file (tracked-file-path tfile)))])
+      (struct-copy tracked-file tfile [time (current-seconds)])))
 
 
-(define (load-project-root-asset project-root project-root-hash)
+; Finds a tracked-file corresponding to a given path in a list of tracked files.
+(define (find-tracked-file path tfiles)
+  (findf (lambda (tf) (equal? (tracked-file-path tf) path)) tfiles))
+
+
+(define (load-project-root-asset project-root)
   (define assets (load-assets-from-file project-root))
   (define project-entry (or (findf (lambda (asset) (eq? (asset-type asset) 'project)) assets)
                             (raise-user-error "No 'project asset found in project root ~a" project-root)))
@@ -108,8 +108,67 @@
   (define project-asset-def (refine-project ((asset-thunk project-entry))))
 
   (set! asset-cache (hash-set asset-cache (cons project-root root-asset-name)
-                              (cons project-root-hash project-asset-def)))
+                              project-asset-def))
   (values project-asset-def root-asset-name assets))
+
+
+(define (list-asset-files root glob-paths)
+  (define base-path (path-only root))
+  (set->list
+   (set-remove
+    (apply set-union
+           (for/list ([glob-path glob-paths])
+             (define glob-path-full (if (absolute-path? glob-path)
+                                        glob-path
+                                        (build-path base-path glob-path)))
+             (apply set (glob glob-path-full))))
+    root)))
+
+
+(define (refresh-project-asset-files root glob-paths prev-asset-tfiles)
+  (define new-asset-paths (list-asset-files root glob-paths))
+
+  (define-values (unchanged-tfiles changed-tfiles)
+    (for/fold ([unchanged '()] [changed '()])
+              ([tfile prev-asset-tfiles]
+               #:when (and (file-exists? (tracked-file-path tfile))
+                           (member (tracked-file-path tfile) new-asset-paths)))
+      (let ([updated (update-tracked-file tfile)])
+        (if (tracked-files-equal? tfile updated)
+            (values (cons updated unchanged) changed)
+            (values unchanged (cons updated changed))))))
+
+  (define new-tfiles
+    (for/list ([path new-asset-paths]
+               #:when (not (find-tracked-file path prev-asset-tfiles)))
+      (path->tracked-file path)))
+
+  (values unchanged-tfiles (append changed-tfiles new-tfiles)))
+
+
+(define (refresh-project-assets! project-root unchanged-tfiles new-tfiles)
+  (define (add-assets-from-tfile ht tfile)
+    (for/fold ([ht ht]) ([asset (load-assets-from-file (tracked-file-path tfile))])
+      (hash-set ht (cons project-root (asset-name asset)) asset)))
+
+  (define (removed-asset? asset-key asset)
+    (and (equal? (car asset-key) project-root)
+         (not (find-tracked-file (asset-file asset) unchanged-tfiles))))
+
+  (define removed-asset-keys (map car (filter (lambda (kv) (removed-asset? (car kv) (cdr kv))) (hash->list open-assets))))
+
+  ; Remove changed and deleted assets
+  (set! open-assets
+        (for/fold ([open-assets open-assets]) ([key removed-asset-keys])
+          (hash-remove open-assets key)))
+  (set! asset-cache
+        (for/fold ([asset-cache asset-cache]) ([key removed-asset-keys])
+          (hash-remove asset-cache key)))
+
+  ; Add changed and new assets
+  (set! open-assets
+        (for/fold ([open-assets open-assets]) ([tfile new-tfiles])
+          (add-assets-from-tfile open-assets tfile))))
 
 
 (define (load-or-update-project prev-project project-root)
@@ -117,66 +176,36 @@
       (log/trace 'info "Updating project ~a" project-root)
       (log/trace 'info "Opening project ~a" project-root))
 
-  ; If the project was already loaded, extract some information for later comparisons.
-  (define prev-asset-files (or (and prev-project (project-asset-files prev-project)) '()))
-  (define prev-last-check-timestamp (or (and prev-project (project-last-check-timestamp prev-project)) -1))
-
-  (define new-check-timestamp (current-seconds))
-
-  (define-values (project-root-changed project-root-hash)
-    (let* ([prev-file-and-hash (assoc project-root prev-asset-files)]
-           [new-hash-if-changed (or (and (not prev-file-and-hash)
-                                         (sha256-bytes (open-input-file project-root)))
-                                    (file-changed? (car prev-file-and-hash)
-                                                   prev-last-check-timestamp
-                                                   (cdr prev-file-and-hash)))])
-      (values new-hash-if-changed (or new-hash-if-changed (cdr prev-file-and-hash)))))
+  ; Handle the project root file separately from other asset files.
+  (define prev-root-tfile (and prev-project (project-root-asset-file prev-project)))
+  (define new-root-tfile
+    (if (and prev-root-tfile (equal? (tracked-file-path prev-root-tfile) project-root))
+        (update-tracked-file prev-root-tfile)
+        (path->tracked-file project-root)))
 
   ; Project definition, name of the project's root asset, additional assets included in the root file.
   (define-values (project-asset-def root-asset-name additional-assets)
-    (if (not project-root-changed)
+    (if (and prev-root-tfile (tracked-files-equal? prev-root-tfile new-root-tfile))
         (parameterize ([current-project prev-project])
           (values (let-values ([(_ def) (retrieve-asset 'project (project-root-asset-name prev-project))])
                     def)
                   (project-root-asset-name prev-project)
                   '()))
-        (load-project-root-asset project-root project-root-hash)))
+        (load-project-root-asset project-root)))
 
-  (define-values (changed-asset-files unchanged-asset-files)
-    (let ([cons-prev-hash (lambda (file)
-                            (cons file (cdr (or (assoc file prev-asset-files) '("" . -1)))))])
-      (partition-changed-files
-       (cons (cons project-root project-root-hash)
-             (map cons-prev-hash (list-asset-files (path-only project-root) (project-asset-globs project-asset-def))))
-       prev-last-check-timestamp)))
+  (define prev-asset-tfiles (or (and prev-project (project-asset-files prev-project)) '()))
+  (define-values (unchanged-tfiles new-tfiles)
+    (refresh-project-asset-files project-root (project-asset-globs project-asset-def) prev-asset-tfiles))
+
+  (refresh-project-assets! project-root unchanged-tfiles new-tfiles)
 
   (set! open-assets
-        (let* (; Remove changed or deleted assets
-               [filtered
-                (for/fold ([assets open-assets]) ([entry (hash->list open-assets)])
-                  (if (or (not (equal? (caar entry) project-root))
-                          (assoc (asset-file (cdr entry)) unchanged-asset-files))
-                      assets
-                      (hash-remove assets (car entry))))]
+        (for/fold ([open-assets open-assets]) ([asset additional-assets])
+          (hash-set open-assets (cons project-root (asset-name asset)) asset)))
 
-               ; Helper proc
-               [add-assets (lambda (ht assets)
-                             (for/fold ([ht ht]) ([a assets])
-                               (hash-set ht (cons project-root (asset-name a)) a)))]
-
-               ; Add changed or new assets
-               [with-new-assets
-                   (for/fold ([assets filtered]) ([file-and-hash changed-asset-files])
-                     (add-assets assets (load-assets-from-file (car file-and-hash))))]
-
-               ; Add assets from project root file
-               [with-additional-assets (add-assets with-new-assets additional-assets)])
-          with-additional-assets))
-
-  (project project-root
+  (project new-root-tfile
            root-asset-name
-           new-check-timestamp
-           (append changed-asset-files unchanged-asset-files)))
+           (append unchanged-tfiles new-tfiles)))
 
 
 ; Returns the project for the given project root.
@@ -189,8 +218,8 @@
     (define prev-project (hash-ref open-projects project-root #f))
 
     (if (and prev-project
-             (for/and ([asset-file (project-asset-files prev-project)])
-               (not (file-changed? (car asset-file) (project-last-check-timestamp prev-project) (cdr asset-file)))))
+             (for/and ([tfile (cons (project-root-asset-file prev-project) (project-asset-files prev-project))])
+               (tracked-files-equal? tfile (update-tracked-file tfile))))
         ; Fast path: no asset files changed
         prev-project
 
@@ -201,10 +230,11 @@
 
 
 (define (list-assets type)
+  (define project-root (tracked-file-path (project-root-asset-file (current-project))))
   (define sorted-assets
     (sort
      (filter (lambda (entry)
-               (and (equal? (caar entry) (project-root-asset-file (current-project)))
+               (and (equal? (caar entry) project-root)
                     (eq? (asset-type (cdr entry)) type)))
              (hash->list open-assets))
      symbol<?
@@ -237,35 +267,32 @@
 
 
 (define/trace (retrieve-asset req-type req-name)
-  #:enter 'debug (format "Retrieving asset ~a from project ~a" req-name (project-root-asset-file (current-project)))
-  (parameterize ([current-error-context (error-context (project-root-asset-file (current-project)) #f #f)])
+  #:enter 'debug (format "Retrieving asset ~a from project ~a" req-name (tracked-file-path (project-root-asset-file (current-project))))
 
-    (define asset-key (cons (project-root-asset-file (current-project)) req-name))
+  (define project-root (tracked-file-path (project-root-asset-file (current-project))))
+  (parameterize ([current-error-context (error-context project-root #f #f)])
+
+    (define asset-key (cons project-root req-name))
     (define asset-inst (hash-ref open-assets asset-key
-                                 (lambda () (raise-asset-error "Asset ~v not found in project ~a" req-name (project-root-asset-file (current-project))))))
+                                 (lambda () (raise-asset-error "Asset ~v not found in project ~a" req-name project-root))))
     (unless (eq? (asset-type asset-inst) req-type)
-      (raise-asset-error "Asset ~v in project ~a does not have type ~v" req-name (project-root-asset-file project) req-type))
+      (raise-asset-error "Asset ~v in project ~a does not have type ~v" req-name project-root req-type))
 
-    (define asset-file-hash (cdr (assoc (asset-file asset-inst) (project-asset-files (current-project)))))
     (define cached-entry (hash-ref asset-cache asset-key #f))
 
-    (define tracked-paths-changed-hash
-      (for/list ([tp (asset-tracked-paths asset-inst)])
-        (file-changed? (car tp) (project-last-check-timestamp (current-project)) (cdr tp))))
     (define new-tracked-paths
-      (for/list ([tp (asset-tracked-paths asset-inst)]
-                 [ch tracked-paths-changed-hash])
-        (if ch (cons (car tp) ch) tp)))
+      (for/list ([tfile (asset-tracked-paths asset-inst)]) (update-tracked-file tfile)))
+    (define no-tracked-paths-changed
+      (for/and ([new-tfile new-tracked-paths] [prev-tfile (asset-tracked-paths asset-inst)])
+        (tracked-files-equal? new-tfile prev-tfile)))
 
     (define/trace (eval-asset)
-      #:enter 'info (format "Evaluating asset ~a in project ~a" req-name (project-root-asset-file (current-project)))
+      #:enter 'info (format "Evaluating asset ~a in project ~a" req-name project-root)
       ((asset-thunk asset-inst)))
 
-    (if (and cached-entry
-             (equal? asset-file-hash (car cached-entry))
-             (not (for/or ([t tracked-paths-changed-hash]) t)))
+    (if (and cached-entry no-tracked-paths-changed)
         ; Cache entry still valid
-        (values asset-inst (cdr cached-entry))
+        (values asset-inst cached-entry)
 
         ; Cache entry does not exist or is no longer valid
         (parameterize ([current-error-context (struct-copy error-context (current-error-context)
@@ -274,7 +301,7 @@
           (let* ([asset-data (eval-asset)]
                  [new-asset (struct-copy asset asset-inst [tracked-paths new-tracked-paths])]
                  [refined-data (refine-asset req-type asset-data)])
-            (set! asset-cache (hash-set asset-cache asset-key (cons asset-file-hash refined-data)))
+            (set! asset-cache (hash-set asset-cache asset-key refined-data))
             (set! open-assets (hash-set open-assets asset-key new-asset))
             (values asset-inst refined-data))))))
 
