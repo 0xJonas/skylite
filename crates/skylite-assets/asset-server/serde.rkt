@@ -59,8 +59,12 @@
      (for ([arg (cdr value)])
        (serialize-obj out 'type (car arg))
        (serialize-obj out (car arg) (cdr arg)))]
-    ['node-list (serialize-obj out 'string (symbol->string value))]
-    ['sequence (serialize-obj out 'string (symbol->string value))])
+    ['node-list
+      (serialize-obj out 'string (symbol->string (car value)))
+      (serialize-obj out 'u32 (cdr value))]
+    ['sequence
+      (serialize-obj out 'string (symbol->string (car value)))
+      (serialize-obj out 'u32 (cdr value))])
   (void))
 
 
@@ -105,9 +109,10 @@
 (define (serialize-node-list out asset-data)
   (serialize-obj out 'u32 (length asset-data))
   (for ([inst asset-data])
-    (serialize-obj out 'string (symbol->string (car inst)))
-    (serialize-obj out 'u32 (length (cdr inst)))
-    (serialize-obj out (cons 'node (car inst)) inst)))
+    (serialize-obj out 'string (symbol->string (caar inst)))  ; name
+    (serialize-obj out 'u32 (cdar inst))  ; id
+    (serialize-obj out 'u32 (length (cdr inst)))  ; num args
+    (serialize-obj out (cons 'node (caar inst)) inst))) ; args
 
 
 (define (serialize-sequence out sequence)

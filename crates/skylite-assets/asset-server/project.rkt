@@ -7,7 +7,7 @@
 (require "./nodes.rkt")
 (require "./sequences.rkt")
 
-(provide current-project retrieve-project list-assets asset-exists? retrieve-asset compute-asset-id
+(provide current-project retrieve-project list-assets retrieve-asset compute-asset-id
          (struct-out project)
          (struct-out asset)
          (struct-out tracked-file))
@@ -242,12 +242,6 @@
   (map cdr sorted-assets))
 
 
-(define (asset-exists? req-type req-name)
-  (define asset-key (cons (project-root-asset-file (current-project)) req-name))
-  (define asset-inst (hash-ref open-assets asset-key #f))
-  (and asset-inst (eq? (asset-type asset-inst) req-type)))
-
-
 ; Refining an asset performes multiple transformations to make
 ; further usage of the asset easier, such as:
 ; - Type checking and general validation.
@@ -261,9 +255,9 @@
 
   (match type
     ['project (refine-project asset-data)]
-    ['node (refine-node asset-data asset-exists?)]
-    ['node-list (refine-node-list asset-data asset-exists? retrieve-node)]
-    ['sequence (refine-sequence asset-data asset-exists? retrieve-node)]))
+    ['node (refine-node asset-data)]
+    ['node-list (refine-node-list asset-data compute-asset-id retrieve-node)]
+    ['sequence (refine-sequence asset-data compute-asset-id retrieve-node)]))
 
 
 (define/trace (retrieve-asset req-type req-name)
@@ -306,11 +300,15 @@
             (values asset-inst refined-data))))))
 
 
-(define (compute-asset-id project-root asset-inst)
+(define (compute-asset-id type name)
+  (define project-root (tracked-file-path (project-root-asset-file (current-project))))
+  (define asset-key (cons project-root name))
+  (unless (hash-ref open-assets asset-key #f)
+    (raise-asset-error "Asset ~a of type ~a does not exist" name type))
   (for/fold ([id 0]) ([entry (hash->list open-assets)])
     (if (and (equal? project-root (caar entry))
-             (eq? (asset-type (cdr entry)) (asset-type asset-inst))
-             (symbol<? (cdar entry) (asset-name asset-inst)))
+             (eq? (asset-type (cdr entry)) type)
+             (symbol<? (cdar entry) name))
         (+ 1 id)
         id)))
 

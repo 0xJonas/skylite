@@ -11,16 +11,14 @@
 (struct sequence (node script))
 
 
-(define (validate-type type asset-exists?)
+(define (validate-type type)
   (match type
     [(or 'u8 'u16 'u32 'u64 'i8 'i16 'i32 'i64 'f32 'f64 'bool 'string 'project 'node-list 'sequence) (void)]
-    [(cons 'vec item-type) (validate-type item-type asset-exists?)]
+    [(cons 'vec item-type) (validate-type item-type)]
     [(cons 'node node)
      (unless (symbol? node)
-       (raise-asset-error "Node must be a symbol, got ~a" node))
-     (unless (or (eq? node '*) (asset-exists? 'node node))
-       (raise-asset-error "Node ~a does not exist" node))]
-    [(list item-types ...) (for ([item-type item-types]) (validate-type item-type asset-exists?))]
+       (raise-asset-error "Node must be a symbol, got ~a" node))]
+    [(list item-types ...) (for ([item-type item-types]) (validate-type item-type))]
     [else (raise-asset-error "Unknown type ~a" else)]))
 
 
@@ -71,14 +69,14 @@
                (raise-asset-error "Expected a string, got ~v" value))]))
 
 
-(define (refine-value type value asset-exists? retrieve-node)
-  (validate-type type asset-exists?)
+(define (refine-value type value compute-id retrieve-node)
+  (validate-type type)
 
   (match type
     [(cons 'vec item-type)
      (unless (vector? value)
        (raise-asset-error "Expected a vector, got ~v" value))
-     (for/vector ([e value]) (refine-value item-type e asset-exists? retrieve-node))]
+     (for/vector ([e value]) (refine-value item-type e compute-id retrieve-node))]
 
     [(list item-types ...)
      (unless (list? value)
@@ -86,7 +84,7 @@
      (unless (= (length value) (length item-types))
        (raise-asset-error "Incorrect number of values for tuple type, expected ~a, got ~a"
                           (length item-types) (length value)))
-     (for/list ([item value] [item-type item-types]) (refine-value item-type item asset-exists? retrieve-node))]
+     (for/list ([item value] [item-type item-types]) (refine-value item-type item compute-id retrieve-node))]
 
     [(cons 'node node)
      (unless (and (list? value) (<= 1 (length value)) (symbol? (car value)))
@@ -106,22 +104,18 @@
         (car value)
         (for/list ([p parameters] [v (cdr value)])
           (let* ([type (cadr p)]
-                 [value (refine-value type v asset-exists? retrieve-node)])
+                 [value (refine-value type v compute-id retrieve-node)])
             (cons type value)))))]
 
     ['node-list
      (unless (symbol? value)
        (raise-asset-error "Expected a symbol for node-list, got ~v" value))
-     (unless (asset-exists? 'node-list value)
-       (raise-asset-error "Node list ~a does not exist" value))
-     value]
+     (cons value (compute-id 'node-list value))]
 
     ['sequence
      (unless (symbol? value)
        (raise-asset-error "Expected a symbol for sequence, got ~v" value))
-     (unless (asset-exists? 'sequence value)
-       (raise-asset-error "Sequence list ~a does not exist" value))
-     value]
+     (const value (compute-id 'sequence value))]
 
     [primitive
      (validate-primitive-typed-value primitive value)

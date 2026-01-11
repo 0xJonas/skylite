@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::asset_server::connect_to_asset_server;
-use crate::assets::{AssetError, AssetMeta, AssetType, NodeArgs, Type, TypedValue};
+use crate::assets::{AssetError, AssetMeta, AssetType, Type, TypedValue};
 use crate::base_serde::Deserialize;
 
 #[derive(Debug, PartialEq)]
@@ -63,17 +63,19 @@ pub fn load_node(project_path: &Path, name: &str) -> Result<Node, AssetError> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeInstance {
     pub node: String,
-    pub args: NodeArgs,
+    pub node_id: u32,
+    pub args: Vec<TypedValue>,
 }
 
 impl NodeInstance {
     fn read(input: &mut impl Read) -> Result<NodeInstance, AssetError> {
-        let name = String::deserialize(input)?;
-        let TypedValue::Node(args) = TypedValue::read(input, &Type::Node(name.clone()))? else {
+        let node = String::deserialize(input)?;
+        let node_id = u32::deserialize(input)?;
+        let TypedValue::Node(args) = TypedValue::read(input, &Type::Node(node.clone()))? else {
             unreachable!()
         };
 
-        Ok(NodeInstance { node: name, args })
+        Ok(NodeInstance { node, node_id, args })
     }
 }
 
@@ -113,7 +115,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{load_node, load_node_list, Node, NodeInstance, NodeList, Variable};
-    use crate::assets::{NodeArgs, Type, TypedValue};
+    use crate::assets::{Type, TypedValue};
 
     #[test]
     fn test_load_node() {
@@ -174,15 +176,13 @@ mod tests {
                 nodes: vec![
                     NodeInstance {
                         node: "node1".to_owned(),
-                        args: NodeArgs {
-                            args: vec![TypedValue::U8(1), TypedValue::String("test1".to_owned())]
-                        },
+                        node_id: 0,
+                        args: vec![TypedValue::U8(1), TypedValue::String("test1".to_owned())],
                     },
                     NodeInstance {
                         node: "node1".to_owned(),
-                        args: NodeArgs {
-                            args: vec![TypedValue::U8(2), TypedValue::String("test2".to_owned())]
-                        },
+                        node_id: 0,
+                        args: vec![TypedValue::U8(2), TypedValue::String("test2".to_owned())],
                     },
                 ],
             }

@@ -84,7 +84,7 @@
        (parameterize ([current-project (retrieve-project project-root)])
          (define-values (asset asset-data) (retrieve-asset (asset-request-params-asset-type params)
                                                            (asset-request-params-asset-name params)))
-         (define asset-id (compute-asset-id project-root asset))
+         (define asset-id (compute-asset-id (asset-type asset) (asset-name asset)))
          (serialize-obj out 'u8 0) ; Result ok
          (serialize-asset-meta out asset-id asset)
          (match (asset-type asset)

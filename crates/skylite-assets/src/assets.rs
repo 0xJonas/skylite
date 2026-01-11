@@ -282,9 +282,9 @@ pub enum TypedValue {
     Vec(Vec<TypedValue>),
     Tuple(Vec<TypedValue>),
     // Project,
-    Node(NodeArgs),
-    NodeList(String),
-    Sequence(String),
+    Node(Vec<TypedValue>),
+    NodeList(u32),
+    Sequence(u32),
 }
 
 impl TypedValue {
@@ -318,22 +318,22 @@ impl TypedValue {
                 Ok(TypedValue::Tuple(items))
             }
             Type::Project => todo!(),
-            Type::Node(_) => {
+            Type::Node(..) => {
                 let args_len = u32::deserialize(input)? as usize;
                 let mut args = Vec::with_capacity(args_len);
                 for _ in 0..args_len {
                     let t = Type::read(input)?;
                     args.push(TypedValue::read(input, &t)?);
                 }
-                Ok(TypedValue::Node(NodeArgs { args }))
+                Ok(TypedValue::Node(args))
             }
             Type::NodeList => {
-                let name = String::deserialize(input)?;
-                Ok(TypedValue::NodeList(name))
+                let id = u32::deserialize(input)?;
+                Ok(TypedValue::NodeList(id))
             }
             Type::Sequence => {
-                let name = String::deserialize(input)?;
-                Ok(TypedValue::Sequence(name))
+                let id = u32::deserialize(input)?;
+                Ok(TypedValue::Sequence(id))
             }
         }
     }

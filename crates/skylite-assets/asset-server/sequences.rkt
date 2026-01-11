@@ -224,7 +224,7 @@
   (memq type '(u8 u16 u32 u64 i8 i16 i32 i64 f32 f64)))
 
 
-(define (refine-sequence asset-data asset-exists? retrieve-node)
+(define (refine-sequence asset-data compute-id retrieve-node)
   (unless (list? asset-data)
     (raise-user-error "Sequence asset must be an alist, got ~v" asset-data))
   (define target-node
@@ -235,7 +235,7 @@
     (unless (symbol? prop) (raise-asset-error "Expected symbol for 'set' instruction, got ~v" prop))
     (define path (string-split (symbol->string prop) "."))
     (define-values (push-offset-ops prop-type) (process-property-access target-node path retrieve-node))
-    (define refined-value (refine-value prop-type value asset-exists? retrieve-node))
+    (define refined-value (refine-value prop-type value compute-id retrieve-node))
     (append push-offset-ops
             ; set-string is a separate instruction, because String in Rust
             ; is heap-allocated, so it must be handled differently than other base types.
@@ -249,7 +249,7 @@
     (define-values (push-offset-ops prop-type) (process-property-access target-node path retrieve-node))
     (unless (numeric-type? prop-type)
       (raise-asset-error "'modify' can only be used for fields with numeric types."))
-    (define refined-value (refine-value prop-type value asset-exists? retrieve-node))
+    (define refined-value (refine-value prop-type value compute-id retrieve-node))
     (append push-offset-ops
             (case prop-type
               [(f32) (list `(modify-f32 ,refined-value))]
@@ -269,7 +269,7 @@
        (define-values (push-offset-ops prop-type) (process-property-access target-node path retrieve-node))
        (unless (numeric-type? prop-type)
          (raise-asset-error "Comparison is only allowed for numeric types"))
-       (define refined-value (refine-value prop-type value asset-exists? retrieve-node))
+       (define refined-value (refine-value prop-type value compute-id retrieve-node))
        (append push-offset-ops
                (case prop-type
                  [(u8 u16 u32 u64) (list `(branch-uint ,(comparison->byte op) (,prop-type . ,refined-value) ,target))]
@@ -376,8 +376,10 @@
       [(node1) (node '() '([prop1 u8] [prop2 bool] [prop3 string] [prop4 (node . node2)] [prop5 f32] [prop6 f64] [prop7 i8]))]
       [(node2) (node '() '([prop1 u8]))]))
 
-  (define (asset-exists? name)
-    (memq name '(node1 node2)))
+  (define (compute-id _ name)
+    (case name
+      [(node1) 0]
+      [(node2) 1]))
 
   ; Basic refining
   (define seq1
@@ -429,7 +431,7 @@
       (return)
       (return)))
 
-  (test-log! (equal? (sequence-script (refine-sequence seq1 asset-exists? retrieve-node)) refined1))
+  (test-log! (equal? (sequence-script (refine-sequence seq1 compute-id retrieve-node)) refined1))
 
   ; Nested properties
   (define seq2
@@ -445,7 +447,7 @@
       (set (u8 . 10))
       (return)))
 
-  (test-log! (equal? (sequence-script (refine-sequence seq2 asset-exists? retrieve-node)) refined2))
+  (test-log! (equal? (sequence-script (refine-sequence seq2 compute-id retrieve-node)) refined2))
 
   ; Complex labels
   (define seq3
@@ -465,4 +467,4 @@
       (jump 5)
       (jump 1)))
 
-  (test-log! (equal? (sequence-script (refine-sequence seq3 asset-exists? retrieve-node)) refined3)))
+  (test-log! (equal? (sequence-script (refine-sequence seq3 compute-id retrieve-node)) refined3)))
