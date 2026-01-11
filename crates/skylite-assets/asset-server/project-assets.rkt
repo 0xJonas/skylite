@@ -2,10 +2,14 @@
 
 (require "./log-trace.rkt")
 (require "./types.rkt")
-(provide refine-project
+(provide refine-project1 refine-project2
          (struct-out project-asset))
 
-(define (refine-project asset-data)
+; project assets have to be refined in multiple steps, because
+; during the first step, the other assets are not yet loaded, so
+; the root node cannot be validated.
+
+(define (refine-project1 asset-data)
   (unless (list? asset-data)
     (raise-asset-error "'project asset must be a list, got ~v" asset-data))
 
@@ -22,4 +26,14 @@
         (raise-asset-error "Value for 'assets must be a list of globs, got ~v" assets))
       assets))
 
-  (project-asset name globs))
+  (define root-node
+    (let ([r (assq 'root-node asset-data)])
+      (unless r (raise-asset-error "Missing require key 'root-node"))
+      (cdr r)))
+
+  (project-asset name globs root-node))
+
+
+(define (refine-project2 project asset-exists? retrieve-node)
+  (struct-copy project-asset project
+               [root-node (refine-value '(node . *) (project-asset-root-node project) asset-exists? retrieve-node)]))

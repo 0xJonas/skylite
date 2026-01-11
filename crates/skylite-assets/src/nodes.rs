@@ -68,14 +68,21 @@ pub struct NodeInstance {
 }
 
 impl NodeInstance {
-    fn read(input: &mut impl Read) -> Result<NodeInstance, AssetError> {
+    pub(crate) fn read(input: &mut impl Read) -> Result<NodeInstance, AssetError> {
         let node = String::deserialize(input)?;
         let node_id = u32::deserialize(input)?;
-        let TypedValue::Node(args) = TypedValue::read(input, &Type::Node(node.clone()))? else {
-            unreachable!()
-        };
+        let args_len = u32::deserialize(input)? as usize;
+        let mut args = Vec::with_capacity(args_len);
+        for _ in 0..args_len {
+            let t = Type::read(input)?;
+            args.push(TypedValue::read(input, &t)?);
+        }
 
-        Ok(NodeInstance { node, node_id, args })
+        Ok(NodeInstance {
+            node,
+            node_id,
+            args,
+        })
     }
 }
 

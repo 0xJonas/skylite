@@ -1,6 +1,7 @@
 #lang racket
 
-(require "./types.rkt")
+(require "./types.rkt"
+         "./project.rkt")
 
 (provide serialize-obj deserialize-obj
          serialize-project-asset
@@ -56,7 +57,10 @@
        (serialize-obj out item-type item))]
     ['project (serialize-obj out 'string (symbol->string value))]
     [(cons 'node _)
-     (for ([arg (cdr value)])
+     (serialize-obj out 'string (symbol->string (node-instance-name value)))
+     (serialize-obj out 'u32 (compute-asset-id 'node (node-instance-name value)))
+     (serialize-obj out 'u32 (length (node-instance-args value)))
+     (for ([arg (node-instance-args value)])
        (serialize-obj out 'type (car arg))
        (serialize-obj out (car arg) (cdr arg)))]
     ['node-list
@@ -91,7 +95,8 @@
 
 
 (define (serialize-project-asset out project-asset)
-  (serialize-obj out 'string (project-asset-name project-asset)))
+  (serialize-obj out 'string (project-asset-name project-asset))
+  (serialize-obj out '(node . *) (project-asset-root-node project-asset)))
 
 
 (define (serialize-node out node)
@@ -109,10 +114,7 @@
 (define (serialize-node-list out asset-data)
   (serialize-obj out 'u32 (length asset-data))
   (for ([inst asset-data])
-    (serialize-obj out 'string (symbol->string (caar inst)))  ; name
-    (serialize-obj out 'u32 (cdar inst))  ; id
-    (serialize-obj out 'u32 (length (cdr inst)))  ; num args
-    (serialize-obj out (cons 'node (caar inst)) inst))) ; args
+    (serialize-obj out (cons 'node (node-instance-name inst)) inst)))
 
 
 (define (serialize-sequence out sequence)

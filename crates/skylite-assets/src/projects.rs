@@ -3,12 +3,13 @@ use std::path::Path;
 
 use crate::asset_server::connect_to_asset_server;
 use crate::base_serde::Deserialize;
-use crate::{list_assets_conn, AssetError, AssetMeta, AssetType};
+use crate::{AssetError, AssetMeta, AssetType, NodeInstance, list_assets_conn};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     pub meta: AssetMeta,
     pub name: String,
+    pub root_node: NodeInstance,
 }
 
 impl Deserialize for Project {
@@ -18,7 +19,8 @@ impl Deserialize for Project {
     {
         let meta = AssetMeta::read(input)?;
         let name = String::deserialize(input)?;
-        Ok(Project { meta, name })
+        let root_node = NodeInstance::read(input)?;
+        Ok(Project { meta, name, root_node })
     }
 }
 
@@ -46,6 +48,8 @@ pub fn load_project(project_path: &Path) -> Result<Project, AssetError> {
 mod tests {
     use std::path::PathBuf;
 
+    use crate::{NodeInstance, TypedValue};
+
     use super::{load_project, Project};
 
     #[test]
@@ -60,7 +64,15 @@ mod tests {
             project,
             Project {
                 meta: project.meta.clone(),
-                name: "Test1".to_owned()
+                name: "Test1".to_owned(),
+                root_node: NodeInstance {
+                    node: "node1".to_owned(),
+                    node_id: 0,
+                    args: vec![
+                        TypedValue::U8(5),
+                        TypedValue::String("abc".to_owned())
+                    ]
+                }
             }
         );
     }

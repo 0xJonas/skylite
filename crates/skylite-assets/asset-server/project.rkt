@@ -105,10 +105,8 @@
   (define project-entry (or (findf (lambda (asset) (eq? (asset-type asset) 'project)) assets)
                             (raise-user-error "No 'project asset found in project root ~a" project-root)))
   (define root-asset-name (asset-name project-entry))
-  (define project-asset-def (refine-project ((asset-thunk project-entry))))
+  (define project-asset-def (refine-project1 ((asset-thunk project-entry))))
 
-  (set! asset-cache (hash-set asset-cache (cons project-root root-asset-name)
-                              project-asset-def))
   (values project-asset-def root-asset-name assets))
 
 
@@ -242,6 +240,13 @@
   (map cdr sorted-assets))
 
 
+(define (asset-exists? req-type req-name)
+  (define project-root (tracked-file-path (project-root-asset-file (current-project))))
+  (define asset-key (cons project-root req-name))
+  (define asset-inst (hash-ref open-assets asset-key #f))
+  (and asset-inst (eq? (asset-type asset-inst) req-type)))
+
+
 ; Refining an asset performes multiple transformations to make
 ; further usage of the asset easier, such as:
 ; - Type checking and general validation.
@@ -254,10 +259,12 @@
       data))
 
   (match type
-    ['project (refine-project asset-data)]
-    ['node (refine-node asset-data)]
-    ['node-list (refine-node-list asset-data compute-asset-id retrieve-node)]
-    ['sequence (refine-sequence asset-data compute-asset-id retrieve-node)]))
+    ['project
+     (let ([tmp (refine-project1 asset-data)])
+       (refine-project2 tmp asset-exists? retrieve-node))]
+    ['node (refine-node asset-data asset-exists?)]
+    ['node-list (refine-node-list asset-data asset-exists? retrieve-node)]
+    ['sequence (refine-sequence asset-data asset-exists? retrieve-node)]))
 
 
 (define/trace (retrieve-asset req-type req-name)
@@ -302,8 +309,7 @@
 
 (define (compute-asset-id type name)
   (define project-root (tracked-file-path (project-root-asset-file (current-project))))
-  (define asset-key (cons project-root name))
-  (unless (hash-ref open-assets asset-key #f)
+  (unless (asset-exists? type name)
     (raise-asset-error "Asset ~a of type ~a does not exist" name type))
   (for/fold ([id 0]) ([entry (hash->list open-assets)])
     (if (and (equal? project-root (caar entry))
@@ -339,7 +345,7 @@
 
   (define (setup-test-project)
     (define-asset (build-path base-dir "project.rkt")
-      'project 'project "'([name . test] [assets . (\"./node-1.rkt\")])" '())
+      'project 'project "'([name . test] [root-node . (node1)] [assets . (\"./node-1.rkt\")])" '())
     (define-asset (build-path base-dir "node-1.rkt")
       'node-1 'node "'()" '())
     (define-asset (build-path base-dir "node-2.rkt")
@@ -387,7 +393,7 @@
 
   ; Changing the project root should cause it to be evaluated again, as well as any new asset files.
   (void (define-asset (build-path base-dir "project.rkt")
-          'project 'project "'([name . test] [assets . (\"./node-2.rkt\")])" '()))
+          'project 'project "'([name . test] [root-node . (node1)] [assets . (\"./node-2.rkt\")])" '()))
   (current-project (retrieve-project (build-path base-dir "project.rkt")))
   (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\n")
 

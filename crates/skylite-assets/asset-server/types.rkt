@@ -4,21 +4,25 @@
 (provide validate-type refine-value
          (struct-out project-asset)
          (struct-out node)
+         (struct-out node-instance)
          (struct-out sequence))
 
-(struct project-asset (name globs))
+(struct project-asset (name globs root-node))
 (struct node (parameters properties))
+(struct node-instance (name args))
 (struct sequence (node script))
 
 
-(define (validate-type type)
+(define (validate-type type asset-exists?)
   (match type
     [(or 'u8 'u16 'u32 'u64 'i8 'i16 'i32 'i64 'f32 'f64 'bool 'string 'project 'node-list 'sequence) (void)]
-    [(cons 'vec item-type) (validate-type item-type)]
+    [(cons 'vec item-type) (validate-type item-type asset-exists?)]
     [(cons 'node node)
      (unless (symbol? node)
-       (raise-asset-error "Node must be a symbol, got ~a" node))]
-    [(list item-types ...) (for ([item-type item-types]) (validate-type item-type))]
+       (raise-asset-error "Node must be a symbol, got ~a" node))
+     (unless (or (eq? node '*) (asset-exists? 'node node))
+       (raise-asset-error "Node ~a does not exist" node))]
+    [(list item-types ...) (for ([item-type item-types]) (validate-type item-type asset-exists?))]
     [else (raise-asset-error "Unknown type ~a" else)]))
 
 
@@ -69,14 +73,14 @@
                (raise-asset-error "Expected a string, got ~v" value))]))
 
 
-(define (refine-value type value compute-id retrieve-node)
-  (validate-type type)
+(define (refine-value type value asset-exists? retrieve-node)
+  (validate-type type asset-exists?)
 
   (match type
     [(cons 'vec item-type)
      (unless (vector? value)
        (raise-asset-error "Expected a vector, got ~v" value))
-     (for/vector ([e value]) (refine-value item-type e compute-id retrieve-node))]
+     (for/vector ([e value]) (refine-value item-type e asset-exists? retrieve-node))]
 
     [(list item-types ...)
      (unless (list? value)
@@ -84,7 +88,7 @@
      (unless (= (length value) (length item-types))
        (raise-asset-error "Incorrect number of values for tuple type, expected ~a, got ~a"
                           (length item-types) (length value)))
-     (for/list ([item value] [item-type item-types]) (refine-value item-type item compute-id retrieve-node))]
+     (for/list ([item value] [item-type item-types]) (refine-value item-type item asset-exists? retrieve-node))]
 
     [(cons 'node node)
      (unless (and (list? value) (<= 1 (length value)) (symbol? (car value)))
@@ -92,7 +96,8 @@
      (unless (or (eq? node '*) (eq? node (car value)))
        (raise-asset-error "Expected node instance of type ~v, got ~v" node (car value)))
 
-     (let* ([node (retrieve-node (car value))]
+     (let* ([name (car value)]
+            [node (retrieve-node name)]
             [parameters (node-parameters node)])
        (unless (= (length parameters) (length (cdr value)))
          (raise-asset-error "Wrong number of parameters for node instance, expected ~a, got ~a"
@@ -100,22 +105,26 @@
 
        ; For node instances, type information is added to the parameters,
        ; so the type does not have to be retrieved again when serializing.
-       (cons
-        (car value)
+       (node-instance
+        name
         (for/list ([p parameters] [v (cdr value)])
           (let* ([type (cadr p)]
-                 [value (refine-value type v compute-id retrieve-node)])
+                 [value (refine-value type v asset-exists? retrieve-node)])
             (cons type value)))))]
 
     ['node-list
      (unless (symbol? value)
        (raise-asset-error "Expected a symbol for node-list, got ~v" value))
-     (cons value (compute-id 'node-list value))]
+     (unless (asset-exists? 'node-list value)
+       (raise-asset-error "Node list ~a does not exist" value))
+     value]
 
     ['sequence
      (unless (symbol? value)
        (raise-asset-error "Expected a symbol for sequence, got ~v" value))
-     (const value (compute-id 'sequence value))]
+     (unless (asset-exists? 'sequence value)
+       (raise-asset-error "Sequence ~a does not exist" value))
+     value]
 
     [primitive
      (validate-primitive-typed-value primitive value)

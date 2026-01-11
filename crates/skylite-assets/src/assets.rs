@@ -4,6 +4,7 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::NodeInstance;
 use crate::asset_server::{connect_to_asset_server, AssetServerConnection};
 use crate::base_serde::Deserialize;
 
@@ -282,7 +283,7 @@ pub enum TypedValue {
     Vec(Vec<TypedValue>),
     Tuple(Vec<TypedValue>),
     // Project,
-    Node(Vec<TypedValue>),
+    Node(NodeInstance),
     NodeList(u32),
     Sequence(u32),
 }
@@ -319,13 +320,8 @@ impl TypedValue {
             }
             Type::Project => todo!(),
             Type::Node(..) => {
-                let args_len = u32::deserialize(input)? as usize;
-                let mut args = Vec::with_capacity(args_len);
-                for _ in 0..args_len {
-                    let t = Type::read(input)?;
-                    args.push(TypedValue::read(input, &t)?);
-                }
-                Ok(TypedValue::Node(args))
+                let inst = NodeInstance::read(input)?;
+                Ok(TypedValue::Node(inst))
             }
             Type::NodeList => {
                 let id = u32::deserialize(input)?;
