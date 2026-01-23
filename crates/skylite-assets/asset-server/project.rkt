@@ -341,7 +341,7 @@
 
   (define (setup-test-project)
     (define-asset (build-path base-dir "project.rkt")
-      'project 'project "'([name . test] [root-node . (node1)] [assets . (\"./node-1.rkt\")])" '())
+      'project 'project "'([name . test] [root-node . (node-1)] [assets . (\"./node-1.rkt\")])" '())
     (define-asset (build-path base-dir "node-1.rkt")
       'node-1 'node "'()" '())
     (define-asset (build-path base-dir "node-2.rkt")
@@ -381,26 +381,27 @@
   (void (define-asset (build-path base-dir "node-1.rkt")
           'node-1 'node "(list)" '()))
   (current-project (retrieve-project project-root))
-  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\n")
+  ; The project asset is also evaluated again, because it was only partially evaluated during the first call to retrieve-project.
+  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nproject-asset\nnode-1-file\n")
 
   ; The asset itself also has to be reevaluated.
   (let-values ([(_1 _2) (retrieve-asset 'node 'node-1)]) (void))
-  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\n")
+  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nproject-asset\nnode-1-file\nnode-1-asset\n")
 
   ; Changing the project root should cause it to be evaluated again, as well as any new asset files.
   (void (define-asset (build-path base-dir "project.rkt")
-          'project 'project "'([name . test] [root-node . (node1)] [assets . (\"./node-2.rkt\")])" '()))
+          'project 'project "'([name . test] [root-node . (node-1)] [assets . (\"./node-2.rkt\")])" '()))
   (current-project (retrieve-project (build-path base-dir "project.rkt")))
-  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\n")
+  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nproject-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\n")
 
   ; Changing a tracked path should reevaluate the affected asset.
   (let-values ([(_1 _2) (retrieve-asset 'node 'node-2)]) (void))
-  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\n")
+  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nproject-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\n")
   (void (define-asset (build-path base-dir "node-1.rkt")
           'node-1 'node "'()" '()))
   (let-values ([(_1 _2) (retrieve-asset 'node 'node-2)]) (void))
-  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\nnode-2-asset\n")
+  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nproject-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\nnode-2-asset\n")
 
   ; Retrieving the asset again should not evaluate anything.
   (let-values ([(_1 _2) (retrieve-asset 'node 'node-2)]) (void))
-  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\nnode-2-asset\n"))
+  (check-eval-log! "project-file\nproject-asset\nnode-1-file\nnode-1-asset\nproject-asset\nnode-1-file\nnode-1-asset\nproject-file\nproject-asset\nnode-2-file\nnode-2-asset\nnode-2-asset\n"))
