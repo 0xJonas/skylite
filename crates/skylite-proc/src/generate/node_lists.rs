@@ -1,16 +1,16 @@
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
+use skylite_assets::NodeList;
 
 use super::encode::CompressionBuffer;
 use crate::generate::nodes::encode_node_instance;
 use crate::generate::project::project_ident;
-use crate::parse::node_lists::NodeList;
-use crate::parse::util::{change_case, IdentCase};
+use crate::generate::util::{change_case, IdentCase};
 
 fn encode_node_list(list: &NodeList) -> TokenStream {
     let mut buffer = CompressionBuffer::new();
-    buffer.write_varint(list.content.len());
-    for instance in &list.content {
+    buffer.write_varint(list.nodes.len());
+    for instance in &list.nodes {
         encode_node_instance(instance, &mut buffer)
     }
     let data = buffer.encode();
@@ -18,8 +18,8 @@ fn encode_node_list(list: &NodeList) -> TokenStream {
     quote!(&[#(#data),*])
 }
 
-pub(crate) fn generate_node_list_data(node_lists: &[&NodeList]) -> TokenStream {
-    let node_list_data = node_lists.iter().map(|&n| encode_node_list(n));
+pub(crate) fn generate_node_list_data(node_lists: &[NodeList]) -> TokenStream {
+    let node_list_data = node_lists.iter().map(|n| encode_node_list(n));
     let num_node_lists = node_lists.len();
 
     quote! {
@@ -36,7 +36,7 @@ pub(crate) fn node_list_ids_type(project_name: &str) -> Ident {
     )
 }
 
-pub(crate) fn generate_node_list_ids(node_lists: &[&NodeList], project_name: &str) -> TokenStream {
+pub(crate) fn generate_node_list_ids(node_lists: &[NodeList], project_name: &str) -> TokenStream {
     let node_list_ids_type = node_list_ids_type(project_name);
     let names = node_lists.iter().map(|list| {
         format_ident!(
@@ -72,7 +72,7 @@ pub(crate) fn generate_decode_node_list_fn(project_name: &str) -> TokenStream {
 
     quote! {
         fn _private_decode_node_list(id: usize) -> ::skylite_core::nodes::NodeList<#project_ident> {
-            let data = _PRIVATE_NODE_LIST_DATA[id as usize];
+            let data = _PRIVATE_NODE_LIST_DATA[id];
             let mut decoder = ::skylite_compress::make_decoder(data);
             let len = ::skylite_core::decode::read_varint(decoder.as_mut());
             let nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=#project_ident>>> = (0..len)

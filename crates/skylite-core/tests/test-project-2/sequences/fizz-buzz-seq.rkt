@@ -1,3 +1,5 @@
+#lang skylite/asset 'sequence
+
 '((node . fizz-buzz)
   (subs .
     ((check-fizz .

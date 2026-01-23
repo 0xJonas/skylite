@@ -1,12 +1,78 @@
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote, ToTokens};
+use skylite_assets::{Type, TypedValue, Variable};
 use syn::{Ident, ImplItem, Item, ItemFn, Meta};
 
 use super::project::project_ident;
 use crate::generate::nodes::node_type_name;
-use crate::parse::util::{change_case, IdentCase};
-use crate::parse::values::{Type, TypedValue, Variable};
 use crate::SkyliteProcError;
+
+pub(crate) enum IdentCase {
+    UpperCamelCase,
+    _LowerCamelCase,
+    _UpperSnakeCase,
+    LowerSnakeCase,
+}
+
+pub(crate) fn change_case(input: &str, case: IdentCase) -> String {
+    input
+        .chars()
+        .scan(
+            (true, true, false),
+            |(first, prev_lowercase, split_queued), c| {
+                let is_delimiter = c == ' ' || c == '-' || c == '_';
+                let do_split = is_delimiter
+                    || *split_queued
+                    || (!*first && *prev_lowercase && c.is_uppercase());
+                *split_queued = false;
+
+                let out = match case {
+                    IdentCase::UpperCamelCase => {
+                        if is_delimiter {
+                            *split_queued = true;
+                            String::new()
+                        } else if do_split || *first {
+                            c.to_uppercase().to_string()
+                        } else {
+                            c.to_lowercase().to_string()
+                        }
+                    }
+                    IdentCase::_LowerCamelCase => {
+                        if is_delimiter {
+                            *split_queued = true;
+                            String::new()
+                        } else if do_split {
+                            c.to_uppercase().to_string()
+                        } else {
+                            c.to_lowercase().to_string()
+                        }
+                    }
+                    IdentCase::_UpperSnakeCase => {
+                        if is_delimiter {
+                            "_".to_owned()
+                        } else if do_split {
+                            "_".to_owned() + &c.to_uppercase().to_string()
+                        } else {
+                            c.to_uppercase().to_string()
+                        }
+                    }
+                    IdentCase::LowerSnakeCase => {
+                        if is_delimiter {
+                            "_".to_owned()
+                        } else if do_split {
+                            "_".to_owned() + &c.to_lowercase().to_string()
+                        } else {
+                            c.to_lowercase().to_string()
+                        }
+                    }
+                };
+                *first = false;
+                *prev_lowercase = c.is_lowercase();
+                Some(out)
+            },
+        )
+        .collect()
+}
 
 /// Returns the function item annotated with the given `attribute` from the list
 /// of `items`.
@@ -80,20 +146,28 @@ pub(crate) fn get_annotated_method_name<'a>(
 
 /// Generates a `TokenStream` of the form `var1: type1, var2: type2:, ...` from
 /// a list of `Variables`. Can be used for parameter lists and struct members.
-pub(crate) fn generate_field_list(params: &[Variable], prefix: TokenStream) -> TokenStream {
+pub(crate) fn generate_field_list(
+    params: &[Variable],
+    prefix: TokenStream,
+    project_name: &Ident,
+) -> TokenStream {
     let param_names = params
         .iter()
         .map(|p| format_ident!("{}", change_case(&p.name, IdentCase::LowerSnakeCase)));
     let param_types = params
         .iter()
-        .map(|p| skylite_type_to_rust(&p.typename, true));
+        .map(|p| skylite_type_to_rust(&p.vtype, true, project_name));
     quote! {
         #(#prefix #param_names: #param_types),*
     }
 }
 
 /// Converts a `Type` to the corresponding owned Rust type.
-pub(crate) fn skylite_type_to_rust(t: &Type, is_annotation: bool) -> TokenStream {
+pub(crate) fn skylite_type_to_rust(
+    t: &Type,
+    is_annotation: bool,
+    project_name: &Ident,
+) -> TokenStream {
     match t {
         Type::U8 => quote!(u8),
         Type::U16 => quote!(u16),
@@ -110,18 +184,26 @@ pub(crate) fn skylite_type_to_rust(t: &Type, is_annotation: bool) -> TokenStream
         Type::Tuple(member_types) => {
             let member_types_tokens = member_types
                 .iter()
-                .map(|t| skylite_type_to_rust(t, is_annotation));
+                .map(|t| skylite_type_to_rust(t, is_annotation, project_name));
             quote!((#(#member_types_tokens),*))
         }
         Type::Vec(item_type) => {
-            let item_type_tokens = skylite_type_to_rust(&item_type, is_annotation);
+            let item_type_tokens = skylite_type_to_rust(&item_type, is_annotation, project_name);
             if is_annotation {
                 quote!(Vec<#item_type_tokens>)
             } else {
                 quote!(Vec::<#item_type_tokens>)
             }
         }
-        Type::NodeList => quote!(::skylite_core::nodes::NodeList),
+        Type::Project => panic!("Unexpected type 'Project'"),
+        Type::NodeList => {
+            if is_annotation {
+                quote!(::skylite_core::nodes::NodeList<#project_name>)
+            } else {
+                quote!(::skylite_core::nodes::NodeList::<#project_name>)
+            }
+        }
+        Type::Sequence => panic!("Unexpected type 'Sequence'"),
         Type::Node(name) => node_type_name(name.as_str()).to_token_stream(),
     }
 }
@@ -129,11 +211,18 @@ pub(crate) fn skylite_type_to_rust(t: &Type, is_annotation: bool) -> TokenStream
 /// Generates a list of statements of the form `let <name> =
 /// <type>::deserialize(decoder);`. Can be used as a building block for decode
 /// functions.
-pub(crate) fn generate_deserialize_statements(args: &[Variable]) -> TokenStream {
+pub(crate) fn generate_deserialize_statements(
+    args: &[Variable],
+    project_name: &Ident,
+) -> TokenStream {
     let statements = args.iter().map(|v| {
         let ident = format_ident!("{}", change_case(&v.name, IdentCase::LowerSnakeCase));
-        let t = skylite_type_to_rust(&v.typename, false);
-        quote!(let #ident = #t::deserialize(decoder);)
+        if let Type::NodeList = &v.vtype {
+            quote!(let #ident = #project_name::_private_decode_node_list(u32::deserialize(decoder) as usize);)
+        } else {
+            let t = skylite_type_to_rust(&v.vtype, false, project_name);
+            quote!(let #ident = #t::deserialize(decoder);)
+        }
     });
     quote!(#(#statements)*)
 }
@@ -187,13 +276,14 @@ pub(crate) fn typed_value_to_rust(val: &TypedValue, project_name: &str) -> Token
                 .args
                 .iter()
                 .map(|item| typed_value_to_rust(item, project_name));
-            let name = node_type_name(&instance.name);
+            let name = node_type_name(&instance.node);
             quote!(#name::new(#(#args),*))
         }
         TypedValue::NodeList(id) => {
             let project_ident = project_ident(project_name);
-            quote!(#project_ident::_private_decode_node_list(#id))
+            quote!(#project_ident::_private_decode_node_list(#id as usize))
         }
+        TypedValue::Sequence(..) => panic!("Unexpected typed value 'Sequence'"),
     }
 }
 
@@ -218,14 +308,76 @@ pub(crate) fn validate_type(skylite_type: &Type, rust_type: &syn::Type) -> bool 
         Type::Node(name) => {
             matches!(rust_type, syn::Type::Path(p) if p.path.is_ident(&change_case(name, IdentCase::UpperCamelCase)))
         }
+        // TODO
+        Type::NodeList => true,
         _ => unimplemented!(),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn create_tmp_fs(files: &[(&str, &str)]) -> Result<tempfile::TempDir, std::io::Error> {
+    use std::fs::create_dir_all;
+
+    let tmp = tempfile::tempdir()?;
+    for (name, content) in files {
+        let file_path = tmp.path().join(name);
+        if let Some(parent) = file_path.parent() {
+            create_dir_all(parent).unwrap();
+        }
+
+        std::fs::write(file_path, content.as_bytes())?;
+    }
+    Ok(tmp)
 }
 
 #[cfg(test)]
 mod tests {
     use quote::format_ident;
     use syn::{parse_quote, File};
+
+    use super::{change_case, IdentCase};
+
+    #[test]
+    fn test_change_case() {
+        assert_eq!(change_case("test", IdentCase::UpperCamelCase), "Test");
+        assert_eq!(change_case("test", IdentCase::_LowerCamelCase), "test");
+        assert_eq!(change_case("test", IdentCase::_UpperSnakeCase), "TEST");
+        assert_eq!(change_case("test", IdentCase::LowerSnakeCase), "test");
+
+        assert_eq!(
+            change_case("TestText", IdentCase::UpperCamelCase),
+            "TestText"
+        );
+        assert_eq!(
+            change_case("TestText", IdentCase::_LowerCamelCase),
+            "testText"
+        );
+        assert_eq!(
+            change_case("TestText", IdentCase::_UpperSnakeCase),
+            "TEST_TEXT"
+        );
+        assert_eq!(
+            change_case("TestText", IdentCase::LowerSnakeCase),
+            "test_text"
+        );
+
+        assert_eq!(
+            change_case("test_text", IdentCase::UpperCamelCase),
+            "TestText"
+        );
+        assert_eq!(
+            change_case("test_text", IdentCase::_LowerCamelCase),
+            "testText"
+        );
+        assert_eq!(
+            change_case("test_text", IdentCase::_UpperSnakeCase),
+            "TEST_TEXT"
+        );
+        assert_eq!(
+            change_case("test_text", IdentCase::LowerSnakeCase),
+            "test_text"
+        );
+    }
 
     #[test]
     fn test_get_annotated_method_name() {

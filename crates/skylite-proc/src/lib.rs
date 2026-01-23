@@ -4,11 +4,9 @@ use std::str::FromStr;
 use generate::nodes::generate_node_definition;
 use generate::remove_annotations_from_items;
 use generate::sequences::generate_sequence_definition;
-use parse::guile::SCM;
-use parse::project::SkyliteProject;
-use parse::scheme_util::form_to_string;
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
+use skylite_assets::AssetError;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{parse2, Expr, ExprLit, Item, ItemMod, Token};
@@ -25,16 +23,16 @@ macro_rules! data_err {
     };
 }
 
-mod assets;
 mod ecs;
 mod generate;
-mod parse;
 
 use ecs::system_impl;
 
-#[derive(Debug, Clone)]
+use crate::generate::project::generate_project;
+
+#[derive(Debug)]
 enum SkyliteProcError {
-    GuileException(SCM),
+    AssetError(AssetError),
     DataError(String),
     SyntaxError(String),
     OtherError(String),
@@ -43,11 +41,17 @@ enum SkyliteProcError {
 impl std::fmt::Display for SkyliteProcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::GuileException(scm) => write!(f, "Scheme Exception: {}", form_to_string(*scm)),
+            Self::AssetError(err) => write!(f, "Asset Error: {}", err),
             Self::DataError(str) => write!(f, "Data Error: {}", str),
             Self::SyntaxError(str) => write!(f, "Syntax Error: {}", str),
             Self::OtherError(str) => write!(f, "Error: {}", str),
         }
+    }
+}
+
+impl From<AssetError> for SkyliteProcError {
+    fn from(value: AssetError) -> Self {
+        SkyliteProcError::AssetError(value)
     }
 }
 
@@ -153,7 +157,7 @@ fn skylite_project_impl_fallible(
         ));
     }
 
-    let path = parse_project_file(&args[0])?;
+    let project_root = parse_project_file(&args[0])?;
 
     let mut module = parse2::<ItemMod>(body_raw)
         .map_err(|err| SkyliteProcError::SyntaxError(err.to_string()))?;
@@ -172,9 +176,9 @@ fn skylite_project_impl_fallible(
         }
     };
 
-    let mut project = SkyliteProject::from_file(&path, true)?;
+    let project = skylite_assets::load_project(&project_root)?;
 
-    let mut project_items = project.generate(target_type, &items)?;
+    let mut project_items = generate_project(&project_root, &project, target_type, &items)?;
     remove_annotations_from_items(items);
     items.append(&mut project_items);
 
@@ -191,9 +195,7 @@ fn skylite_project_impl_fallible(
     Ok(out)
 }
 
-fn extract_asset_file(
-    asset_file: &TokenStream,
-) -> Result<(SkyliteProject, String), SkyliteProcError> {
+fn extract_asset_file(asset_file: &TokenStream) -> Result<(PathBuf, String), SkyliteProcError> {
     let args = Parser::parse2(
         Punctuated::<Expr, Token![,]>::parse_separated_nonempty,
         asset_file.clone(),
@@ -211,14 +213,13 @@ fn extract_asset_file(
     }
 
     let project_root = parse_project_file(&args[0])?;
-    let stub = SkyliteProject::from_file(&project_root, false)?;
 
     let asset_name = string_from_expr(
         &args[1],
         syntax_err!("Expected a string literal for asset name"),
     )?;
 
-    return Ok((stub, asset_name));
+    return Ok((project_root, asset_name));
 }
 
 fn node_definition_fallible(
@@ -234,8 +235,9 @@ fn node_definition_fallible(
         .ok_or(data_err!("Node definition module must have a body"))?
         .1;
 
-    let (mut project, name) = extract_asset_file(&args_raw)?;
-    let node = project.assets.load_node(&name)?;
+    let (project_path, name) = extract_asset_file(&args_raw)?;
+    let node = skylite_assets::load_node(&project_path, &name)?;
+    let project = skylite_assets::load_project(&project_path)?;
 
     let tokens = generate_node_definition(&node, &project.name, &items)?;
     remove_annotations_from_items(items);
@@ -256,8 +258,9 @@ fn sequence_definition_fallible(
         .ok_or(data_err!("Node definition module must have a body"))?
         .1;
 
-    let (mut project, name) = extract_asset_file(&args_raw)?;
-    let sequence = project.assets.load_sequence(&name)?;
+    let (project_path, name) = extract_asset_file(&args_raw)?;
+    let sequence = skylite_assets::load_sequence(&project_path, &name)?;
+    let project = skylite_assets::load_project(&project_path)?;
 
     let tokens = Item::Verbatim(generate_sequence_definition(
         &sequence,

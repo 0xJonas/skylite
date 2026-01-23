@@ -16,13 +16,12 @@
 (struct project (root-asset-file root-asset-name asset-files))
 (struct asset (name type file tracked-paths thunk))
 
-
 ; (project-root asset-name) -> asset-data
-(define asset-cache (make-immutable-hash))
+(define asset-cache (make-hash))
 ; (project-root asset-name) -> asset-meta
-(define open-assets (make-immutable-hash))
+(define open-assets (make-hash))
 ; project-root -> project
-(define open-projects (make-immutable-hash))
+(define open-projects (make-hash))
 
 (define current-project (make-parameter #f))
 
@@ -67,7 +66,8 @@
   (define raw-assets
     (let ([ns (make-base-namespace)])
       (parameterize ([current-namespace ns])
-        (dynamic-require path 'skylite-assets))))
+        (with-handlers ([exn? (lambda (e) (raise-asset-error "Error loading file ~a: ~a" (path->string path) e))])
+          (dynamic-require path 'skylite-assets)))))
 
   (parameterize ([current-error-context
                   (struct-copy error-context (current-error-context)
@@ -145,9 +145,9 @@
 
 
 (define (refresh-project-assets! project-root unchanged-tfiles new-tfiles)
-  (define (add-assets-from-tfile ht tfile)
-    (for/fold ([ht ht]) ([asset (load-assets-from-file (tracked-file-path tfile))])
-      (hash-set ht (cons project-root (asset-name asset)) asset)))
+  (define (add-assets-from-tfile! ht tfile)
+    (for ([asset (load-assets-from-file (tracked-file-path tfile))])
+      (hash-set! ht (cons project-root (asset-name asset)) asset)))
 
   (define (removed-asset? asset-key asset)
     (and (equal? (car asset-key) project-root)
@@ -156,17 +156,14 @@
   (define removed-asset-keys (map car (filter (lambda (kv) (removed-asset? (car kv) (cdr kv))) (hash->list open-assets))))
 
   ; Remove changed and deleted assets
-  (set! open-assets
-        (for/fold ([open-assets open-assets]) ([key removed-asset-keys])
-          (hash-remove open-assets key)))
-  (set! asset-cache
-        (for/fold ([asset-cache asset-cache]) ([key removed-asset-keys])
-          (hash-remove asset-cache key)))
+  (for ([key removed-asset-keys])
+    (hash-remove! open-assets key))
+  (for ([key removed-asset-keys])
+    (hash-remove! asset-cache key))
 
   ; Add changed and new assets
-  (set! open-assets
-        (for/fold ([open-assets open-assets]) ([tfile new-tfiles])
-          (add-assets-from-tfile open-assets tfile))))
+  (for ([tfile new-tfiles])
+    (add-assets-from-tfile! open-assets tfile)))
 
 
 (define (load-or-update-project prev-project project-root)
@@ -197,9 +194,8 @@
 
   (refresh-project-assets! project-root unchanged-tfiles new-tfiles)
 
-  (set! open-assets
-        (for/fold ([open-assets open-assets]) ([asset additional-assets])
-          (hash-set open-assets (cons project-root (asset-name asset)) asset)))
+  (for ([asset additional-assets])
+    (hash-set! open-assets (cons project-root (asset-name asset)) asset))
 
   (project new-root-tfile
            root-asset-name
@@ -223,7 +219,7 @@
 
         ; Project was not open or some files have changed
         (let ([new-project (load-or-update-project prev-project project-root)])
-          (set! open-projects (hash-set open-projects project-root new-project))
+          (hash-set! open-projects project-root new-project)
           new-project))))
 
 
@@ -302,8 +298,8 @@
           (let* ([asset-data (eval-asset)]
                  [new-asset (struct-copy asset asset-inst [tracked-paths new-tracked-paths])]
                  [refined-data (refine-asset req-type asset-data)])
-            (set! asset-cache (hash-set asset-cache asset-key refined-data))
-            (set! open-assets (hash-set open-assets asset-key new-asset))
+            (hash-set! asset-cache asset-key refined-data)
+            (hash-set! open-assets asset-key new-asset)
             (values asset-inst refined-data))))))
 
 

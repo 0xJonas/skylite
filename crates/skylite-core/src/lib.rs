@@ -64,7 +64,7 @@ pub trait Ids: Copy {
 /// The main type for skylite projects.
 pub trait SkyliteProject {
     type Target: SkyliteTarget;
-    type TileType: Copy;
+    //type TileType: Copy;
     type NodeListIds: NodeListIds;
 
     /// Creates a new instance of the project with the given target.

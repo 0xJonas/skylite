@@ -44,56 +44,56 @@ pub enum Op {
         value: String,
     },
     Modify {
-        value: TypedValue,
+        delta: TypedValue,
     },
     ModifyF32 {
-        value: f32,
+        delta: f32,
     },
     ModifyF64 {
-        value: f64,
+        delta: f64,
     },
     BranchIfTrue {
-        target: u32,
+        target: usize,
     },
     BranchIfFalse {
-        target: u32,
+        target: usize,
     },
     BranchUInt {
         comparison: Comparison,
         value: TypedValue,
-        target: u32,
+        target: usize,
     },
     BranchSInt {
         comparison: Comparison,
         value: TypedValue,
-        target: u32,
+        target: usize,
     },
     BranchF32 {
         comparison: Comparison,
         value: f32,
-        target: u32,
+        target: usize,
     },
     BranchF64 {
         comparison: Comparison,
         value: f64,
-        target: u32,
+        target: usize,
     },
     Jump {
-        target: u32,
+        target: usize,
     },
     Call {
-        target: u32,
+        target: usize,
     },
     Return,
     Wait {
         frames: u16,
     },
     RunCustom {
-        fname: String,
+        id: String,
     },
     BranchCustom {
-        fname: String,
-        target: u32,
+        id: String,
+        target: usize,
     },
 }
 
@@ -117,30 +117,30 @@ impl Deserialize for Op {
             }
             3 => {
                 let type_ = Type::read(input)?;
-                let value = TypedValue::read(input, &type_)?;
-                Ok(Op::Modify { value })
+                let delta = TypedValue::read(input, &type_)?;
+                Ok(Op::Modify { delta })
             }
             4 => {
-                let value = f32::deserialize(input)?;
-                Ok(Op::ModifyF32 { value })
+                let delta = f32::deserialize(input)?;
+                Ok(Op::ModifyF32 { delta })
             }
             5 => {
-                let value = f64::deserialize(input)?;
-                Ok(Op::ModifyF64 { value })
+                let delta = f64::deserialize(input)?;
+                Ok(Op::ModifyF64 { delta })
             }
             6 => {
-                let target = u32::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
                 Ok(Op::BranchIfTrue { target })
             }
             7 => {
-                let target = u32::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
                 Ok(Op::BranchIfFalse { target })
             }
             8 => {
                 let comparison = Comparison::deserialize(input)?;
                 let type_ = Type::read(input)?;
                 let value = TypedValue::read(input, &type_)?;
-                let target = u32::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
                 Ok(Op::BranchUInt {
                     comparison,
                     value,
@@ -151,7 +151,7 @@ impl Deserialize for Op {
                 let comparison = Comparison::deserialize(input)?;
                 let type_ = Type::read(input)?;
                 let value = TypedValue::read(input, &type_)?;
-                let target = u32::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
                 Ok(Op::BranchSInt {
                     comparison,
                     value,
@@ -161,7 +161,7 @@ impl Deserialize for Op {
             10 => {
                 let comparison = Comparison::deserialize(input)?;
                 let value = f32::deserialize(input)?;
-                let target = u32::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
                 Ok(Op::BranchF32 {
                     comparison,
                     value,
@@ -171,7 +171,7 @@ impl Deserialize for Op {
             11 => {
                 let comparison = Comparison::deserialize(input)?;
                 let value = f64::deserialize(input)?;
-                let target = u32::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
                 Ok(Op::BranchF64 {
                     comparison,
                     value,
@@ -179,11 +179,11 @@ impl Deserialize for Op {
                 })
             }
             12 => {
-                let target = u32::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
                 Ok(Op::Jump { target })
             }
             13 => {
-                let target = u32::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
                 Ok(Op::Call { target })
             }
             14 => Ok(Op::Return),
@@ -192,13 +192,13 @@ impl Deserialize for Op {
                 Ok(Op::Wait { frames })
             }
             16 => {
-                let fname = String::deserialize(input)?;
-                Ok(Op::RunCustom { fname })
+                let id = String::deserialize(input)?;
+                Ok(Op::RunCustom { id })
             }
             17 => {
-                let fname = String::deserialize(input)?;
-                let target = u32::deserialize(input)?;
-                Ok(Op::BranchCustom { fname, target })
+                let id = String::deserialize(input)?;
+                let target = u32::deserialize(input)? as usize;
+                Ok(Op::BranchCustom { id, target })
             }
             _ => panic!("Invalid operation {}", opcode),
         }
@@ -233,6 +233,24 @@ pub fn load_sequence(project_path: &Path, name: &str) -> Result<Sequence, AssetE
     connection.read_exact(&mut status)?;
     if status[0] == 0 {
         Ok(Sequence::deserialize(&mut connection)?)
+    } else {
+        Err(AssetError::read(&mut connection))
+    }
+}
+
+pub fn load_all_sequences(project_path: &Path) -> Result<Vec<Sequence>, AssetError> {
+    let mut connection = connect_to_asset_server()?;
+    connection.send_all_assets_request(project_path, AssetType::Sequence)?;
+
+    let mut status = [0u8; 1];
+    connection.read_exact(&mut status)?;
+    if status[0] == 0 {
+        let len = u32::deserialize(&mut connection)? as usize;
+        let mut out = Vec::with_capacity(len);
+        for _ in 0..len {
+            out.push(Sequence::deserialize(&mut connection)?);
+        }
+        Ok(out)
     } else {
         Err(AssetError::read(&mut connection))
     }
@@ -277,18 +295,18 @@ mod tests {
                         property: "prop-u16".to_owned()
                     },
                     Op::Modify {
-                        value: TypedValue::U16(10)
+                        delta: TypedValue::U16(10)
                     },
                     Op::PushOffset {
                         node: "node2".to_owned(),
                         property: "prop-f32".to_owned()
                     },
-                    Op::ModifyF32 { value: 1.0 },
+                    Op::ModifyF32 { delta: 1.0 },
                     Op::PushOffset {
                         node: "node2".to_owned(),
                         property: "prop-f64".to_owned()
                     },
-                    Op::ModifyF64 { value: -1.0 },
+                    Op::ModifyF64 { delta: -1.0 },
                     Op::PushOffset {
                         node: "node2".to_owned(),
                         property: "prop-bool".to_owned()
@@ -339,10 +357,10 @@ mod tests {
                     Op::Call { target: 28 },
                     Op::Wait { frames: 1 },
                     Op::RunCustom {
-                        fname: "custom-fn".to_owned()
+                        id: "custom-fn".to_owned()
                     },
                     Op::BranchCustom {
-                        fname: "custom-cond".to_owned(),
+                        id: "custom-cond".to_owned(),
                         target: 0
                     },
                     Op::Return,

@@ -64,11 +64,9 @@
        (serialize-obj out 'type (car arg))
        (serialize-obj out (car arg) (cdr arg)))]
     ['node-list
-      (serialize-obj out 'string (symbol->string (car value)))
-      (serialize-obj out 'u32 (cdr value))]
+      (serialize-obj out 'u32 (compute-asset-id 'node-list value))]
     ['sequence
-      (serialize-obj out 'string (symbol->string (car value)))
-      (serialize-obj out 'u32 (cdr value))])
+      (serialize-obj out 'u32 (compute-asset-id 'sequence value))])
   (void))
 
 

@@ -172,7 +172,7 @@ pub(crate) use unix::{connect_to_asset_server, AssetServerConnection};
 compile_error!("This platform is currently not supported.");
 
 const REQ_TYPE_RETRIEVE_ASSET: u8 = 0;
-const REQ_TYPE_LIST_ASSETS: u8 = 1;
+const REQ_TYPE_ALL_ASSETS: u8 = 1;
 const REQ_TYPE_CLEAR_CACHE: u8 = 2;
 const REQ_TYPE_SHUTDOWN: u8 = 3;
 
@@ -197,12 +197,12 @@ impl AssetServerConnection {
         Ok(())
     }
 
-    pub(crate) fn send_list_assets_request(
+    pub(crate) fn send_all_assets_request(
         &mut self,
         project_path: &Path,
         atype: AssetType,
     ) -> Result<(), AssetError> {
-        REQ_TYPE_LIST_ASSETS.serialize(self)?;
+        REQ_TYPE_ALL_ASSETS.serialize(self)?;
         path_to_native(project_path).as_slice().serialize(self)?;
 
         match atype {

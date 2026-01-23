@@ -2,9 +2,8 @@
 
 #![allow(non_snake_case)]
 
+use skylite_assets::TypedValue;
 use skylite_compress::{compress, CompressionMethods};
-
-use crate::parse::values::TypedValue;
 
 pub trait Serialize {
     fn serialize(&self, buffer: &mut CompressionBuffer);
@@ -141,6 +140,7 @@ impl Serialize for TypedValue {
             TypedValue::Vec(v) => (&v[..]).serialize(buffer),
             TypedValue::Node(instance) => instance.args.iter().for_each(|i| i.serialize(buffer)),
             TypedValue::NodeList(v) => buffer.write_varint(*v as usize),
+            TypedValue::Sequence(v) => buffer.write_varint(*v as usize),
         }
     }
 }

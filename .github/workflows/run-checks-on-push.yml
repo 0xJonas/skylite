@@ -31,9 +31,6 @@ jobs:
         variant: 'CS'
         version: '8.14'
 
-    - name: Install Guile
-      run: sudo apt-get install guile-3.0-dev
-
     - name: Install skylite support package
       run: raco pkg install --link ./support/skylite-racket
 

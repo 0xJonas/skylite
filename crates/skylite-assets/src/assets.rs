@@ -4,9 +4,9 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::NodeInstance;
 use crate::asset_server::{connect_to_asset_server, AssetServerConnection};
 use crate::base_serde::Deserialize;
+use crate::NodeInstance;
 
 #[cfg(target_family = "unix")]
 pub(crate) fn path_to_native(path: &Path) -> Vec<u8> {
@@ -149,7 +149,7 @@ impl AssetType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssetMeta {
-    pub id: u32,
+    pub id: usize,
     pub name: String,
     pub asset_type: AssetType,
     pub tracked_paths: Vec<PathBuf>,
@@ -157,7 +157,7 @@ pub struct AssetMeta {
 
 impl AssetMeta {
     pub(crate) fn read(input: &mut impl Read) -> Result<AssetMeta, AssetError> {
-        let id = u32::deserialize(input)?;
+        let id = u32::deserialize(input)? as usize;
         let name = String::deserialize(input)?;
         let asset_type = AssetType::read(input)?;
         let tracked_paths_len = u32::deserialize(input)? as usize;
@@ -173,31 +173,6 @@ impl AssetMeta {
             tracked_paths,
         })
     }
-}
-
-pub(crate) fn list_assets_conn(
-    project_path: &Path,
-    atype: AssetType,
-    connection: &mut AssetServerConnection,
-) -> Result<Vec<AssetMeta>, AssetError> {
-    connection.send_list_assets_request(project_path, atype)?;
-
-    let mut status = [0u8; 1];
-    connection.read_exact(&mut status)?;
-    if status[0] == 0 {
-        let num_assets = u32::deserialize(connection)? as usize;
-        let mut out = Vec::with_capacity(num_assets);
-        for _ in 0..num_assets {
-            out.push(AssetMeta::read(connection)?);
-        }
-        Ok(out)
-    } else {
-        Err(AssetError::read(connection))
-    }
-}
-
-pub fn list_assets(project_path: &Path, atype: AssetType) -> Result<Vec<AssetMeta>, AssetError> {
-    list_assets_conn(project_path, atype, &mut connect_to_asset_server()?)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -332,41 +307,5 @@ impl TypedValue {
                 Ok(TypedValue::Sequence(id))
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::{list_assets, AssetMeta, AssetType};
-
-    #[test]
-    fn test_list_assets() {
-        let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("./tests/test-project")
-            .canonicalize()
-            .unwrap();
-
-        let nodes = list_assets(&project_dir.join("project.rkt"), AssetType::Node).unwrap();
-        assert_eq!(nodes.len(), 2);
-        assert_eq!(
-            nodes[0],
-            AssetMeta {
-                asset_type: AssetType::Node,
-                id: 0,
-                name: "node1".to_owned(),
-                tracked_paths: vec![project_dir.join("assets/node1.rkt")]
-            }
-        );
-        assert_eq!(
-            nodes[1],
-            AssetMeta {
-                asset_type: AssetType::Node,
-                id: 1,
-                name: "node2".to_owned(),
-                tracked_paths: vec![project_dir.join("assets/node2.rkt")]
-            }
-        );
     }
 }

@@ -60,17 +60,35 @@ pub fn load_node(project_path: &Path, name: &str) -> Result<Node, AssetError> {
     }
 }
 
+pub fn load_all_nodes(project_path: &Path) -> Result<Vec<Node>, AssetError> {
+    let mut connection = connect_to_asset_server()?;
+    connection.send_all_assets_request(project_path, AssetType::Node)?;
+
+    let mut status = [0u8; 1];
+    connection.read_exact(&mut status)?;
+    if status[0] == 0 {
+        let len = u32::deserialize(&mut connection)? as usize;
+        let mut out = Vec::with_capacity(len);
+        for _ in 0..len {
+            out.push(Node::read(&mut connection)?);
+        }
+        Ok(out)
+    } else {
+        Err(AssetError::read(&mut connection))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeInstance {
     pub node: String,
-    pub node_id: u32,
+    pub node_id: usize,
     pub args: Vec<TypedValue>,
 }
 
 impl NodeInstance {
     pub(crate) fn read(input: &mut impl Read) -> Result<NodeInstance, AssetError> {
         let node = String::deserialize(input)?;
-        let node_id = u32::deserialize(input)?;
+        let node_id = u32::deserialize(input)? as usize;
         let args_len = u32::deserialize(input)? as usize;
         let mut args = Vec::with_capacity(args_len);
         for _ in 0..args_len {
@@ -112,6 +130,24 @@ pub fn load_node_list(project_path: &Path, name: &str) -> Result<NodeList, Asset
     connection.read_exact(&mut status)?;
     if status[0] == 0 {
         Ok(NodeList::read(&mut connection)?)
+    } else {
+        Err(AssetError::read(&mut connection))
+    }
+}
+
+pub fn load_all_node_lists(project_path: &Path) -> Result<Vec<NodeList>, AssetError> {
+    let mut connection = connect_to_asset_server()?;
+    connection.send_all_assets_request(project_path, AssetType::NodeList)?;
+
+    let mut status = [0u8; 1];
+    connection.read_exact(&mut status)?;
+    if status[0] == 0 {
+        let len = u32::deserialize(&mut connection)? as usize;
+        let mut out = Vec::with_capacity(len);
+        for _ in 0..len {
+            out.push(NodeList::read(&mut connection)?);
+        }
+        Ok(out)
     } else {
         Err(AssetError::read(&mut connection))
     }

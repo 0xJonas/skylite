@@ -2,13 +2,13 @@ use skylite_core::SkyliteProject;
 use skylite_mock::{Call, MockTarget};
 use skylite_proc::{node_definition, sequence_definition, skylite_project};
 
-#[sequence_definition("./tests/test-project-2/project.scm", "fizz-buzz-seq")]
+#[sequence_definition("./tests/test-project-2/project.rkt", "fizz-buzz-seq")]
 mod fizz_buzz_seq {
     use crate::fizz_buzz::FizzBuzz;
     use crate::project::SequenceTest;
 }
 
-#[node_definition("./tests/test-project-2/project.scm", "wrapper")]
+#[node_definition("./tests/test-project-2/project.rkt", "wrapper")]
 mod wrapper {
     use skylite_core::sequences::Sequencer;
     use skylite_core::ProjectControls;
@@ -39,7 +39,7 @@ mod wrapper {
     }
 }
 
-#[node_definition("./tests/test-project-2/project.scm", "fizz-buzz")]
+#[node_definition("./tests/test-project-2/project.rkt", "fizz-buzz")]
 mod fizz_buzz {
     use super::fizz_buzz_scratch::FizzBuzzScratch;
     use crate::project::SequenceTest;
@@ -77,7 +77,7 @@ mod fizz_buzz {
     }
 }
 
-#[node_definition("./tests/test-project-2/project.scm", "fizz-buzz-scratch")]
+#[node_definition("./tests/test-project-2/project.rkt", "fizz-buzz-scratch")]
 mod fizz_buzz_scratch {
     use crate::project::SequenceTest;
 
@@ -102,7 +102,7 @@ mod fizz_buzz_scratch {
     }
 }
 
-#[skylite_project("./tests/test-project-2/project.scm", MockTarget)]
+#[skylite_project("./tests/test-project-2/project.rkt", MockTarget)]
 mod project {
     use skylite_mock::MockTarget;
 

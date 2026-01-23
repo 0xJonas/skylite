@@ -1,5 +1,8 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
+use skylite_assets::{
+    load_all_node_lists, load_all_nodes, load_all_sequences, Node, NodeInstance, NodeList, Project,
+};
 use syn::{Item, ItemFn};
 
 use super::node_lists::generate_node_list_ids;
@@ -8,14 +11,11 @@ use crate::generate::node_lists::{
     generate_decode_node_list_fn, generate_node_list_data, node_list_ids_type,
 };
 use crate::generate::nodes::{generate_decode_node_fn, node_type_name};
-use crate::generate::util::{get_annotated_function, typed_value_to_rust};
+use crate::generate::util::{change_case, get_annotated_function, typed_value_to_rust, IdentCase};
 use crate::generate::{
     ANNOTATION_INIT, ANNOTATION_POST_RENDER, ANNOTATION_POST_UPDATE, ANNOTATION_PRE_RENDER,
     ANNOTATION_PRE_UPDATE,
 };
-use crate::parse::nodes::NodeInstance;
-use crate::parse::project::SkyliteProject;
-use crate::parse::util::{change_case, IdentCase};
 use crate::SkyliteProcError;
 
 fn tile_type_name(project_name: &str) -> Ident {
@@ -65,7 +65,7 @@ fn generate_project_new_method(
     root_node: &NodeInstance,
 ) -> TokenStream {
     let project_ident = project_ident(project_name);
-    let root_node_name = node_type_name(&root_node.name);
+    let root_node_name = node_type_name(&root_node.node);
     let root_node_params = root_node
         .args
         .iter()
@@ -133,7 +133,9 @@ fn gen_apply_project_controls() -> TokenStream {
 }
 
 fn generate_project_trait_impl(
-    project: &SkyliteProject,
+    project: &Project,
+    nodes: &[Node],
+    node_lists: &[NodeList],
     target_type: &syn::Path,
     items: &[Item],
 ) -> TokenStream {
@@ -142,7 +144,7 @@ fn generate_project_trait_impl(
     }
 
     let project_ident = project_ident(&project.name);
-    let tile_type_name = tile_type_name(&project.name);
+    //let tile_type_name = tile_type_name(&project.name);
     let node_list_ids_type = node_list_ids_type(&project.name);
 
     let new_draw_context = gen_new_draw_context();
@@ -174,22 +176,16 @@ fn generate_project_trait_impl(
         .map(|name| quote!(#name(&mut draw_context);))
         .unwrap_or(TokenStream::new());
 
-    let new_method = generate_project_new_method(
-        &project.name,
-        target_type,
-        &init,
-        project.root_node.as_ref().unwrap(),
-    );
+    let new_method =
+        generate_project_new_method(&project.name, target_type, &init, &project.root_node);
 
-    let nodes = project.assets.get_all_nodes();
-    let node_lists = project.assets.get_all_node_lists();
-    let decode_node_fn = generate_decode_node_fn(&project.name, &nodes, &node_lists);
+    let decode_node_fn = generate_decode_node_fn(&project.name, nodes, node_lists);
     let decode_node_list_fn = generate_decode_node_list_fn(&project.name);
 
     quote! {
         impl skylite_core::SkyliteProject for #project_ident {
             type Target = #target_type;
-            type TileType = #tile_type_name;
+            //type TileType = #tile_type_name;
             type NodeListIds = #node_list_ids_type;
 
             #new_method
@@ -238,54 +234,52 @@ fn generate_project_trait_impl(
     }
 }
 
-impl SkyliteProject {
-    pub(crate) fn initialize_assets(&mut self) -> Result<(), SkyliteProcError> {
-        self.assets.load_all_nodes()?;
-        self.assets.load_all_node_lists()?;
-        self.assets.load_all_sequences()?;
-        Ok(())
-    }
+pub(crate) fn generate_project(
+    project_root: &std::path::Path,
+    project: &Project,
+    target_type: &syn::Path,
+    items: &[Item],
+) -> Result<Vec<Item>, SkyliteProcError> {
+    let nodes = load_all_nodes(project_root)?;
+    let node_lists = load_all_node_lists(project_root)?;
+    let sequences = load_all_sequences(project_root)?;
 
-    pub(crate) fn generate(
-        &mut self,
-        target_type: &syn::Path,
-        items: &[Item],
-    ) -> Result<Vec<Item>, SkyliteProcError> {
-        self.initialize_assets()?;
-
-        let node_lists = self.assets.get_all_node_lists();
-
-        Ok(vec![
-            Item::Verbatim(generate_tile_type_enum(&self.name, &self.tile_types)),
-            Item::Verbatim(generate_node_list_data(&node_lists[..])),
-            Item::Verbatim(generate_node_list_ids(&node_lists[..], &self.name)),
-            Item::Verbatim(generate_sequence_data(&self.assets.get_all_sequences()[..])),
-            Item::Verbatim(generate_project_type(&self.name, &target_type)),
-            Item::Verbatim(generate_project_impl(&self.name)),
-            Item::Verbatim(generate_project_trait_impl(self, &target_type, items)),
-        ])
-    }
+    Ok(vec![
+        //Item::Verbatim(generate_tile_type_enum(&project.name, &self.tile_types)),
+        Item::Verbatim(generate_node_list_data(&node_lists)),
+        Item::Verbatim(generate_node_list_ids(&node_lists, &project.name)),
+        Item::Verbatim(generate_sequence_data(&sequences)),
+        Item::Verbatim(generate_project_type(&project.name, &target_type)),
+        Item::Verbatim(generate_project_impl(&project.name)),
+        Item::Verbatim(generate_project_trait_impl(
+            project,
+            &nodes,
+            &node_lists,
+            &target_type,
+            items,
+        )),
+    ])
 }
 
 #[cfg(test)]
 mod tests {
     use quote::quote;
+    use skylite_assets::{load_all_nodes, load_project};
     use syn::parse_quote;
 
     use super::generate_project_trait_impl;
-    use crate::assets::tests::create_tmp_fs;
-    use crate::SkyliteProject;
+    use crate::generate::util::create_tmp_fs;
 
     #[test]
     fn test_generate_project_implementation() {
         let tmp_fs = create_tmp_fs(&[
             (
-                "project.scm",
-                r#"'((name . Test1) (root-node . (test-node #f 5)) (tile-types . (solid)))"#,
+                "project.rkt",
+                r#"#lang skylite/asset 'project '([name . Test1] [root-node . (test-node #f 5)])"#,
             ),
             (
-                "nodes/test-node.scm",
-                "'((parameters . ((p1 bool) (p2 u8))))",
+                "nodes/test-node.rkt",
+                "#lang skylite/asset 'node '([parameters . ((p1 bool) (p2 u8))])",
             ),
         ])
         .unwrap();
@@ -301,16 +295,21 @@ mod tests {
             fn post_render(project: &mut skylite_core::RenderControls<'static, Test1>) {}
         };
 
-        let mut project =
-            SkyliteProject::from_file(&tmp_fs.path().join("project.scm"), true).unwrap();
-        project.initialize_assets().unwrap();
+        let project_root = tmp_fs.path().join("project.rkt");
 
-        let actual =
-            generate_project_trait_impl(&project, &parse_quote!(MockTarget), &body_parsed.items);
+        let project = load_project(&project_root).unwrap();
+        let nodes = load_all_nodes(&project_root).unwrap();
+
+        let actual = generate_project_trait_impl(
+            &project,
+            &nodes,
+            &[],
+            &parse_quote!(MockTarget),
+            &body_parsed.items,
+        );
         let expectation = quote! {
             impl skylite_core::SkyliteProject for Test1 {
                 type Target = MockTarget;
-                type TileType = Test1Tiles;
                 type NodeListIds = Test1NodeListIds;
 
                 fn new(target: MockTarget) -> Test1 {
@@ -378,7 +377,7 @@ mod tests {
                 }
 
                 fn _private_decode_node_list(id: usize) -> ::skylite_core::nodes::NodeList<Test1> {
-                    let data = _PRIVATE_NODE_LIST_DATA[id as usize];
+                    let data = _PRIVATE_NODE_LIST_DATA[id];
                     let mut decoder = ::skylite_compress::make_decoder(data);
                     let len = ::skylite_core::decode::read_varint(decoder.as_mut());
                     let nodes: Vec<Box<dyn ::skylite_core::nodes::Node<P=Test1>>> = (0 .. len)

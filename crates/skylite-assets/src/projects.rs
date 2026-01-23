@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::asset_server::connect_to_asset_server;
 use crate::base_serde::Deserialize;
-use crate::{AssetError, AssetMeta, AssetType, NodeInstance, list_assets_conn};
+use crate::{AssetError, AssetMeta, AssetType, NodeInstance};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
@@ -20,24 +20,24 @@ impl Deserialize for Project {
         let meta = AssetMeta::read(input)?;
         let name = String::deserialize(input)?;
         let root_node = NodeInstance::read(input)?;
-        Ok(Project { meta, name, root_node })
+        Ok(Project {
+            meta,
+            name,
+            root_node,
+        })
     }
 }
 
 pub fn load_project(project_path: &Path) -> Result<Project, AssetError> {
     let mut connection = connect_to_asset_server()?;
-    let project_assets = list_assets_conn(project_path, AssetType::Project, &mut connection)?;
-    assert_eq!(project_assets.len(), 1);
-
-    connection.send_load_asset_request(
-        project_path,
-        AssetType::Project,
-        &project_assets[0].name,
-    )?;
+    connection.send_all_assets_request(project_path, AssetType::Project)?;
 
     let mut status = [0u8; 1];
     connection.read_exact(&mut status)?;
     if status[0] == 0 {
+        let len = u32::deserialize(&mut connection)?;
+        assert_eq!(len, 1, "Project asset not found: {:?}", project_path);
+
         Ok(Project::deserialize(&mut connection)?)
     } else {
         Err(AssetError::read(&mut connection))
@@ -48,9 +48,8 @@ pub fn load_project(project_path: &Path) -> Result<Project, AssetError> {
 mod tests {
     use std::path::PathBuf;
 
-    use crate::{NodeInstance, TypedValue};
-
     use super::{load_project, Project};
+    use crate::{NodeInstance, TypedValue};
 
     #[test]
     fn test_load_project_asset() {
@@ -68,10 +67,7 @@ mod tests {
                 root_node: NodeInstance {
                     node: "node1".to_owned(),
                     node_id: 0,
-                    args: vec![
-                        TypedValue::U8(5),
-                        TypedValue::String("abc".to_owned())
-                    ]
+                    args: vec![TypedValue::U8(5), TypedValue::String("abc".to_owned())]
                 }
             }
         );

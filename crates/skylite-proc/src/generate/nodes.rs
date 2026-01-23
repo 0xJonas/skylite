@@ -2,23 +2,20 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use skylite_assets::{Node, NodeInstance, NodeList};
 use syn::{Field, Ident, Item, ItemStruct, Meta};
 
 use super::encode::{CompressionBuffer, Serialize};
-use crate::assets::AssetSource;
 use crate::generate::project::project_ident;
 use crate::generate::util::{
-    generate_argument_list, generate_deserialize_statements, generate_field_list,
-    get_annotated_method_name, validate_type,
+    change_case, generate_argument_list, generate_deserialize_statements, generate_field_list,
+    get_annotated_method_name, validate_type, IdentCase,
 };
 use crate::generate::{
     ANNOTATION_IS_VISIBLE, ANNOTATION_NEW, ANNOTATION_NODE, ANNOTATION_NODES,
     ANNOTATION_POST_UPDATE, ANNOTATION_PRE_UPDATE, ANNOTATION_PROPERTY, ANNOTATION_RENDER,
     ANNOTATION_UPDATE, ANNOTATION_Z_ORDER,
 };
-use crate::parse::node_lists::NodeList;
-use crate::parse::nodes::{Node, NodeInstance};
-use crate::parse::util::{change_case, IdentCase};
 use crate::SkyliteProcError;
 
 pub fn node_type_name(name: &str) -> Ident {
@@ -32,8 +29,8 @@ pub(crate) fn encode_node_instance(instance: &NodeInstance, buffer: &mut Compres
 
 pub(crate) fn generate_decode_node_fn(
     project_name: &str,
-    nodes: &[&Node],
-    node_lists: &[&NodeList],
+    nodes: &[Node],
+    node_lists: &[NodeList],
 ) -> TokenStream {
     // Only include nodes which are actually encoded,
     // i.e. those which appear as NodeInstances in NodeLists or Node properties.
@@ -41,7 +38,7 @@ pub(crate) fn generate_decode_node_fn(
 
     let used_nodes = node_lists
         .iter()
-        .flat_map(|node_list| node_list.content.iter())
+        .flat_map(|node_list| node_list.nodes.iter())
         .map(|i| i.node_id)
         .collect::<HashSet<usize>>();
 
@@ -49,13 +46,15 @@ pub(crate) fn generate_decode_node_fn(
         let node = &nodes[*id];
         let id = node.meta.id;
         let ident = node_type_name(&node.meta.name);
-        match node.meta.source {
-            AssetSource::BuiltIn(_) => {
-                // Use full path for built-in nodes, since it is known.
-                quote!(#id => Box::new(::skylite_core::nodes::#ident::_private_decode(decoder)))
-            }
-            _ => quote!(#id => Box::new(#ident::_private_decode(decoder))),
-        }
+        // match node.meta.source {
+        //     AssetSource::BuiltIn(_) => {
+        //         // Use full path for built-in nodes, since it is known.
+        //         quote!(#id =>
+        // Box::new(::skylite_core::nodes::#ident::_private_decode(decoder)))
+        //     }
+        //     _ => quote!(#id => Box::new(#ident::_private_decode(decoder))),
+        // }
+        quote!(#id => Box::new(#ident::_private_decode(decoder)))
     });
 
     let project_ident = project_ident(project_name);
@@ -105,7 +104,7 @@ fn validate_property(node: &Node, field: &syn::Field) -> Result<(), SkyliteProcE
         .iter()
         .find(|var| change_case(&var.name, IdentCase::LowerSnakeCase) == name)
         .ok_or(data_err!("Property {name} not found in node definition."))?;
-    if validate_type(&variable.typename, &field.ty) {
+    if validate_type(&variable.vtype, &field.ty) {
         Ok(())
     } else {
         Err(data_err!(
@@ -161,9 +160,13 @@ fn parse_node_struct(node: &Node, node_struct: &ItemStruct) -> Result<NodeType, 
     Ok(node_type)
 }
 
-fn gen_node_new_fn(node: &Node, items: &[Item]) -> Result<TokenStream, SkyliteProcError> {
+fn gen_node_new_fn(
+    node: &Node,
+    items: &[Item],
+    project_name: &Ident,
+) -> Result<TokenStream, SkyliteProcError> {
     let node_name = node_type_name(&node.meta.name);
-    let params = generate_field_list(&node.parameters, TokenStream::new());
+    let params = generate_field_list(&node.parameters, TokenStream::new(), project_name);
     let args = generate_argument_list(&node.parameters);
 
     let new_fn = get_annotated_method_name(items, ANNOTATION_NEW, &node_name)?.ok_or(
@@ -182,12 +185,11 @@ fn gen_node_new_fn(node: &Node, items: &[Item]) -> Result<TokenStream, SkylitePr
 fn gen_node_impl(
     node: &Node,
     node_type: &NodeType,
-    project_name: &str,
+    project_name: &Ident,
     items: &[Item],
 ) -> Result<TokenStream, SkyliteProcError> {
     let node_name = node_type_name(&node.meta.name);
-    let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
-    let decode_statements = generate_deserialize_statements(&node.parameters);
+    let decode_statements = generate_deserialize_statements(&node.parameters, &project_name);
     let args = generate_argument_list(&node.parameters);
 
     let pre_update_call = get_annotated_method_name(items, ANNOTATION_PRE_UPDATE, &node_name)?
@@ -255,6 +257,7 @@ fn gen_node_impl(
                 Self: Sized
             {
                 use ::skylite_core::decode::Deserialize;
+                use ::skylite_core::SkyliteProject;
                 #decode_statements
                 #node_name::_private_new(#args)
             }
@@ -320,12 +323,13 @@ pub(crate) fn generate_node_definition(
     project_name: &str,
     items: &[Item],
 ) -> Result<TokenStream, SkyliteProcError> {
+    let project_name = format_ident!("{}", change_case(project_name, IdentCase::UpperCamelCase));
     let id = node.meta.id;
     let node_name = node_type_name(&node.meta.name);
     let node_struct = find_node_struct(node, &items)?;
     let node_type = parse_node_struct(node, node_struct)?;
-    let node_new_method = gen_node_new_fn(node, &items)?;
-    let node_impl = gen_node_impl(node, &node_type, project_name, &items)?;
+    let node_new_method = gen_node_new_fn(node, &items, &project_name)?;
+    let node_impl = gen_node_impl(node, &node_type, &project_name, &items)?;
 
     Ok(quote! {
         impl ::skylite_core::nodes::TypeId for #node_name {
@@ -342,43 +346,33 @@ pub(crate) fn generate_node_definition(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use quote::quote;
+    use quote::{format_ident, quote};
+    use skylite_assets::{AssetMeta, AssetType, Node, Type, Variable};
     use syn::{parse_quote, File, Item};
 
-    use crate::assets::{AssetMetaData, AssetSource, AssetType};
     use crate::generate::nodes::{find_node_struct, gen_node_impl, parse_node_struct};
-    use crate::parse::nodes::Node;
-    use crate::parse::values::{Type, Variable};
 
     fn create_test_node() -> Node {
         Node {
-            meta: AssetMetaData {
-                atype: AssetType::Node,
+            meta: AssetMeta {
+                asset_type: AssetType::Node,
                 name: "TestNode".to_owned(),
                 id: 0,
-                source: AssetSource::Path(PathBuf::new()),
+                tracked_paths: vec![],
             },
             parameters: vec![
                 Variable {
                     name: "param1".to_owned(),
-                    typename: Type::U8,
-                    documentation: None,
-                    default: None,
+                    vtype: Type::U8,
                 },
                 Variable {
                     name: "param2".to_owned(),
-                    typename: Type::U16,
-                    documentation: None,
-                    default: None,
+                    vtype: Type::U16,
                 },
             ],
             properties: vec![Variable {
                 name: "sum".to_owned(),
-                typename: Type::U16,
-                documentation: None,
-                default: None,
+                vtype: Type::U16,
             }],
         }
     }
@@ -422,7 +416,8 @@ mod tests {
         let node_struct = find_node_struct(&node, &mut items).unwrap();
         let node_type = parse_node_struct(&node, node_struct).unwrap();
 
-        let actual = gen_node_impl(&node, &node_type, "TestProject", &items).unwrap();
+        let actual =
+            gen_node_impl(&node, &node_type, &format_ident!("TestProject"), &items).unwrap();
         let expected = quote! {
             impl ::skylite_core::nodes::Node for TestNode {
                 type P = TestProject;
@@ -432,6 +427,7 @@ mod tests {
                     Self: Sized
                 {
                     use ::skylite_core::decode::Deserialize;
+                    use ::skylite_core::SkyliteProject;
                     let param1 = u8::deserialize(decoder);
                     let param2 = u16::deserialize(decoder);
                     TestNode::_private_new(param1, param2)

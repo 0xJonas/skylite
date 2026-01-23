@@ -7,7 +7,7 @@
 
 (struct request-header (type project-root))
 (struct asset-request-params (asset-type asset-name))
-(struct list-assets-request-params (asset-type))
+(struct all-assets-request-params (asset-type))
 
 
 (define (read-request-header in)
@@ -45,7 +45,7 @@
      (asset-request-params asset-type asset-name)]
     [(1)
      (define asset-type (id->asset-type (deserialize-obj in 'u8)))
-     (list-assets-request-params asset-type)]))
+     (all-assets-request-params asset-type)]))
 
 
 (define (serialize-asset-meta out id asset)
@@ -77,32 +77,42 @@
 
 
 (define (process-request header params out)
+  (define (serialize-asset type asset)
+    (match type
+      ['project (serialize-project-asset out asset)]
+      ['node (serialize-node out asset)]
+      ['node-list (serialize-node-list out asset)]
+      ['sequence (serialize-sequence out asset)]))
+
   (case (request-header-type header)
     [(0)
      (define project-root (request-header-project-root header))
      (with-handlers ([exn:asset? (lambda (exn) (error-response out exn))])
        (parameterize ([current-project (retrieve-project project-root)])
-         (define-values (asset asset-data) (retrieve-asset (asset-request-params-asset-type params)
+         (define-values (meta data) (retrieve-asset (asset-request-params-asset-type params)
                                                            (asset-request-params-asset-name params)))
-         (define asset-id (compute-asset-id (asset-type asset) (asset-name asset)))
+         (define asset-id (compute-asset-id (asset-type meta) (asset-name meta)))
          (serialize-obj out 'u8 0) ; Result ok
-         (serialize-asset-meta out asset-id asset)
-         (match (asset-type asset)
-           ['project (serialize-project-asset out asset-data)]
-           ['node (serialize-node out asset-data)]
-           ['node-list (serialize-node-list out asset-data)]
-           ['sequence (serialize-sequence out asset-data)])))
+         (serialize-asset-meta out asset-id meta)
+         (serialize-asset (asset-type meta) data)))
      (flush-output out)]
     [(1)
      (define project-root (request-header-project-root header))
      (with-handlers ([exn:asset? (lambda (exn) (error-response out exn))])
        (parameterize ([current-project (retrieve-project project-root)])
-         (define assets (list-assets (list-assets-request-params-asset-type params)))
-         (define num-assets (length assets))
+         (define asset-metas (list-assets (all-assets-request-params-asset-type params)))
+         (define assets
+           (map (lambda (m) (let-values ([(_ data) (retrieve-asset (asset-type m) (asset-name m))])
+                              data))
+                asset-metas))
+         (define num-assets (length asset-metas))
          (serialize-obj out 'u8 0) ; Result ok
          (serialize-obj out 'u32 num-assets)
-         (for ([asset assets] [id (build-list num-assets values)])
-           (serialize-asset-meta out id asset))))
+         (for ([meta asset-metas]
+               [id (build-list num-assets values)]
+               [data assets])
+           (serialize-asset-meta out id meta)
+           (serialize-asset (asset-type meta) data))))
      (flush-output out)]))
 
 

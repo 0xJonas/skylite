@@ -289,6 +289,18 @@ impl<P: SkyliteProject> NodeList<P> {
     }
 }
 
+impl<'nodes, P: SkyliteProject> NodeIterable<'nodes, P> for &'nodes NodeList<P> {
+    fn get_iterator(self) -> NodeObjectRefIterator<'nodes, P> {
+        self.0.get_iterator()
+    }
+}
+
+impl<'nodes, P: SkyliteProject> NodeIterableMut<'nodes, P> for &'nodes mut NodeList<P> {
+    fn get_iterator_mut(self) -> NodeObjectMutIterator<'nodes, P> {
+        self.0.get_iterator_mut()
+    }
+}
+
 macro_rules! system_fn {
     ($name:ident, $($vars:ident : $types:ident),+) => {
         pub fn $name<P: SkyliteProject, $($types: Node<P=P>),+>(node: &mut dyn Node<P=P>, func: &mut impl FnMut($(&mut $types),+)) {

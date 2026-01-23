@@ -2,9 +2,9 @@ use skylite_core::SkyliteProject;
 use skylite_mock::{Call, MockTarget};
 use skylite_proc::{node_definition, skylite_project};
 
-#[node_definition("./tests/test-project-1/project.scm", "basic-node-1")]
+#[node_definition("./tests/test-project-1/project.rkt", "basic-node-1")]
 mod basic_node_1 {
-    use skylite_core::nodes::Node;
+    use skylite_core::nodes::NodeList;
     use skylite_core::ProjectControls;
 
     use crate::basic_node_2::BasicNode2;
@@ -18,21 +18,19 @@ mod basic_node_1 {
         sub1: BasicNode2,
         #[skylite_proc::node]
         sub2: ZOrderNode,
+        #[skylite_proc::property]
         #[skylite_proc::nodes]
-        list: Vec<Box<dyn Node<P = TestProject1>>>,
+        pub list: NodeList<TestProject1>,
     }
 
     impl BasicNode1 {
         #[skylite_proc::new]
-        pub(crate) fn new_basic_node_1(id: String) -> BasicNode1 {
+        pub(crate) fn new_basic_node_1(id: String, list: NodeList<TestProject1>) -> BasicNode1 {
             BasicNode1 {
                 id,
                 sub1: BasicNode2::new_basic_node_2(String::from("sub1")),
                 sub2: ZOrderNode::new_z_order_node(String::from("sub2"), -1),
-                list: vec![
-                    Box::new(BasicNode2::new_basic_node_2(String::from("list_item_1"))),
-                    Box::new(ZOrderNode::new_z_order_node(String::from("list_item_2"), 2)),
-                ],
+                list,
             }
         }
 
@@ -54,7 +52,7 @@ mod basic_node_1 {
     }
 }
 
-#[node_definition("./tests/test-project-1/project.scm", "basic-node-2")]
+#[node_definition("./tests/test-project-1/project.rkt", "basic-node-2")]
 mod basic_node_2 {
     use skylite_core::ProjectControls;
 
@@ -82,7 +80,7 @@ mod basic_node_2 {
     }
 }
 
-#[node_definition("./tests/test-project-1/project.scm", "z-order-node")]
+#[node_definition("./tests/test-project-1/project.rkt", "z-order-node")]
 mod z_order_node {
     use skylite_core::{ProjectControls, RenderControls};
 
@@ -125,14 +123,14 @@ mod z_order_node {
     }
 }
 
-#[skylite_project("./tests/test-project-1/project.scm", MockTarget)]
+#[skylite_project("./tests/test-project-1/project.rkt", MockTarget)]
 mod project {
-    use skylite_core::nodes::SList;
     use skylite_core::{ProjectControls, RenderControls};
     use skylite_mock::MockTarget;
 
     use crate::basic_node_1::BasicNode1;
     use crate::basic_node_2::BasicNode2;
+    use crate::z_order_node::ZOrderNode;
 
     #[skylite_proc::pre_update]
     fn pre_update(controls: &mut ProjectControls<TestProject1>) {
@@ -175,7 +173,7 @@ fn test_update_cycle() {
     project.update();
     let target = project._private_target();
     let calls = target.get_calls_by_tag("root");
-    assert_eq!(calls.len(), 9);
+    assert_eq!(calls.len(), 8);
     assert!(match_call(&calls[0], "pre_update"));
     assert!(match_call(&calls[1], "basic-node-1::pre_update"));
     assert!(match_call(&calls[2], "basic-node-2::update"));
@@ -183,8 +181,7 @@ fn test_update_cycle() {
     assert!(match_call(&calls[4], "basic-node-2::update"));
     assert!(match_call(&calls[5], "z-order-node::update"));
     assert!(match_call(&calls[6], "basic-node-1::post_update"));
-    assert!(match_call(&calls[7], "basic-node-2::update"));
-    assert!(match_call(&calls[8], "post_update"));
+    assert!(match_call(&calls[7], "post_update"));
 }
 
 #[test]
